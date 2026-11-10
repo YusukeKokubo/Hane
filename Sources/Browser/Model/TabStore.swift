@@ -11,6 +11,10 @@ final class TabStore: TabOpening {
     /// アドレスバーにフォーカスを移してほしいときに増やす合図。
     private(set) var addressFocusRequest = 0
 
+    /// アドレスバーの今の中身。外部から状態を尋ねられたときに答えるための写しで、
+    /// 画面の更新には使わない。
+    @ObservationIgnored var addressBar = AddressBarState()
+
     @ObservationIgnored private let factory: PageFactory
     @ObservationIgnored private var lastTabNumber = 0
 
@@ -84,6 +88,11 @@ final class TabStore: TabOpening {
 
     func focusAddressBar() {
         addressFocusRequest += 1
+    }
+
+    struct AddressBarState {
+        var text = ""
+        var isFocused = false
     }
 
     private func insertTab(after anchor: Tab.ID?) -> Tab {

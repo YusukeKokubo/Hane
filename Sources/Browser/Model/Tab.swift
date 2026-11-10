@@ -14,6 +14,8 @@ final class Tab: Identifiable {
     /// 開いた順の通し番号。外部からタブを指すときの短い名前になる。
     let number: Int
     let page: WebPage
+    /// このタブのコンソール出力と読み込み失敗の記録。
+    let log = PageLog()
 
     /// 一度でも読み込みを始めたか。まっさらなタブでは Web ビューを作らない。
     private(set) var hasContent = false
@@ -24,10 +26,10 @@ final class Tab: Identifiable {
 
     init(number: Int, factory: PageFactory, opener: any TabOpening) {
         self.number = number
-        page = factory.makePage(navigationDecider: NavigationDecider(opener: opener))
+        page = factory.makePage(navigationDecider: NavigationDecider(opener: opener), log: log)
         monitor = Task { [weak self, page] in
             await Self.watchNavigations(of: page) { failure in
-                self?.failure = failure
+                self?.record(failure: failure)
             }
         }
     }
@@ -36,7 +38,10 @@ final class Tab: Identifiable {
 
     var title: String {
         if !page.title.isEmpty { return page.title }
-        if let host = page.url?.host() { return host }
+        if let url = page.url {
+            // ローカルファイルなどホストのないURLは、ファイル名で代える。
+            return url.host() ?? (url.lastPathComponent.isEmpty ? url.absoluteString : url.lastPathComponent)
+        }
         return hasContent ? "読み込み中…" : "新規タブ"
     }
 
@@ -79,6 +84,13 @@ final class Tab: Identifiable {
 
     func stop() {
         page.stopLoading()
+    }
+
+    private func record(failure: String?) {
+        self.failure = failure
+        if let failure {
+            log.append(level: "navigation", message: failure)
+        }
     }
 
     /// 失敗の表示を消して、下にある元のページを見せる。

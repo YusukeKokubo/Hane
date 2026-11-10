@@ -10,7 +10,7 @@ struct BrowserWindow: View {
     var body: some View {
         VStack(spacing: 0) {
             if let tab = store.selected {
-                NavigationRow(tab: tab, focusRequest: store.addressFocusRequest)
+                NavigationRow(tab: tab, store: store)
             }
             TabBar(store: store) { id in
                 if !store.close(id) {
@@ -37,7 +37,7 @@ struct BrowserWindow: View {
 /// ウインドウの中身として自前で並べている。
 private struct NavigationRow: View {
     let tab: Tab
-    let focusRequest: Int
+    let store: TabStore
 
     /// 左上の信号機ボタンを避けるための余白。
     private static let windowControlsWidth: CGFloat = 78
@@ -48,7 +48,7 @@ private struct NavigationRow: View {
                 .disabled(!tab.canGoBack)
             Button("進む", systemImage: "chevron.right") { tab.goForward() }
                 .disabled(!tab.canGoForward)
-            AddressBar(tab: tab, focusRequest: focusRequest)
+            AddressBar(tab: tab, store: store)
             if tab.page.isLoading {
                 Button("読み込みを中止", systemImage: "xmark") { tab.stop() }
             } else {

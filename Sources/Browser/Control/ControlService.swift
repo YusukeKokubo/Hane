@@ -1,10 +1,11 @@
+import AppKit
 import ControlWire
 import Foundation
 import WebKit
 
 /// 外部からの操作要求を、タブとページへの操作に置き換える。
 ///
-/// 命令の一覧と書式は `help` の文面が正本。
+/// 命令の一覧と書式は `ControlHelp` の文面が正本。
 @MainActor
 final class ControlService {
     private let store: TabStore
@@ -44,14 +45,15 @@ final class ControlService {
         let tabNumber = try takeOption("--tab", from: &args).map { try integer($0, "--tab") }
         let limit = try takeOption("--limit", from: &args).map { try integer($0, "--limit") }
         let fullPage = takeFlag("--full", from: &args)
-        guard let command = args.first else { return Self.help }
+        let clear = takeFlag("--clear", from: &args)
+        guard let command = args.first else { return ControlHelp.text }
         args.removeFirst()
 
         func target() throws -> Tab { try tab(numbered: tabNumber) }
 
         switch command {
         case "help", "--help", "-h":
-            return Self.help
+            return ControlHelp.text
 
         case "tabs":
             return store.tabs.map(describe).joined(separator: "\n")
@@ -129,6 +131,29 @@ final class ControlService {
         case "eval":
             guard !args.isEmpty else { throw ControlError("JavaScriptがない。例: eval \"document.title\"") }
             return try await evaluate(args.joined(separator: " "), on: try target())
+
+        case "ui":
+            return describeUI()
+
+        case "logs":
+            let tab = try target()
+            let entries = tab.log.entries.suffix(limit ?? 50)
+            let listing = entries.isEmpty
+                ? "（記録なし）"
+                : entries.map { "\(Self.clock.string(from: $0.date)) [\($0.level)] \($0.message)" }.joined(separator: "\n")
+            if clear { tab.log.clear() }
+            return describe(tab) + "\n" + listing
+
+        case "stats":
+            return await ProcessStats.report() + "\ntabs: \(store.tabs.count)（うちページあり \(store.tabs.count { $0.hasContent })）"
+
+        case "quit":
+            // 応答を返し終えてから終了する。
+            Task {
+                try? await Task.sleep(for: .milliseconds(200))
+                NSApp.terminate(nil)
+            }
+            return "quitting"
 
         case "screenshot":
             return try await screenshot(of: try target(), to: args.first, fullPage: fullPage)
@@ -211,6 +236,33 @@ final class ControlService {
         return describe(tab) + (tab.page.isLoading ? "\n（まだ読み込み中。`wait` で続きを待てる）" : "")
     }
 
+    /// ウインドウの枠まわり（ページの外側）が今どう見えているか。
+    private func describeUI() -> String {
+        var lines = ["profile: \(BrowserProfile.name)"]
+        if let tab = store.selected {
+            let state: (Bool) -> String = { $0 ? "enabled" : "disabled" }
+            lines.append("window title: \(tab.title)")
+            lines.append("address bar: \"\(store.addressBar.text)\"" + (store.addressBar.isFocused ? " (focused)" : ""))
+            lines.append("buttons: back=\(state(tab.canGoBack)) forward=\(state(tab.canGoForward)) "
+                + (tab.page.isLoading ? "stop=enabled" : "reload=\(state(tab.hasContent))"))
+            lines.append("page: " + (tab.hasContent
+                ? (tab.page.isLoading ? "loading \(Int(tab.page.estimatedProgress * 100))%" : "loaded")
+                : "empty"))
+            if let failure = tab.failure {
+                lines.append("failure shown: \(failure)")
+            }
+        }
+        lines.append("tabs (left to right):")
+        lines.append(contentsOf: store.tabs.map(describe))
+        return lines.joined(separator: "\n")
+    }
+
+    private static let clock: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss"
+        return formatter
+    }()
+
     // MARK: 引数と表示
 
     private func tab(numbered number: Int?) throws -> Tab {
@@ -269,48 +321,6 @@ final class ControlService {
         }
         return nsError.localizedDescription
     }
-
-    static let help = """
-    browserctl — 起動中の Browser を外から操作する。アプリが起動していなければ自動で起動する。
-
-    使い方: browserctl [--tab <番号>] <命令> [引数…]
-      --tab を省くと、選択中のタブ（一覧で * の付いたタブ）が対象になる。
-
-    タブ
-      tabs                   タブの一覧
-      new [URL|検索語]        新しいタブを開いて選択する
-      select <番号>           タブを選択する
-      close [番号]            タブを閉じる（最後の1枚は閉じられない）
-
-    移動（どれも読み込みが終わるまで待ってから返る）
-      open <URL|検索語>       ページを開く。URLでなければ検索する
-      back / forward / reload
-      wait                   読み込みが終わるのを待つ
-
-    ページを読む
-      snapshot [--limit N]   操作できる要素を番号つきで一覧する。見出しも併せて出る
-      text [--limit N]       本文のテキスト
-      screenshot [保存先]     見えている範囲をPNGで保存し、パスを返す（選択中のタブのみ）
-                             --full を付けるとページ全体を撮る
-      eval <JavaScript>      式の値、または return した値をJSONで返す
-
-    ページを操作する（番号は直前の snapshot のもの）
-      click <番号>            クリックする
-      fill <番号> <文字列>     入力欄に文字列を入れる。select要素なら選択肢を選ぶ
-      press <キー> [番号]      キーを送る（Enter, Escape, Tab, ArrowDown など）。Enter はフォームを送信する
-
-    典型的な流れ
-      browserctl open example.com
-      browserctl snapshot          # → [3] textbox "検索" などが並ぶ
-      browserctl fill 3 "swift"
-      browserctl press Enter 3
-      browserctl text
-
-    注意
-      ・ページが変わったら番号は無効になる。操作の前に snapshot を取り直すこと。
-      ・iframe の中の要素は snapshot に出ない。
-      ・失敗したときは終了コード1で、理由を標準エラーに出す。
-    """
 }
 
 struct ControlError: Error {

@@ -105,6 +105,55 @@ import Testing
         #expect(failed.output.contains("missingFunction"))
     }
 
+    @Test func reportsWindowChrome() async throws {
+        var response = await run("ui")
+        #expect(response.output.contains("buttons: back=disabled forward=disabled reload=disabled"))
+        #expect(response.output.contains("page: empty"))
+
+        try await open(html: "<title>One</title>")
+        response = await run("ui")
+        #expect(response.output.contains("window title: One"))
+        #expect(response.output.contains("reload=enabled"))
+        #expect(response.output.contains("page: loaded"))
+    }
+
+    @Test func collectsConsoleOutputAndExceptions() async throws {
+        try await open(html: """
+        <script>
+        console.log('hello', { n: 1 });
+        console.warn('careful');
+        Promise.reject(new Error('boom'));
+        </script>
+        """)
+        _ = await run("wait")
+
+        var response = await run("logs")
+        #expect(response.output.contains(#"[log] hello {"n":1}"#))
+        #expect(response.output.contains("[warn] careful"))
+        #expect(response.output.contains("[exception]"))
+        #expect(response.output.contains("boom"))
+
+        response = await run("logs", "--limit", "1", "--clear")
+        #expect(!response.output.contains("hello"))
+        #expect(await run("logs").output.contains("記録なし"))
+    }
+
+    @Test func logKeepsOnlyRecentEntries() {
+        let log = PageLog()
+        for index in 0..<(PageLog.capacity + 10) {
+            log.append(level: "log", message: "\(index)")
+        }
+        #expect(log.entries.count == PageLog.capacity)
+        #expect(log.entries.first?.message == "10")
+    }
+
+    @Test func statsListsThisProcess() async {
+        let response = await run("stats")
+        #expect(response.ok)
+        #expect(response.output.contains("Browser (app)"))
+        #expect(response.output.contains("total"))
+    }
+
     @Test func snapshotLimitIsReported() async throws {
         try await open(html: (1...5).map { "<a href='#\($0)'>L\($0)</a>" }.joined())
 

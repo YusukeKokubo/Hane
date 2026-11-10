@@ -20,6 +20,24 @@ public struct ControlResponse: Codable, Sendable {
     }
 }
 
+/// 環境変数 `BROWSER_PROFILE` で選ぶ、アプリの実体の区別。
+///
+/// 指定がなければ普段使いの `default`。それ以外の名前では、操作用ソケットが別になり、
+/// Cookieなどのサイトデータも保存されない使い捨てになる。
+public enum BrowserProfile {
+    public static let environmentKey = "BROWSER_PROFILE"
+    public static let defaultName = "default"
+
+    public static let name: String = {
+        guard let value = ProcessInfo.processInfo.environment[environmentKey], !value.isEmpty,
+              value.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-" || $0 == "_") })
+        else { return defaultName }
+        return value
+    }()
+
+    public static var isDefault: Bool { name == defaultName }
+}
+
 public struct ControlSocketError: Error, CustomStringConvertible {
     public let description: String
 }
@@ -29,9 +47,13 @@ public enum ControlSocket {
     public static let bundleIdentifier = "local.personal.browser"
 
     /// 待ち受け場所。利用者のライブラリ配下なので、他のユーザーからは届かない。
+    /// プロファイルごとに別の場所になるので、開発用の実体と普段使いの実体は混ざらない。
     public static var path: String {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        return base.appending(path: "Browser/control.sock").path(percentEncoded: false)
+        let relative = BrowserProfile.isDefault
+            ? "Browser/control.sock"
+            : "Browser/profiles/\(BrowserProfile.name)/control.sock"
+        return base.appending(path: relative).path(percentEncoded: false)
     }
 
     /// 待ち受け用のソケットを作って返す。前回の残骸があれば置き換える。

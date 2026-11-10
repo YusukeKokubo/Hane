@@ -14,7 +14,11 @@ func connectLaunchingIfNeeded() -> Int32 {
 
     let launcher = Process()
     launcher.executableURL = URL(filePath: "/usr/bin/open")
-    launcher.arguments = ["-b", ControlSocket.bundleIdentifier]
+    // 普段使い以外のプロファイルは、起動済みの実体とは別にもう一つ立ち上げる。
+    launcher.arguments = BrowserProfile.isDefault
+        ? ["-b", ControlSocket.bundleIdentifier]
+        : ["-n", "-b", ControlSocket.bundleIdentifier,
+           "--env", "\(BrowserProfile.environmentKey)=\(BrowserProfile.name)"]
     launcher.standardError = FileHandle.nullDevice
     try? launcher.run()
     launcher.waitUntilExit()
@@ -29,6 +33,13 @@ func connectLaunchingIfNeeded() -> Int32 {
 }
 
 let arguments = Array(CommandLine.arguments.dropFirst())
+
+// 使い方を見るだけなら、アプリを起動しない。
+if arguments.isEmpty || ["help", "--help", "-h"].contains(arguments[0]) {
+    print(ControlHelp.text)
+    exit(0)
+}
+
 let fd = connectLaunchingIfNeeded()
 ControlSocket.ignoreBrokenPipe(fd)
 

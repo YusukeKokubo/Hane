@@ -1,19 +1,27 @@
+import ControlWire
 import Foundation
 import WebKit
 
 /// `WebPage` の生成と設定を一か所にまとめる。
 ///
 /// コンテンツブロッカー（`WKContentRuleList`）やユーザースクリプトを足すときは
-/// `makeConfiguration()` の中で `userContentController` に登録すればよい。
+/// `makeConfiguration(log:)` の中で `userContentController` に登録すればよい。
 /// 全タブがこのファクトリを通るので、設定がタブごとにばらつくことはない。
 @MainActor
 struct PageFactory {
     /// 全タブで共有するサイトデータ（Cookieやキャッシュ）の保存先。
-    var dataStore: WKWebsiteDataStore = .default()
+    /// 普段使い以外のプロファイルでは、終了時に消える使い捨てにする。
+    var dataStore: WKWebsiteDataStore = BrowserProfile.isDefault ? .default() : .nonPersistent()
 
-    func makeConfiguration() -> WebPage.Configuration {
+    func makeConfiguration(log: PageLog) -> WebPage.Configuration {
         var configuration = WebPage.Configuration()
         configuration.websiteDataStore = dataStore
+
+        // ページごとに別の受け口を持たせ、コンソール出力をそのタブの記録に流す。
+        let userContent = WKUserContentController()
+        userContent.addUserScript(PageLog.userScript)
+        userContent.add(log, name: PageLog.handlerName)
+        configuration.userContentController = userContent
         configuration.applicationNameForUserAgent = BrowserSettings.userAgentSuffix
         configuration.upgradeKnownHostsToHTTPS = true
 
@@ -25,8 +33,8 @@ struct PageFactory {
         return configuration
     }
 
-    func makePage(navigationDecider: some WebPage.NavigationDeciding) -> WebPage {
-        let page = WebPage(configuration: makeConfiguration(), navigationDecider: navigationDecider)
+    func makePage(navigationDecider: some WebPage.NavigationDeciding, log: PageLog) -> WebPage {
+        let page = WebPage(configuration: makeConfiguration(log: log), navigationDecider: navigationDecider)
         page.isInspectable = true
         return page
     }
