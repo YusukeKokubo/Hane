@@ -4,7 +4,15 @@ import SwiftUI
 struct BrowserApp: App {
     static let windowID = "main"
 
-    @State private var store = TabStore()
+    @State private var store: TabStore
+    private let control: ControlService
+
+    init() {
+        let store = TabStore()
+        _store = State(initialValue: store)
+        control = ControlService(store: store)
+        control.start()
+    }
 
     var body: some Scene {
         Window("Browser", id: Self.windowID) {

@@ -12,6 +12,7 @@ final class TabStore: TabOpening {
     private(set) var addressFocusRequest = 0
 
     @ObservationIgnored private let factory: PageFactory
+    @ObservationIgnored private var lastTabNumber = 0
 
     init(factory: PageFactory = PageFactory()) {
         self.factory = factory
@@ -34,9 +35,16 @@ final class TabStore: TabOpening {
     }
 
     func openTab(with request: URLRequest, inBackground: Bool) {
+        open(request, inBackground: inBackground)
+    }
+
+    /// 選択中のタブの隣に、ページを読み込むタブを開く。
+    @discardableResult
+    func open(_ request: URLRequest, inBackground: Bool = false) -> Tab {
         let tab = insertTab(after: selectedID)
         tab.load(request)
         if !inBackground { selectedID = tab.id }
+        return tab
     }
 
     /// タブを閉じる。最後の1枚を閉じたら `false` を返す（呼び出し側でウインドウを閉じる）。
@@ -79,7 +87,8 @@ final class TabStore: TabOpening {
     }
 
     private func insertTab(after anchor: Tab.ID?) -> Tab {
-        let tab = Tab(factory: factory, opener: self)
+        lastTabNumber += 1
+        let tab = Tab(number: lastTabNumber, factory: factory, opener: self)
         if let anchor, let index = tabs.firstIndex(where: { $0.id == anchor }) {
             tabs.insert(tab, at: index + 1)
         } else {

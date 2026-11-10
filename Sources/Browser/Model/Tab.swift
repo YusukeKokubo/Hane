@@ -11,6 +11,8 @@ import WebKit
 @Observable
 final class Tab: Identifiable {
     nonisolated let id = UUID()
+    /// 開いた順の通し番号。外部からタブを指すときの短い名前になる。
+    let number: Int
     let page: WebPage
 
     /// 一度でも読み込みを始めたか。まっさらなタブでは Web ビューを作らない。
@@ -20,7 +22,8 @@ final class Tab: Identifiable {
 
     @ObservationIgnored private var monitor: Task<Void, Never>?
 
-    init(factory: PageFactory, opener: any TabOpening) {
+    init(number: Int, factory: PageFactory, opener: any TabOpening) {
+        self.number = number
         page = factory.makePage(navigationDecider: NavigationDecider(opener: opener))
         monitor = Task { [weak self, page] in
             await Self.watchNavigations(of: page) { failure in
@@ -76,6 +79,11 @@ final class Tab: Identifiable {
 
     func stop() {
         page.stopLoading()
+    }
+
+    /// 失敗の表示を消して、下にある元のページを見せる。
+    func dismissFailure() {
+        failure = nil
     }
 
     /// タブを閉じるときに呼ぶ。監視タスクを止め、読み込みも打ち切る。

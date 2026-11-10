@@ -21,6 +21,8 @@ enum AddressResolver {
 
     /// `https://…` のようにスキームまで書かれた入力。
     private static func explicitURL(_ text: String) -> URL? {
+        // data: は中身に空白を含みうるので、空白があっても検索に回さない。
+        if text.lowercased().hasPrefix("data:") { return URL(string: text) }
         guard !text.contains(" "),
               let url = URL(string: text),
               let scheme = url.scheme?.lowercased(),

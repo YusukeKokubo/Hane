@@ -14,6 +14,7 @@ import Testing
         ("192.168.1.10:8080", "http://192.168.1.10:8080"),
         ("about:blank", "about:blank"),
         ("file:///tmp/a.html", "file:///tmp/a.html"),
+        ("data:text/html,<b>a b</b>", "data:text/html,%3Cb%3Ea%20b%3C/b%3E"),
     ])
     func opensAsURL(input: String, expected: String) {
         #expect(AddressResolver.resolve(input)?.absoluteString == expected)
