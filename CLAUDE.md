@@ -54,13 +54,13 @@ build/browserctl ui-menu 二番 名前とフォルダを編集…   # 選ぶと�
 
 ## 測る
 
-`scripts/bench.sh` は `bench` プロファイルの別実体で、起動直後・ページを開き終えた後・タブを閉じた後の三つを、それぞれ15秒待ってから10秒ずつ測る。その間に、同じタブでページを5回移る間の CPU も測る（`3-navigate` の `app cpu %` が操作の重さの目安。何もしない段階と違って待たずに測る）。読み込みの直後はWebKitが15秒ほど動いていて起床回数が跳ねるので、待たずに測ると変更の良し悪しが埋もれる。結果は `build/bench/<日時>/` に残り、前回の要約と並べて出る。一度の計測でも数割ぶれるので、差が小さいときは `--runs 3` で起動からやり直して何度か測る（真ん中の値と、括弧の中に最小〜最大が出る）。
+`scripts/bench.sh` は `bench` プロファイルの別実体で、起動直後・ページを開き終えた後・タブを閉じた後・タブを10枚足した後・それをまた閉じた後の五つを、それぞれ15秒待ってから10秒ずつ測る。後ろの二つから、タブ1枚あたりに増えるメモリと、閉じても戻らない分（閉じたタブが残っていないかの目安）を要約の下に出す。その間に、同じタブでページを5回移る間の CPU も測る（`3-navigate` の `app cpu %` が操作の重さの目安。何もしない段階と違って待たずに測る）。読み込みの直後はWebKitが15秒ほど動いていて起床回数が跳ねるので、待たずに測ると変更の良し悪しが埋もれる。結果は `build/bench/<日時>/` に残り、前回の要約と並べて出る。一度の計測でも数割ぶれるので、差が小さいときは `--runs 3` で起動からやり直して何度か測る（真ん中の値と、括弧の中に最小〜最大が出る）。
 
-起床回数（wakeups/s）は、タイマーや割り込みでスレッドが起こされた回数。何もしていないはずの時間にこれが増えていれば、常駐する処理が紛れ込んでいる。`browserctl stats --seconds N --json` で期間を延ばしたり、機械で読める形にしたりできる。最後の行に測った実行ファイルが出るので、入れてある版を測っていないか確かめる。`browserctl` は `dev` などのプロファイルを自動で起こすとき、隣にある `build/Browser.app` を選ぶ（バンドルIDで頼むと `~/Applications` の版が立ち上がるため）。
+起床回数（wakeups/s）は、タイマーや割り込みでスレッドが起こされた回数。何もしていないはずの時間にこれが増えていれば、常駐する処理が紛れ込んでいる。`browserctl stats --seconds N --json` で期間を延ばしたり、機械で読める形にしたりできる。ページのプロセス（WebContent）の行には、描いているタブの番号が付く（`PageProcess` が `WebPage` の中の Web ビューから非公開のプロセス番号を読んでいる。WebKit が変わって引けなくなると `pageProcessIsFound` のテストが落ちる）。番号のないページのプロセスは、どのタブにも結びついていないもの。最後の行に測った実行ファイルが出るので、入れてある版を測っていないか確かめる。`browserctl` は `dev` などのプロファイルを自動で起こすとき、隣にある `build/Browser.app` を選ぶ（バンドルIDで頼むと `~/Applications` の版が立ち上がるため）。
 
 中身まで見たいときは macOS の道具をそのまま使う。Ad-hoc 署名で Hardened Runtime を付けていないので、`sample`、`vmmap --summary`、`footprint`、`leaks`、`heap` も `xctrace record --template 'Time Profiler' --attach <pid>` も権限なしで刺さる（`bundle.sh` に `--options runtime` を足すとこれらが使えなくなる）。アプリはページの読み込み、タブの選択、閲覧状態と閲覧履歴の書き出し、フィルタリストの準備に区間の印（`Signposts`）を付けていて、Instruments の Points of Interest に出る。書き出すときは `xctrace export --xpath '/trace-toc/run[@number="1"]/data/table[@schema="os-signpost" and @category="PointsOfInterest"]'`。
 
-`scripts/profile.sh record <秒>` はこの記録から、秒ごとのサンプル数、区間の印、重い関数（アプリ自身のコード、その関数自身、呼んだ先も含む全体）を文字にまとめる。操作しながら測るときは裏で走らせ、2秒ほど待ってから `browserctl` で操作する。秒ごとの表で山を見つけたら、`scripts/profile.sh summary <trace> <開始秒> <終了秒>` でその時間帯だけを見る。`xctrace` の書き出しは同じ値の2回目から参照で省くので、grep で数えると少なく見える。
+`scripts/profile.sh record <秒> [--tab N | --process gpu|networking]` はこの記録から、秒ごとのサンプル数、区間の印、重い関数（アプリ自身のコード、その関数自身、呼んだ先も含む全体）を文字にまとめる。既定ではアプリ本体を記録する。ページのスクリプトや描画が重いときはアプリ本体には出ないので、`--tab N` でそのタブのページのプロセスを記録する（WebKit のプロセスにも権限なしで刺さる）。操作しながら測るときは裏で走らせ、2秒ほど待ってから `browserctl` で操作する。秒ごとの表で山を見つけたら、`scripts/profile.sh summary <trace> <開始秒> <終了秒>` でその時間帯だけを見る。`xctrace` の書き出しは同じ値の2回目から参照で省くので、grep で数えると少なく見える。
 
 SwiftUI の中で重いときは、Time Profiler の関数名がレイアウトの内部ばかりになり、どの画面の部品かは分からない。そのときは部品を一つずつ `Color.clear` などに差し替えて、同じ操作の間のメインスレッドのサンプル数を比べると早い。Instruments の SwiftUI テンプレートは、attach でも起動からでも（get-task-allow を付けても）更新の表が空だったので頼れない。
 
@@ -72,7 +72,7 @@ SwiftUI の中で重いときは、Time Profiler の関数名がレイアウト�
 - `Sources/Browser/Model` — 状態。`TabStore`（タブの一覧と選択。普通のタブと、ブックマークからその場で開いたページを分けて持つ）、`Tab`（`WebPage` を1つ所有）、`BookmarkStore`（ブックマークとフォルダの並びと保存。フォルダは一段だけ）、`SessionStore`（閲覧状態の保存。再起動したときにタブを戻す）、`HistoryStore`（閲覧履歴と、アドレスバーで補う候補選び）、`PageFactory`（`WebPage` の設定をすべてここで行う）、`Signposts`（Instruments に出す区間の印）、`NavigationDecider`、`AddressResolver`、`PageLog`、`BrowserSettings`（検索先やUser-Agentなどの固定値。変えたい値はここに集める）。
 - `Sources/Browser/Views` — 画面。`BrowserWindow`（上からタブバー、ナビゲーションの段、ページ）、`AddressBar`、`TabBar`（左にブックマーク、右に普通のタブを一列に並べる）、`BookmarkBar`（ブックマークとフォルダの項目、追加・編集のポップオーバー）。
 - `Sources/Browser/Model` の広告ブロック — `ContentBlocker`（ルールリストのコンパイルと全ページへの配布）、`FilterList`（Adblock Plus 形式をWebKitのルールに訳す）、`ContentRule`（WebKitのルールのJSON）、`HiddenElementStore`（⌥右クリックで隠した要素の保存）、`ElementPicker`（⌥右クリックで要素を選ぶページ内スクリプト）。フィルタリストの本体は `Support/Filters`。
-- `Sources/Browser/Control` — 外部操作。`ControlServer`（ソケット）、`ControlService`（命令の解釈）、`PageScripts`（ページ内で走らせるJavaScript）、`WindowElements`（窓まわりの部品の一覧とマウス操作）、`ProcessStats`。
+- `Sources/Browser/Control` — 外部操作。`ControlServer`（ソケット）、`ControlService`（命令の解釈）、`PageScripts`（ページ内で走らせるJavaScript）、`WindowElements`（窓まわりの部品の一覧とマウス操作）、`ProcessStats`、`PageProcess`（タブとページのプロセスの対応）。
 - `Sources/ControlWire` — アプリと `browserctl` が共有する通信の取り決めと、命令の説明文（`ControlHelp`。これが仕様の正本）。
 - `Sources/browserctl` — コマンド本体。引数をそのまま送るだけで、命令の意味は知らない。
 

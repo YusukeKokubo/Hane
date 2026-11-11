@@ -3,14 +3,16 @@
 # そのとき何をしていたか（区間の印）を文字でまとめる。Instruments の画面を開かずに読むため。
 #
 # 使い方:
-#   scripts/profile.sh record <秒>
+#   scripts/profile.sh record <秒> [--tab N | --process gpu|networking]
 #       BROWSER_PROFILE（既定 dev）の実体のアプリ本体を記録し、build/profile/<日時>.trace に置いて要約を出す。
+#       --tab N でそのタブを描いているページのプロセス（WebContent）を、--process で補助プロセスを記録する。
+#       ページのスクリプトや描画が重いときはアプリ本体には出ないので、--tab で見る。
 #       記録の間に browserctl で操作するなら、これを裏で走らせて、2秒ほど待ってから操作する。
 #   scripts/profile.sh summary <trace> [開始秒 終了秒] [--top N] [--step 秒]
 #       記録済みのものを要約する。秒ごとの表で山を見つけたら、その時間帯を指定して中身を見る。
 #       --step 0.1 のように刻みを細かくすると、区間の印と山の前後を突き合わせやすい。
 #
-# 数字はサンプルの数で、1サンプルがおよそ1ミリ秒のCPU。ページのプロセス（WebContent）は含まない。
+# 数字はサンプルの数で、1サンプルがおよそ1ミリ秒のCPU。記録するのは選んだ一つのプロセスだけ。
 set -eu
 
 cd "$(dirname "$0")/.."
@@ -20,7 +22,7 @@ case "${BROWSER_PROFILE:-}" in
 esac
 
 usage() {
-    sed -n '5,11p' "$0" | sed 's/^# \{0,1\}//' >&2
+    sed -n '5,13p' "$0" | sed 's/^# \{0,1\}//' >&2
     exit 2
 }
 
@@ -35,7 +37,7 @@ summarize() {
         --xpath '/trace-toc/run[@number="1"]/data/table[@schema="os-signpost" and @category="PointsOfInterest"]' \
         > "$work/signposts.xml"
     python3 -I - "$work/samples.xml" "$work/signposts.xml" "$@" <<'PY'
-import collections, sys
+import collections, re, sys
 import xml.etree.ElementTree as ET
 
 samples_path, signposts_path, *rest = sys.argv[1:]
@@ -112,7 +114,7 @@ for (name, _), begun in open_marks.items():
 marks.sort()
 
 if not samples:
-    print("サンプルがない（記録の間、アプリ本体はほとんど動いていなかった）")
+    print("サンプルがない（記録の間、そのプロセスはほとんど動いていなかった）")
 end = max([s[0] for s in samples] + [m[0] for m in marks] + [0])
 
 print(f"== {step:g} 秒ごとのサンプル数" + ("（時間帯の中だけ）" if window else ""))
@@ -133,7 +135,8 @@ chosen = [s for s in samples if window is None or window[0] <= s[0] < window[1]]
 span = f"{window[0]}s〜{window[1]}s" if window else "全体"
 print(f"\n== 重い関数（{span}、{len(chosen)} サンプル）")
 threads = collections.Counter(thread for _, thread, _ in chosen)
-print("スレッド: " + ", ".join(f"{name.split(' (Browser')[0]} {count}" for name, count in threads.most_common(5)))
+# 「Main Thread (0x1a1129) (Browser, pid: 123)」の後ろのプロセス名は、どれも同じなので削る。
+print("スレッド: " + ", ".join(f"{re.sub(r' [(][^()]*, pid: [0-9]+[)]$', '', name)} {count}" for name, count in threads.most_common(5)))
 
 def is_plumbing(name):
     """入口や、コンパイラが挟む仲立ちの関数。どの記録でも上に来るだけで手がかりにならない。"""
@@ -161,7 +164,9 @@ def show(title, counter):
         print("（なし）")
 
 
-show("アプリ自身のコード（呼んだ先も含む）", own)
+# ページのプロセスなどを記録したときは、アプリ自身のコードは出てこないので省く。
+if own:
+    show("アプリ自身のコード（呼んだ先も含む）", own)
 show("その関数自身で使った時間", leaves)
 show("呼んだ先も含む時間（すべて）", inclusive)
 PY
@@ -171,12 +176,32 @@ case "${1:-}" in
     record)
         [ "$#" -ge 2 ] || usage
         seconds="$2"
+        shift 2
+        which="app"
+        case "${1:-}" in
+            --tab) [ "$#" -ge 2 ] || usage; which="tab $2" ;;
+            --process) [ "$#" -ge 2 ] || usage; which="$2" ;;
+            "") ;;
+            *) usage ;;
+        esac
         pid="$(build/browserctl stats --json | python3 -I -c '
 import json, sys
-print(next(p["pid"] for p in json.load(sys.stdin)["report"]["processes"] if p["name"] == "Browser (app)"))')"
+which = sys.argv[1]
+processes = json.load(sys.stdin)["report"]["processes"]
+names = {"app": "Browser (app)", "gpu": "com.apple.WebKit.GPU", "networking": "com.apple.WebKit.Networking"}
+if which.startswith("tab "):
+    number = int(which[4:])
+    found = [p for p in processes if number in (p.get("tabs") or [])]
+    hint = "そのタブはまだ読み込んでいないか、ない（browserctl tabs と stats で確かめる）"
+else:
+    found = [p for p in processes if p["name"] == names.get(which)]
+    hint = "--process は gpu か networking"
+if not found:
+    sys.exit(f"記録するプロセスが見つからない: {which}。{hint}")
+print(found[0]["pid"])' "$which")"
         mkdir -p build/profile
         trace="build/profile/$(date +%Y%m%d-%H%M%S).trace"
-        echo "== 記録（プロファイル: ${BROWSER_PROFILE}、pid ${pid}、${seconds} 秒）"
+        echo "== 記録（プロファイル: ${BROWSER_PROFILE}、${which}、pid ${pid}、${seconds} 秒）"
         xctrace record --template 'Time Profiler' --attach "$pid" --time-limit "${seconds}s" \
             --output "$trace" >/dev/null 2>&1
         echo "記録: $trace"

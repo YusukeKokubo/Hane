@@ -2,7 +2,8 @@
 # 決まった手順で負荷をかけ、メモリ・CPU・起床回数を測る。変更の前後で走らせて見比べる。
 #
 # 手順は「起動して何もしない」「ページを開き終えて何もしない」「同じタブでページを5回移る」
-# 「タブを閉じて何もしない」の四つ。何もしない段階は BENCH_SETTLE 秒（既定 15）待ってから
+# 「タブを閉じて何もしない」「タブを BENCH_TABS 枚（既定 10）足して何もしない」「それを閉じて何もしない」の六つ。
+# 後ろの二つで、タブ1枚あたりに増えるメモリと、閉じたあとに戻りきらない分（漏れの目安）を出す。何もしない段階は BENCH_SETTLE 秒（既定 15）待ってから
 # BENCH_SECONDS 秒（既定 10）の平均を取る。ページを移る段階は、移っている間の CPU が操作の重さの目安になる。
 # 読み込みの直後は WebKit がしばらく動いていて起床回数が跳ねるので、落ち着くのを待つ。
 # 何もしていないはずの時間に CPU や起床回数が増えていたら、常駐する処理が紛れ込んでいる。
@@ -24,6 +25,7 @@ esac
 SECONDS_PER_PHASE="${BENCH_SECONDS:-10}"
 SETTLE="${BENCH_SETTLE:-15}"
 NAVIGATE_SECONDS="${BENCH_NAVIGATE:-6}"
+MANY_TABS="${BENCH_TABS:-10}"
 CTL="$ROOT/build/browserctl"
 # 前面で測る。裏のアプリは macOS に間引かれることがあり、前の結果と比べられなくなるため。
 export BROWSER_LAUNCH=front
@@ -102,15 +104,35 @@ while [ "$run" -le "$RUNS" ]; do
     done
     sleep "$SETTLE"
     measure "$run" 4-closed
+
+    # タブを足して、1枚あたりの重さを見る。ページは渡されたものを順に使い回す。
+    added=0
+    while [ "$added" -lt "$MANY_TABS" ]; do
+        for url in "$@"; do
+            [ "$added" -lt "$MANY_TABS" ] || break
+            "$CTL" new "$url" >/dev/null
+            added=$((added + 1))
+        done
+    done
+    sleep "$SETTLE"
+    measure "$run" 5-many-tabs
+
+    # また最初のタブだけにする。4-closed より増えたまま戻らない分が、閉じたタブの残りかす。
+    while [ "$("$CTL" tabs | wc -l)" -gt 1 ]; do
+        "$CTL" close >/dev/null
+    done
+    sleep "$SETTLE"
+    measure "$run" 6-closed-again
     echo "  $run 回目 済"
     run=$((run + 1))
 done
 
 # 段階ごとに、回をまたいだ真ん中の値を一行にまとめる。
-python3 -I - "$OUT" > "$OUT/summary.txt" <<'PY'
+python3 -I - "$OUT" "$MANY_TABS" > "$OUT/summary.txt" <<'PY'
 import glob, json, os, statistics, sys
 
 out = sys.argv[1]
+many_tabs = int(sys.argv[2])
 runs = sorted(glob.glob(os.path.join(out, "run*")))
 phases = sorted(os.path.basename(p)[:-5] for p in glob.glob(os.path.join(runs[0], "*.json")))
 
@@ -122,16 +144,27 @@ def cell(values, digits=1):
     return f"{middle:.{digits}f} ({min(values):.{digits}f}-{max(values):.{digits}f})"
 
 
-print(f"{'phase':<12} {'processes':>9} {'memory MB':>20} {'app MB':>20} {'cpu %':>16} {'app cpu %':>16} {'wakeups/s':>20}")
+print(f"{'phase':<15} {'processes':>9} {'memory MB':>20} {'app MB':>20} {'cpu %':>16} {'app cpu %':>16} {'wakeups/s':>20}")
 for phase in phases:
     reports = [json.load(open(os.path.join(run, phase + ".json")))["report"] for run in runs]
     app = [next(p for p in r["processes"] if p["name"] == "Browser (app)") for r in reports]
-    print(f"{phase:<12} {cell([len(r['processes']) for r in reports], 0):>9}"
+    print(f"{phase:<15} {cell([len(r['processes']) for r in reports], 0):>9}"
           f" {cell([r['total']['memoryBytes'] / 1048576 for r in reports]):>20}"
           f" {cell([a['memoryBytes'] / 1048576 for a in app]):>20}"
           f" {cell([r['total']['cpuPercent'] for r in reports], 2):>16}"
           f" {cell([a['cpuPercent'] for a in app], 2):>16}"
           f" {cell([r['total']['wakeupsPerSecond'] for r in reports]):>20}")
+
+
+def memory(run, phase):
+    return json.load(open(os.path.join(run, phase + ".json")))["report"]["total"]["memoryBytes"] / 1048576
+
+
+if {"4-closed", "5-many-tabs", "6-closed-again"} <= set(phases) and many_tabs > 0:
+    per_tab = [(memory(run, "5-many-tabs") - memory(run, "4-closed")) / many_tabs for run in runs]
+    left = [memory(run, "6-closed-again") - memory(run, "4-closed") for run in runs]
+    print(f"タブ1枚あたり: {cell(per_tab)} MB（5-many-tabs と 4-closed の差を {many_tabs} 枚で割る）")
+    print(f"閉じても戻らない分: {cell(left)} MB（6-closed-again − 4-closed。増え続けるなら閉じたタブが残っている）")
 print(f"回数: {len(runs)}、実行ファイル: {reports[0]['executable']}")
 PY
 

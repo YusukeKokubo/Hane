@@ -22,6 +22,9 @@ enum ProcessStats {
         let memoryBytes: UInt64
         let cpuPercent: Double
         let wakeupsPerSecond: Double
+        /// このプロセスが描いているタブの番号。ページのプロセス（WebContent）にだけ付く。
+        /// どのタブにも結びつかないページのプロセスは、先に立ち上げて待たせてあるものなど。
+        var tabs: [Int]? = nil
     }
 
     struct Report: Codable {
@@ -35,7 +38,8 @@ enum ProcessStats {
     }
 
     /// 期間をおいて2回測り、その間のCPU使用率と起床回数を出す。
-    static func measure(for interval: Duration = .milliseconds(500)) async -> Report {
+    /// `tabs` はページのプロセスの番号から、そのプロセスが描いているタブの番号への対応。
+    static func measure(for interval: Duration = .milliseconds(500), tabs: [pid_t: [Int]] = [:]) async -> Report {
         let pids = family()
         let before = Dictionary(uniqueKeysWithValues: pids.compactMap(sample).map { ($0.pid, $0) })
         let clock = ContinuousClock()
@@ -55,7 +59,8 @@ enum ProcessStats {
                 pid: current.pid,
                 memoryBytes: current.footprint,
                 cpuPercent: elapsed > 0 ? cpu / elapsed * 100 : 0,
-                wakeupsPerSecond: elapsed > 0 ? wakeups / elapsed : 0
+                wakeupsPerSecond: elapsed > 0 ? wakeups / elapsed : 0,
+                tabs: tabs[current.pid]?.sorted()
             ))
         }
         let total = Row(
@@ -73,7 +78,7 @@ enum ProcessStats {
     /// 人が読む表にする。
     static func table(_ report: Report) -> String {
         var lines = ["process".padding(toLength: 34, withPad: " ", startingAt: 0)
-            + "    pid     memory    cpu  wakeups/s"]
+            + "    pid     memory    cpu  wakeups/s  tabs"]
         lines += report.processes.map(row)
         lines.append(row(report.total))
         lines.append(String(format: "（%.1f 秒間の平均。実行ファイル: %@）", report.seconds, report.executable))
@@ -88,6 +93,7 @@ enum ProcessStats {
         return row.name.padding(toLength: 34, withPad: " ", startingAt: 0)
             + String(repeating: " ", count: max(0, 7 - pid.count)) + pid
             + String(format: " %7.1f MB %5.1f%% %10.1f", Double(row.memoryBytes) / 1_048_576, row.cpuPercent, row.wakeupsPerSecond)
+            + (row.tabs.map { "  " + $0.map(String.init).joined(separator: ",") } ?? "")
     }
 
     /// 自分自身と、自分と同じ「責任プロセス」に属するWebKitの補助プロセス

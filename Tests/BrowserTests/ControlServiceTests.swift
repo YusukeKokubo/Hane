@@ -275,6 +275,29 @@ import Testing
         #expect(object["tabs"] is [String: Any])
     }
 
+    /// ページのプロセスは WebKit の中身から引いているので、WebKit が変わると引けなくなる。それを知らせる。
+    @Test func pageProcessIsFound() async throws {
+        try await open(html: "<title>Process</title>")
+        let tab = try #require(store.selected)
+        let pid = try #require(PageProcess.identifier(of: tab.page))
+        #expect(pid != getpid())
+
+        let response = await run("stats", "--seconds", "0.1", "--json")
+        let object = try #require(try JSONSerialization.jsonObject(with: Data(response.output.utf8)) as? [String: Any])
+        let report = try #require(object["report"] as? [String: Any])
+        // 補助プロセスを特定できない環境では、アプリ本体しか並ばない。
+        guard report["appOnly"] as? Bool == false else { return }
+        let processes = try #require(report["processes"] as? [[String: Any]])
+        let row = try #require(processes.first { $0["pid"] as? Int == Int(pid) }, "\(processes)")
+        #expect(row["tabs"] as? [Int] == [tab.number])
+    }
+
+    /// 読み込む前のタブのために Web ビューを作らせない。
+    @Test func pageProcessIsNotCreatedForEmptyTabs() {
+        let tab = store.newTab()
+        #expect(PageProcess.identifier(of: tab.page) == nil)
+    }
+
     @Test func statsRejectsTooLongMeasurements() async {
         let response = await run("stats", "--seconds", "600")
         #expect(!response.ok)

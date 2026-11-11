@@ -285,8 +285,12 @@ final class ControlService {
                 return value
             } ?? 0.5
             let json = takeFlag("--json", from: &args)
-            let report = await ProcessStats.measure(for: .milliseconds(Int(seconds * 1000)))
             let all = store.allTabs
+            let pages = Dictionary(grouping: all.filter(\.hasContent)) { PageProcess.identifier(of: $0.page) }
+            let byProcess = pages.reduce(into: [pid_t: [Int]]()) { result, entry in
+                if let pid = entry.key { result[pid] = entry.value.map(\.number) }
+            }
+            let report = await ProcessStats.measure(for: .milliseconds(Int(seconds * 1000)), tabs: byProcess)
             let tabs = StatsTabs(total: all.count, withContent: all.count { $0.hasContent }, bookmarkPages: store.bookmarkTabs.count)
             if json {
                 let encoder = JSONEncoder()
