@@ -84,6 +84,20 @@ import Testing
         #expect(response.output.contains("窓が出ていない"))
     }
 
+    @Test func windowElementCommandsExplainWhatIsMissing() async {
+        // テストには窓がないので、番号のない操作と、窓が要る操作が分かる言葉で断ることを見る。
+        var response = await run("ui-click", "1")
+        #expect(!response.ok)
+        #expect(response.output.contains("ui-snapshot"))
+        #expect(await !run("ui-click").ok)
+        #expect(await !run("ui-hover", "x").ok)
+        #expect(await !run("ui-menu", "1").ok)
+
+        response = await run("window-size", "800", "600")
+        #expect(response.output.contains("窓が出ていない"))
+        #expect(await run("appearance", "sepia").output.contains("dark、light、system"))
+    }
+
     @Test func uiReportsWindowFrame() async {
         // テストには窓がないので、行があって「なし」と出ることだけを見る。
         #expect(await run("ui").output.contains("window frame: (なし)"))

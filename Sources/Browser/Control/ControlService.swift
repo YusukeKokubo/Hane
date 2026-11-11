@@ -11,6 +11,8 @@ final class ControlService {
     private let store: TabStore
     /// 要素の控えを置く実行環境。ページ自身のスクリプトからは見えない。
     private let world = WKContentWorld.world(name: "browserctl")
+    /// `ui-snapshot` で振った番号と、窓まわりの部品の対応。
+    private let windowElements = WindowElements()
 
     private static let loadTimeout: Duration = .seconds(30)
 
@@ -136,6 +138,59 @@ final class ControlService {
         case "ui":
             return describeUI()
 
+        case "ui-snapshot":
+            return try await windowElements.snapshot()
+
+        case "ui-click":
+            let result = try windowElements.click(try integer(try argument(args, 0, "部品の番号"), "部品の番号"))
+            return await afterUIAction(result)
+
+        case "ui-hover":
+            let result = try windowElements.hover(try integer(try argument(args, 0, "部品の番号"), "部品の番号"))
+            return await afterUIAction(result)
+
+        case "ui-menu":
+            let menu = try windowElements.menu(try integer(try argument(args, 0, "部品の番号"), "部品の番号"))
+            guard args.count > 1 else {
+                return "menu of \(menu.label):\n" + menu.items.enumerated().map { index, item in
+                    "  [\(index + 1)] " + (item === menu.selected ? "* " : "") + item.title
+                        + (item.isEnabled ? "" : " (disabled)") + (item.hasSubmenu ? " ▸" : "")
+                }.joined(separator: "\n")
+            }
+            let wanted = args.dropFirst().joined(separator: " ")
+            guard let item = Int(wanted).flatMap({ menu.items.indices.contains($0 - 1) ? menu.items[$0 - 1] : nil })
+                ?? menu.items.first(where: { $0.title == wanted }) else {
+                throw ControlError("メニューに「\(wanted)」がない。番号か項目名で指定すること: "
+                    + menu.items.map(\.title).joined(separator: " / "))
+            }
+            guard item.isEnabled else { throw ControlError("「\(item.title)」は今は選べない。") }
+            guard !item.hasSubmenu else { throw ControlError("「\(item.title)」は下にメニューを持つ項目で、選べない。") }
+            menu.choose(item)
+            return await afterUIAction("chose \"\(item.title)\" from \(menu.label)")
+
+        case "window-size":
+            guard let window = Self.mainWindow() else { throw ControlError("窓が出ていない。") }
+            let width = try integer(try argument(args, 0, "幅"), "幅")
+            let height = try integer(try argument(args, 1, "高さ"), "高さ")
+            // 左上を動かさずに大きさだけ変える（AppKit の座標は左下から測る）。
+            var frame = window.frame
+            frame.origin.y += frame.height - CGFloat(height)
+            frame.size = CGSize(width: width, height: height)
+            window.setFrame(frame, display: true)
+            return await afterUIAction("resized to \(width)x\(height)")
+
+        case "appearance":
+            if let name = args.first {
+                switch name {
+                case "dark": NSApp.appearance = NSAppearance(named: .darkAqua)
+                case "light": NSApp.appearance = NSAppearance(named: .aqua)
+                case "system": NSApp.appearance = nil
+                default: throw ControlError("外観は dark、light、system のどれか: \(name)")
+                }
+            }
+            let effective = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? "dark" : "light"
+            return "appearance: \(effective)" + (NSApp.appearance == nil ? "（システムに従う）" : "（このアプリだけ固定。appearance system で戻す）")
+
         case "key":
             try sendKey(try argument(args, 0, "キー"))
             // 画面の更新とポップオーバーの出し入れを待ってから様子を返す。
@@ -143,8 +198,9 @@ final class ControlService {
             return describeUI()
 
         case "type":
+            let replace = takeFlag("--replace", from: &args)
             guard !args.isEmpty else { throw ControlError("打つ文字列がない。例: type github") }
-            try await typeText(args.joined(separator: " "))
+            try await typeText(args.joined(separator: " "), replacing: replace)
             try? await Task.sleep(for: .milliseconds(300))
             return describeUI()
 
@@ -243,6 +299,10 @@ final class ControlService {
             // 応答を返し終えてから終了する。
             Task {
                 try? await Task.sleep(for: .milliseconds(200))
+                // シート（アラート）が出ていると終了が黙って取りやめになるので、先に閉じる。
+                for window in NSApp.windows {
+                    if let sheet = window.attachedSheet { window.endSheet(sheet) }
+                }
                 NSApp.terminate(nil)
             }
             return "quitting"
@@ -311,7 +371,7 @@ final class ControlService {
     /// Core Animation の層をそのまま描く。窓の背景の素材は中身の外にあって写らないので、
     /// 外観に合わせた窓の背景色を下に敷く。
     private func windowScreenshot(to path: String?) throws -> String {
-        guard let window = Self.backgroundKeyTarget(), let view = window.contentView, let layer = view.layer else {
+        guard let window = Self.mainWindow(), let view = window.contentView, let layer = view.layer else {
             throw ControlError("窓が出ていない。")
         }
         view.layoutSubtreeIfNeeded()
@@ -432,6 +492,9 @@ final class ControlService {
             }
             lines.append("folder list: \(folder.name) " + (rows.isEmpty ? "(空)" : rows.joined(separator: " ")))
         }
+        for (_, kind) in WindowElements.windows().dropFirst() {
+            lines.append("overlay: \(kind)（中身は ui-snapshot）")
+        }
         lines.append("tabs (left to right):")
         lines.append(contentsOf: store.allTabs.map(describe))
         return lines.joined(separator: "\n")
@@ -440,7 +503,7 @@ final class ControlService {
     /// 窓の大きさと位置、覚えている名前。窓の枠を戻す仕組みが効いているかを外から確かめるため。
     /// 位置は画面の左上からの距離で表す（AppKit の座標は左下から測るので向きを直す）。
     private func describeWindowFrame() -> String {
-        guard let window = Self.backgroundKeyTarget() else { return "(なし)" }
+        guard let window = Self.mainWindow() else { return "(なし)" }
         let frame = window.frame
         let screen = window.screen?.frame ?? .zero
         let name = window.frameAutosaveName.isEmpty ? "(覚えない)" : "\"\(window.frameAutosaveName)\""
@@ -468,9 +531,9 @@ final class ControlService {
 
     /// ページの外（メニューやバー）へ、利用者が打ったのと同じ道筋でキーを送る。
     ///
-    /// 前面にいれば事象の待ち行列に積み、局所モニタ、メニュー、ウインドウの順に本物のキーと同じく渡す。
-    /// 裏にいるとキーを受けるウインドウがなく、自分から前に出ることもシステムに断られる。
-    /// 動作確認のたびに持ち主の作業を遮らないよう、そのときは同じ順をここで辿って手渡しする。
+    /// 本物のキーが通る順（局所モニタ、窓の部品のキー、メニュー、ウインドウ）をここで辿って手渡しする。
+    /// 裏にいるとキーを受けるウインドウがなく、自分から前に出ることもシステムに断られるため。
+    /// 前面にいるときも同じ道を通す。待ち行列に積むと、アラートの Return と Esc が効かなかった。
     private func sendKey(_ spec: String) throws {
         var parts = spec.lowercased().split(separator: "+").map(String.init)
         guard let name = parts.popLast() else { throw ControlError("キーがない。") }
@@ -487,8 +550,7 @@ final class ControlService {
         guard let (keyCode, characters) = Self.keys[name] else {
             throw ControlError("知らないキー: \(name)（\(Self.keys.keys.sorted().joined(separator: ", "))）")
         }
-        let isActive = NSApp.isActive && NSApp.keyWindow != nil
-        guard let window = isActive ? NSApp.keyWindow : Self.backgroundKeyTarget() else {
+        guard let window = NSApp.keyWindow ?? Self.backgroundKeyTarget() else {
             throw ControlError("ウインドウがない。")
         }
         guard let event = NSEvent.keyEvent(
@@ -498,11 +560,9 @@ final class ControlService {
             isARepeat: false, keyCode: keyCode
         ) else { throw ControlError("キーの事象を作れない: \(spec)") }
 
-        if isActive {
-            NSApp.postEvent(event, atStart: false)
-            return
-        }
         if FolderShortcut.handle(event, store: store) { return }
+        // メニューより先に窓の部品へ渡す。アラートや編集欄の既定のボタン（Return）とキャンセル（Esc）はここで拾われる。
+        if window.performKeyEquivalent(with: event) { return }
         if NSApp.mainMenu?.performKeyEquivalent(with: event) == true { return }
         window.sendEvent(event)
     }
@@ -512,8 +572,14 @@ final class ControlService {
     /// キーの事象を作って送ると、持ち主の入力方式が日本語のときに仮名へ変換されてしまうので、
     /// 入力欄の編集部品（フィールドエディタ）へ文字を直接入れる。文字ごとに間を置き、
     /// 画面が1文字ずつ変化を受け取れるようにする。
-    private func typeText(_ text: String) async throws {
+    private func typeText(_ text: String, replacing: Bool) async throws {
         let window = NSApp.keyWindow ?? Self.backgroundKeyTarget()
+        if replacing {
+            guard let editor = window?.firstResponder as? NSTextView else {
+                throw ControlError("文字を受け付ける入力欄にフォーカスがない。")
+            }
+            editor.selectAll(nil)
+        }
         for character in text {
             guard let editor = window?.firstResponder as? NSTextView else {
                 throw ControlError("文字を受け付ける入力欄にフォーカスがない。")
@@ -523,10 +589,19 @@ final class ControlService {
         }
     }
 
-    /// 裏にいるとき、前に出ていればキーを受けたはずのウインドウ。ポップオーバーが出ていればそちら。
+    /// 裏にいるとき、前に出ていればキーを受けたはずのウインドウ。シートやポップオーバーが出ていればそちら。
     private static func backgroundKeyTarget() -> NSWindow? {
-        guard let main = NSApp.windows.first(where: { $0.isVisible && $0.canBecomeMain }) else { return nil }
-        return main.childWindows?.last(where: \.isVisible) ?? main
+        WindowElements.windows().last?.window
+    }
+
+    private static func mainWindow() -> NSWindow? {
+        WindowElements.windows().first?.window
+    }
+
+    /// 窓まわりを操作したあと、画面の更新とポップオーバーの出し入れを待ってから様子を添えて返す。
+    private func afterUIAction(_ result: String) async -> String {
+        try? await Task.sleep(for: .milliseconds(300))
+        return result + "\n" + describeUI()
     }
 
     /// `key` で送れるキー。値は仮想キーコードと、そのキーが打ち出す文字。

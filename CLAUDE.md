@@ -38,9 +38,17 @@ build/browserctl quit               # 終わったら止める（pkill は普段
 
 `BROWSER_PROFILE=dev` の実体は、操作用ソケットが別で、Cookieなどを保存しない使い捨てになる。命令の一覧は `build/browserctl help`。ページだけを撮るなら `browserctl screenshot <保存先>`。`window-screenshot` を `cacheDisplay` で作ると、バーの背景が明るい外観の白で塗られて実物と違ってしまうので、層を直に描いている。撮った画像を `sips -c` で切り抜くと真ん中が切り出されるので、縮めて見るなら `sips -Z 1200`。
 
-アドレスバーへの入力は `browserctl type <文字列>` で打てる。キーの事象を作ると持ち主の入力方式が日本語のとき仮名に化けるので、入力欄の編集部品へ文字を直接差し込んでいる。履歴から補った続きは `ui` の `completion=` に出る。
+アドレスバーへの入力は `browserctl type <文字列>` で打てる（`--replace` で今の中身を置き換える）。キーの事象を作ると持ち主の入力方式が日本語のとき仮名に化けるので、入力欄の編集部品へ文字を直接差し込んでいる。履歴から補った続きは `ui` の `completion=` に出る。
 
-メニューやバーへのキー操作は `browserctl key ctrl+1` のように送れる。アプリが裏にいるとシステムはキーを届けず、前に出すと持ち主の作業を遮るので、そのときは `ControlService` が局所モニタ、メニュー、ウインドウ（出ていればポップオーバー）の順を自分で辿って手渡しする。前面にいるときは本物のキーと同じく待ち行列に積む。
+メニューやバーへのキー操作は `browserctl key ctrl+1` のように送れる。アプリが裏にいるとシステムはキーを届けず、前に出すと持ち主の作業を遮るので、`ControlService` が局所モニタ、窓の部品のキー、メニュー、ウインドウの順を自分で辿って手渡しする。宛先はシート、ポップオーバー、窓の順に出ているものを選ぶ。前面にいるときも同じ道を通す（待ち行列に積むと、アラートの Return と Esc が効かなかった）。
+
+窓まわりの部品（タブ、ブックマーク、ボタン、ポップオーバーやアラートの中身）は、`ui-snapshot` で番号つきの一覧を取り、`ui-click`、`ui-hover`、`ui-menu`（右クリックのメニューと選択欄）で触る。部品はアプリ自身のアクセシビリティの木から拾い、操作は部品の真ん中へマウスの事象を作って窓へ渡す（`WindowElements`）。幅で見た目が変わる部品は `window-size`、外観は `appearance dark|light|system` で切り替えて `window-screenshot` で撮る。
+
+```sh
+build/browserctl ui-snapshot              # [3] text "Second" help="file://…" @167,3 63x26 など
+build/browserctl ui-menu 3                # 右クリックのメニューの項目
+build/browserctl ui-menu 3 名前とフォルダを編集…   # 選ぶとポップオーバーが出て、ui-snapshot に中身が続く
+```
 
 持ち主が普段使いで試すのは `~/Applications/Browser.app` で、`build/` を作り直しただけでは変わらない。試してもらう前に `scripts/bundle.sh --install` し、動いている実体を ⌘Q で終えて起動し直してもらう（タブは前回の閲覧状態から戻る。ただし入れ替え前の版で終えたときは、その版が状態を書き出していないので戻らない）。入った版は `cmp ~/Applications/Browser.app/Contents/MacOS/Browser build/Browser.app/Contents/MacOS/Browser` で確かめる。
 
@@ -64,7 +72,7 @@ SwiftUI の中で重いときは、Time Profiler の関数名がレイアウト�
 - `Sources/Browser/Model` — 状態。`TabStore`（タブの一覧と選択。普通のタブと、ブックマークからその場で開いたページを分けて持つ）、`Tab`（`WebPage` を1つ所有）、`BookmarkStore`（ブックマークとフォルダの並びと保存。フォルダは一段だけ）、`SessionStore`（閲覧状態の保存。再起動したときにタブを戻す）、`HistoryStore`（閲覧履歴と、アドレスバーで補う候補選び）、`PageFactory`（`WebPage` の設定をすべてここで行う）、`Signposts`（Instruments に出す区間の印）、`NavigationDecider`、`AddressResolver`、`PageLog`、`BrowserSettings`（検索先やUser-Agentなどの固定値。変えたい値はここに集める）。
 - `Sources/Browser/Views` — 画面。`BrowserWindow`（上からタブバー、ナビゲーションの段、ページ）、`AddressBar`、`TabBar`（左にブックマーク、右に普通のタブを一列に並べる）、`BookmarkBar`（ブックマークとフォルダの項目、追加・編集のポップオーバー）。
 - `Sources/Browser/Model` の広告ブロック — `ContentBlocker`（ルールリストのコンパイルと全ページへの配布）、`FilterList`（Adblock Plus 形式をWebKitのルールに訳す）、`ContentRule`（WebKitのルールのJSON）、`HiddenElementStore`（⌥右クリックで隠した要素の保存）、`ElementPicker`（⌥右クリックで要素を選ぶページ内スクリプト）。フィルタリストの本体は `Support/Filters`。
-- `Sources/Browser/Control` — 外部操作。`ControlServer`（ソケット）、`ControlService`（命令の解釈）、`PageScripts`（ページ内で走らせるJavaScript）、`ProcessStats`。
+- `Sources/Browser/Control` — 外部操作。`ControlServer`（ソケット）、`ControlService`（命令の解釈）、`PageScripts`（ページ内で走らせるJavaScript）、`WindowElements`（窓まわりの部品の一覧とマウス操作）、`ProcessStats`。
 - `Sources/ControlWire` — アプリと `browserctl` が共有する通信の取り決めと、命令の説明文（`ControlHelp`。これが仕様の正本）。
 - `Sources/browserctl` — コマンド本体。引数をそのまま送るだけで、命令の意味は知らない。
 
@@ -89,6 +97,10 @@ SwiftUI の中で重いときは、Time Profiler の関数名がレイアウト�
 - **広告ブロックは WebKit のコンテンツブロッカーで行う。** 判定はページのプロセスの中で WebKit がするので、アプリ側で常に動く処理はない。同梱のリスト（EasyList と AdGuard Japanese）を起動時に訳してコンパイルするのは中身か `FilterList.version` が変わったときだけで（数秒）、ふだんは `WKContentRuleListStore` から引くだけ。訳し方を変えたら `FilterList.version` を上げる。普段使いは WebKit の既定の置き場、それ以外のプロファイルは `~/Library/Caches/Browser/profiles/<名前>` に置くので、`verify.sh` の初回はコンパイルを待つ。
 - **WebKit のルールは1リスト15万件まで、ひとつでも受け付けないルールがあるとリスト全体が落ちる。** 訳せない書き方は捨てる方へ倒し、`bundledListsCompile` のテストで同梱のリストが実際にコンパイルできるかを見張っている。例外（`ignore-previous-rules`）は同じリストで前にあるルールしか取り消せないので、例外は最後に並べる。
 - **右クリックのメニューには項目を足せない。** WebKit for SwiftUI の `webViewContextMenu` は標準の項目（コピー、調べる、Webインスペクタなど）をすべて置き換えてしまう。そのため要素を隠す操作は、ページ内のスクリプトで ⌥ 付きの右クリックだけを拾っている。子フレームの中なら `postMessage` で親へ知らせてフレームごと選ばせる。`browserctl` からは、合成した `contextmenu` 事象（`altKey: true`）と `press` で同じ流れを試せる。
+- **SwiftUI はアクセシビリティの木を問われるまで作らない。** `open` で起動すると常駐する何かが問い合わせて木ができるが、直に起動すると（`verify.sh`）中から辿っても空のまま。`WindowElements` は外の道具と同じ API で自分に一度問い合わせて作らせている。作らせても、何もしていない間の起床回数とメモリは変わらなかった。
+- **窓まわりの操作で、アプリを止めてしまうもの。** 選択欄を押す、右クリックのメニューを出すと、閉じるまでメインスレッドが止まって応答を返せない。そのため `ui-menu` はメニューを出さずに中身を引いて項目の動作を直に呼び、`ui-click` は選択欄を断る。ボタンは押されると離す事象を自分で待つので、離す事象を先に待ち行列へ積んでから押す。選択欄は選択欄の動作を送っても SwiftUI の値が変わらず、項目の動作を呼ぶ必要がある。
+- **窓まわりで、作った事象では確かめられないもの。** ドラッグは始まらない（運ぶ中身を載せた情報を落とし先へ直に渡す方法も試したが、SwiftUI は受け付けず、その後の描画でアプリが落ちた）。並べ替えは `TabStore.drop` の単体テストで見る。`onHover` はアプリが前面のときしか効かないので、裏にいるときの `ui-hover` は乗せたときの表示を出せない（`verify.sh` はそのとき skip と出す）。
+- **シートが出ていると終了が黙って取りやめになる。** `quit` は先にシートを閉じてから終える。終わったつもりで古い版が動き続け、作り直した版を試したつもりになることがあった。
 - **テストはネットワークに出さない。** HTMLは一時ファイルに書いて `file://` で開く。`data:` や検索語はアドレスの解釈に巻き込まれやすい。
 - **`file://` のページでは例外の中身が「Script error.」に潰れる。** WebKitの仕様で、http(s) のページでは普通に取れる。
 

@@ -90,6 +90,47 @@ expect "Escで補った部分だけ取り消す" "address bar: \"$FIXTURES/sec\"
 "$CTL" type o >/dev/null
 expect "補ったまま確定して移る" 'window title: Second' key return
 expect "打って訪れた回数を数える" 'typed 2 visits' history
+# 窓まわりの部品をマウスで操作する。番号は並びで変わるので、ui-snapshot から名前で引く。
+ui_number() { "$CTL" ui-snapshot | grep -F -- "$1" | head -1 | sed 's/^ *\[\([0-9]*\)\].*/\1/'; }
+"$CTL" new "$FIXTURES/second.html" >/dev/null
+expect "窓まわりの部品の一覧" 'button "新規タブ"' ui-snapshot
+expect "新規タブのボタンを押す" 'window title: 新規タブ' ui-click "$(ui_number 'button "新規タブ"')"
+closers="$("$CTL" ui-snapshot | grep -c 'タブを閉じる' || true)"
+expect "選んでいないタブにポインタを乗せる" 'hovering text "Second"' ui-hover "$(ui_number 'text "Second"')"
+# SwiftUI の onHover は前面にいるときしか効かない。持ち主の作業を遮らないよう、前には出さずに飛ばす。
+if "$CTL" ui-hover "$(ui_number 'text "Second"')" | grep -q '裏にいる'; then
+    echo "  skip 乗せたタブにも閉じるボタンが出る（アプリが裏にいる）"
+else
+    after="$("$CTL" ui-snapshot | grep -c 'タブを閉じる' || true)"
+    if [ "$after" -gt "$closers" ]; then
+        echo "  ok   乗せたタブにも閉じるボタンが出る"
+    else
+        echo "  FAIL 乗せたタブにも閉じるボタンが出る（閉じるボタン $closers 個 → $after 個）"
+        failures=$((failures + 1))
+    fi
+fi
+# 足したタブを閉じ、資源の数字を前と比べられる並びに戻す。
+"$CTL" close >/dev/null
+"$CTL" close >/dev/null
+"$CTL" bookmark-add "$FIXTURES/second.html" --name 三番 >/dev/null
+expect "ブックマークの右クリックのメニュー" '名前とフォルダを編集…' ui-menu "$(ui_number 'text "三番"')"
+expect "メニューから編集のポップオーバーを出す" 'overlay: popover' ui-menu "$(ui_number 'text "三番"')" 名前とフォルダを編集…
+"$CTL" ui-click "$(ui_number 'value="三番"')" >/dev/null
+"$CTL" type --replace 四番 >/dev/null
+expect "選択欄でフォルダを選ぶ" 'chose "試験"' ui-menu "$(ui_number 'popup "')" 試験
+expect "Returnで編集を終える" 'bookmarks bar: [試験 ▾]' key return
+expect "名前とフォルダが変わる" 'folder list: 試験 [>1 Smoke] [2 二番] [3 四番]' key ctrl+1
+"$CTL" key escape >/dev/null
+expect "フォルダの名前を変えるアラート" 'overlay: sheet' ui-menu "$(ui_number 'text "試験"')" 名前を変更…
+"$CTL" type --replace 検証 >/dev/null
+expect "Returnでアラートを確定する" 'bookmarks bar: [検証 ▾]' key return
+frame="$("$CTL" ui | sed -n 's/^window frame: \([0-9]*\)x\([0-9]*\) .*/\1 \2/p')"
+expect "窓の大きさを変える" 'window frame: 700x500' window-size 700 500
+"$CTL" window-size $frame >/dev/null
+expect "外観を固定する" 'appearance: light' appearance light
+expect "固定した外観で撮る" 'appearance: light' window-screenshot "${TMPDIR:-/tmp}/browser-verify-light.png"
+"$CTL" appearance system >/dev/null
+
 # 資源の数字を前と比べられるよう、ここで開いたタブを閉じて元の並びに戻す。
 "$CTL" close >/dev/null
 "$CTL" close >/dev/null
