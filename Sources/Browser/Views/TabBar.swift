@@ -23,10 +23,23 @@ struct TabBar: View {
             // ページを移るたびにメインスレッドが0.1秒ほど取られていた。縮めきった幅を足し算で出して自分で選ぶ。
             Group {
                 if needsScrolling {
-                    ScrollView(.horizontal) { tabRow }
-                        .scrollIndicators(.never)
+                    // 流しているときは、選んだタブが見えるところまで送り、新規タブのボタンは流れの外に置く。
+                    // でないと右端で開いた新しいタブもボタンも、見えないところに隠れてしまう。
+                    HStack(spacing: Self.spacing) {
+                        ScrollViewReader { proxy in
+                            ScrollView(.horizontal) { tabs }
+                                .scrollIndicators(.never)
+                                .onChange(of: store.selectedID, initial: true) {
+                                    if let id = store.selectedID { proxy.scrollTo(id) }
+                                }
+                        }
+                        newTabButton
+                    }
                 } else {
-                    tabRow
+                    HStack(spacing: Self.spacing) {
+                        tabs
+                        newTabButton
+                    }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -43,7 +56,7 @@ struct TabBar: View {
         return tabs * (TabItem.minimumWidth + Self.spacing) + Self.newTabButtonWidth > rowWidth
     }
 
-    private var tabRow: some View {
+    private var tabs: some View {
         HStack(spacing: Self.spacing) {
             ForEach(store.tabs) { tab in
                 TabItem(
@@ -53,11 +66,14 @@ struct TabBar: View {
                     onClose: { onClose(tab.id) }
                 )
             }
-            Button("新規タブ", systemImage: "plus") { store.newTab() }
-                .labelStyle(.iconOnly)
-                .buttonStyle(.borderless)
-                .padding(.horizontal, 6)
         }
+    }
+
+    private var newTabButton: some View {
+        Button("新規タブ", systemImage: "plus") { store.newTab() }
+            .labelStyle(.iconOnly)
+            .buttonStyle(.borderless)
+            .padding(.horizontal, 6)
     }
 }
 
