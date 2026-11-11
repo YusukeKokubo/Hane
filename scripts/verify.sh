@@ -4,11 +4,15 @@
 # 通し確認は開発用プロファイル（BROWSER_PROFILE=dev）の別実体で行うので、
 # 普段使いのブラウザのタブやCookieには触れない。ネットワークにも出ない。
 # 使い方: scripts/verify.sh
+#   別の作業と並べて走らせるときは BROWSER_PROFILE=<名前> で実体を分けられる（default は使えない）。
 set -eu
 
 cd "$(dirname "$0")/.."
 ROOT="$(pwd)"
-export BROWSER_PROFILE=dev
+case "${BROWSER_PROFILE:-}" in
+    ""|default) export BROWSER_PROFILE=dev ;;
+    *) export BROWSER_PROFILE ;;
+esac
 CTL="$ROOT/build/browserctl"
 FIXTURES="file://$ROOT/Tests/Fixtures"
 
@@ -75,6 +79,27 @@ expect "⌃1でフォルダの一覧を開く" 'folder list: 試験 [>1 Smoke] [
 expect "↓で次の行を選ぶ" 'folder list: 試験 [1 Smoke] [>2 二番]' key down
 expect "Returnで選んだ行を開く" '[*試験 › 二番 ▾]' key return
 expect "⌘1で最初の普通のタブ" 'window title: Second' key cmd+1
+# 広告ブロック。初回はフィルタリストのコンパイルを待つので時間がかかる。
+expect "フィルタリストの準備" 'filters: ready' adblock
+expect "広告のページを開く" 'Ads' open "$FIXTURES/ads.html"
+expect "フィルタリストの要素を隠すルール" '"none"' eval 'getComputedStyle(document.querySelector(".ad-slot")).display'
+expect "フィルタリストで広告のスクリプトを止める" 'ad script blocked' logs
+"$CTL" eval 'document.getElementById("promo-text").dispatchEvent(new MouseEvent("contextmenu", {bubbles: true, cancelable: true, altKey: true}))' >/dev/null
+"$CTL" press ArrowUp >/dev/null
+"$CTL" press Enter >/dev/null
+expect "⌥右クリックで選んで親へ広げて隠す" '  div.promo' adblock
+"$CTL" reload >/dev/null
+expect "隠した要素は読み込み直しても隠れる" '"none"' eval 'getComputedStyle(document.querySelector(".promo")).display'
+expect "隠した要素を戻す" 'restored 1' unhide
+expect "戻した要素は見える" '"block"' eval 'getComputedStyle(document.querySelector(".promo")).display'
+# 子フレームの中の ⌥右クリックは、親へ知らせてフレームごと選ばせる。その知らせを子へ送って確かめる。
+"$CTL" eval 'document.getElementById("frame").contentWindow.postMessage({browserElementPicker: "pick"}, "*")' >/dev/null
+sleep 0.5
+"$CTL" press Enter >/dev/null
+expect "子フレームはフレームごと隠す" '  #frame' adblock
+"$CTL" unhide >/dev/null
+expect "セレクタを指して隠す" 'hid 1 element' hide '#article p'
+"$CTL" unhide >/dev/null
 expect "読み込み失敗の報告" '読み込みに失敗' open "$FIXTURES/missing.html"
 expect "失敗が記録に残る" '[navigation]' logs
 expect "資源の計測" 'Browser (app)' stats

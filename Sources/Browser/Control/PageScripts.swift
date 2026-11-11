@@ -138,6 +138,16 @@ enum PageScripts {
     return fail('未知の操作: ' + action);
     """
 
+    /// セレクタに合う要素を隠す。引数: `selector`。隠した数か、失敗の理由をJSONで返す。
+    static let hide = """
+    let found;
+    try { found = document.querySelectorAll(selector); }
+    catch { return JSON.stringify({ error: 'CSSセレクタとして読めない: ' + selector }); }
+    if (!found.length) return JSON.stringify({ error: '合う要素がない: ' + selector });
+    for (const el of found) el.style.setProperty('display', 'none', 'important');
+    return JSON.stringify({ count: found.length });
+    """
+
     /// いま画面に見えている範囲を、ページ内の座標で返す。
     static let viewport = """
     return JSON.stringify({ x: window.scrollX, y: window.scrollY, width: window.innerWidth, height: window.innerHeight });

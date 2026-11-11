@@ -4,14 +4,16 @@ import WebKit
 
 /// `WebPage` の生成と設定を一か所にまとめる。
 ///
-/// コンテンツブロッカー（`WKContentRuleList`）やユーザースクリプトを足すときは
-/// `makeConfiguration(log:)` の中で `userContentController` に登録すればよい。
-/// 全タブがこのファクトリを通るので、設定がタブごとにばらつくことはない。
+/// ユーザースクリプトなどを足すときは `makeConfiguration(log:)` の中で
+/// `userContentController` に登録すればよい。全タブがこのファクトリを通るので、
+/// 設定がタブごとにばらつくことはない。
 @MainActor
 struct PageFactory {
     /// 全タブで共有するサイトデータ（Cookieやキャッシュ）の保存先。
     /// 普段使い以外のプロファイルでは、終了時に消える使い捨てにする。
     var dataStore: WKWebsiteDataStore = BrowserProfile.isDefault ? .default() : .nonPersistent()
+    /// 広告ブロック。テストでは付けない。
+    var contentBlocker: ContentBlocker?
 
     func makeConfiguration(log: PageLog) -> WebPage.Configuration {
         var configuration = WebPage.Configuration()
@@ -21,6 +23,7 @@ struct PageFactory {
         let userContent = WKUserContentController()
         userContent.addUserScript(PageLog.userScript)
         userContent.add(log, name: PageLog.handlerName)
+        contentBlocker?.attach(to: userContent)
         configuration.userContentController = userContent
         configuration.applicationNameForUserAgent = BrowserSettings.userAgentSuffix
         configuration.upgradeKnownHostsToHTTPS = true

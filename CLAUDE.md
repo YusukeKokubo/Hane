@@ -17,6 +17,7 @@ swift build                 # デバッグビルド
 swift test                  # 単体テスト
 scripts/bundle.sh [--install] [--run]  # リリースビルド → build/Browser.app と build/browserctl（Ad-hoc署名）。--install で ~/Applications に置く（Raycast から起動できる）
 scripts/verify.sh           # テスト → ビルド → 開発用の別実体で通し確認。変更したら必ずこれを通す
+scripts/update-filters.sh   # 広告ブロックのフィルタリストを取ってきて Support/Filters を置き換える
 ```
 
 ## 動かして確かめる
@@ -44,6 +45,7 @@ build/browserctl quit               # 終わったら止める（pkill は普段
 - `Sources/Browser` 直下 — `BrowserApp`（入口）、`BrowserCommands`（メニューとキーボードショートカット）。
 - `Sources/Browser/Model` — 状態。`TabStore`（タブの一覧と選択。普通のタブと、ブックマークからその場で開いたページを分けて持つ）、`Tab`（`WebPage` を1つ所有）、`BookmarkStore`（ブックマークとフォルダの並びと保存。フォルダは一段だけ）、`SessionStore`（閲覧状態の保存。再起動したときにタブを戻す）、`PageFactory`（`WebPage` の設定をすべてここで行う）、`NavigationDecider`、`AddressResolver`、`PageLog`、`BrowserSettings`（検索先やUser-Agentなどの固定値。変えたい値はここに集める）。
 - `Sources/Browser/Views` — 画面。`BrowserWindow`（上からタブバー、ナビゲーションの段、ページ）、`AddressBar`、`TabBar`（左にブックマーク、右に普通のタブを一列に並べる）、`BookmarkBar`（ブックマークとフォルダの項目、追加・編集のポップオーバー）。
+- `Sources/Browser/Model` の広告ブロック — `ContentBlocker`（ルールリストのコンパイルと全ページへの配布）、`FilterList`（Adblock Plus 形式をWebKitのルールに訳す）、`ContentRule`（WebKitのルールのJSON）、`HiddenElementStore`（⌥右クリックで隠した要素の保存）、`ElementPicker`（⌥右クリックで要素を選ぶページ内スクリプト）。フィルタリストの本体は `Support/Filters`。
 - `Sources/Browser/Control` — 外部操作。`ControlServer`（ソケット）、`ControlService`（命令の解釈）、`PageScripts`（ページ内で走らせるJavaScript）、`ProcessStats`。
 - `Sources/ControlWire` — アプリと `browserctl` が共有する通信の取り決めと、命令の説明文（`ControlHelp`。これが仕様の正本）。
 - `Sources/browserctl` — コマンド本体。引数をそのまま送るだけで、命令の意味は知らない。
@@ -62,6 +64,9 @@ build/browserctl quit               # 終わったら止める（pkill は普段
 - **閲覧状態は変化を拾って書き出す。** `TabStore` が `withObservationTracking` で開いているページの並び・アドレス・題名・選択を見張り、変わったら書き出す（同じ中身なら書かない）。タイマーは使わない。終了直前にも `BrowserApp` から一度書く。普段使いのプロファイルだけ `~/Library/Application Support/Browser/session.json` に保存し、`dev` とテストでは保存しない。戻る・進むの履歴は `WebPage` に書き出す手段がないので持ち越さない。
 - **戻したタブは選ばれるまで読み込まない。** 一斉に読み込むとタブの数だけ WebContent プロセスが立ち上がるため。`TabStore.selectedID` の `didSet` で読み込みを始める。行き先は `page.url` ではなく `Tab.url` で読む（読み込み前や、読み込みに失敗して `page.url` が空のタブでも返す）。
 - **バーのドラッグは専用の型で運ぶ。** `BarDragItem` の型 `local.personal.browser.bar-item` は `Support/Info.plist` で宣言している。文字列で運ぶと、ページの入力欄に落としたとき文字として入ってしまう。
+- **広告ブロックは WebKit のコンテンツブロッカーで行う。** 判定はページのプロセスの中で WebKit がするので、アプリ側で常に動く処理はない。同梱のリスト（EasyList と AdGuard Japanese）を起動時に訳してコンパイルするのは中身か `FilterList.version` が変わったときだけで（数秒）、ふだんは `WKContentRuleListStore` から引くだけ。訳し方を変えたら `FilterList.version` を上げる。普段使いは WebKit の既定の置き場、それ以外のプロファイルは `~/Library/Caches/Browser/profiles/<名前>` に置くので、`verify.sh` の初回はコンパイルを待つ。
+- **WebKit のルールは1リスト15万件まで、ひとつでも受け付けないルールがあるとリスト全体が落ちる。** 訳せない書き方は捨てる方へ倒し、`bundledListsCompile` のテストで同梱のリストが実際にコンパイルできるかを見張っている。例外（`ignore-previous-rules`）は同じリストで前にあるルールしか取り消せないので、例外は最後に並べる。
+- **右クリックのメニューには項目を足せない。** WebKit for SwiftUI の `webViewContextMenu` は標準の項目（コピー、調べる、Webインスペクタなど）をすべて置き換えてしまう。そのため要素を隠す操作は、ページ内のスクリプトで ⌥ 付きの右クリックだけを拾っている。子フレームの中なら `postMessage` で親へ知らせてフレームごと選ばせる。`browserctl` からは、合成した `contextmenu` 事象（`altKey: true`）と `press` で同じ流れを試せる。
 - **テストはネットワークに出さない。** HTMLは一時ファイルに書いて `file://` で開く。`data:` や検索語はアドレスの解釈に巻き込まれやすい。
 - **`file://` のページでは例外の中身が「Script error.」に潰れる。** WebKitの仕様で、http(s) のページでは普通に取れる。
 

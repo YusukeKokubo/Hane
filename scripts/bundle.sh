@@ -27,6 +27,9 @@ mkdir -p "$APP/Contents/MacOS"
 cp "$BIN_DIR/Browser" "$APP/Contents/MacOS/Browser"
 cp "$BIN_DIR/browserctl" build/browserctl
 cp Support/Info.plist "$APP/Contents/Info.plist"
+# 広告ブロックのフィルタリスト。アプリが起動時に訳してコンパイルする（中身が変わったときだけ）。
+mkdir -p "$APP/Contents/Resources/Filters"
+cp Support/Filters/*.txt "$APP/Contents/Resources/Filters/"
 
 codesign --force --sign - "$APP"
 echo "作成: $APP, build/browserctl"

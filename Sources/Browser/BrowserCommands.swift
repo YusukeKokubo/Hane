@@ -81,6 +81,26 @@ struct BrowserCommands: Commands {
                 }
             }
         }
+
+        if let blocker = store.contentBlocker {
+            CommandMenu("広告ブロック") {
+                // 選ぶ操作はページの中で拾うのでメニューからは始められないが、やり方をここで見せる。
+                Text("⌥右クリックで要素を選んで隠す")
+                Divider()
+                let site = store.selected?.url.flatMap(HiddenElementStore.site(for:))
+                let count = site.map { blocker.hidden.selectors(on: $0).count } ?? 0
+                Button(count > 0 ? "このサイトで隠した要素を元に戻す（\(count)件）" : "このサイトで隠した要素を元に戻す") {
+                    guard let site, let tab = store.selected else { return }
+                    Task {
+                        await blocker.unhideAll(on: site)
+                        tab.reload()
+                    }
+                }
+                .disabled(count == 0)
+                Divider()
+                Text(blocker.filterSummary)
+            }
+        }
     }
 
     private var hasBookmarkForSelectedPage: Bool {

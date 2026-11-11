@@ -8,7 +8,13 @@ struct BrowserApp: App {
     private let control: ControlService
 
     init() {
-        let store = TabStore(bookmarks: .forCurrentProfile(), session: .forCurrentProfile())
+        let blocker = ContentBlocker.forCurrentProfile()
+        Task { await blocker.prepare() }
+        let store = TabStore(
+            factory: PageFactory(contentBlocker: blocker),
+            bookmarks: .forCurrentProfile(),
+            session: .forCurrentProfile()
+        )
         _store = State(initialValue: store)
         control = ControlService(store: store)
         control.start()

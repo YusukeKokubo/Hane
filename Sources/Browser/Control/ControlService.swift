@@ -170,6 +170,32 @@ final class ControlService {
             store.removeBookmark(try bookmarkID(try argument(args, 0, "ブックマークの番号")))
             return describeBookmarks()
 
+        case "adblock":
+            let blocker = try contentBlocker()
+            // 起動直後はまだコンパイル中のことがあるので、準備が済むのを待ってから答える。
+            await blocker.settle()
+            return describeAdBlock(blocker)
+
+        case "hide":
+            guard !args.isEmpty else { throw ControlError("CSSセレクタがない。例: hide \".ad-banner\"") }
+            let selector = args.joined(separator: " ")
+            let blocker = try contentBlocker()
+            let tab = try target()
+            let site = try self.site(of: tab)
+            let reply = try await script(PageScripts.hide, ["selector": selector], on: tab)
+            let object = reply.data(using: .utf8).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+            if let message = object?["error"] as? String { throw ControlError(message) }
+            await blocker.hide(selector, on: site)
+            return "hid \(object?["count"] as? Int ?? 0) element(s) on \(site): \(selector)"
+
+        case "unhide":
+            let blocker = try contentBlocker()
+            let tab = try target()
+            let site = try self.site(of: tab)
+            let count = await blocker.unhideAll(on: site)
+            tab.reload()
+            return "restored \(count) selector(s) on \(site)\n" + (try await settled(tab))
+
         case "logs":
             let tab = try target()
             let entries = tab.log.entries.suffix(limit ?? 50)
@@ -271,6 +297,40 @@ final class ControlService {
             throw ControlError("読み込みに失敗: \(failure)\n" + describe(tab))
         }
         return describe(tab) + (tab.page.isLoading ? "\n（まだ読み込み中。`wait` で続きを待てる）" : "")
+    }
+
+    // MARK: 広告ブロック
+
+    private func contentBlocker() throws -> ContentBlocker {
+        guard let blocker = store.contentBlocker else { throw ControlError("広告ブロックが付いていない。") }
+        return blocker
+    }
+
+    private func site(of tab: Tab) throws -> String {
+        guard let site = tab.url.flatMap(HiddenElementStore.site(for:)) else {
+            throw ControlError("このページでは要素を隠せない（http(s) か file のページのみ）。")
+        }
+        return site
+    }
+
+    private func describeAdBlock(_ blocker: ContentBlocker) -> String {
+        var lines: [String] = []
+        switch blocker.filterState {
+        case .unavailable: lines.append("filters: unavailable（同梱のリストがない）")
+        case .preparing: lines.append("filters: preparing")
+        case .ready(let rules?, let skipped?): lines.append("filters: ready (\(rules) rules, \(skipped) skipped)")
+        case .ready: lines.append("filters: ready (compiled earlier)")
+        case .failed(let message): lines.append("filters: failed: \(message)")
+        }
+        let elements = blocker.hidden.elements
+        let sites = Set(elements.map(\.site))
+        lines.append("hidden elements: \(elements.count) on \(sites.count) site(s)")
+        if let tab = store.selected, let site = tab.url.flatMap(HiddenElementStore.site(for:)) {
+            let selectors = blocker.hidden.selectors(on: site)
+            lines.append("this site: \(site) (\(selectors.count))")
+            lines += selectors.map { "  \($0)" }
+        }
+        return lines.joined(separator: "\n")
     }
 
     /// ウインドウの枠まわり（ページの外側）が今どう見えているか。

@@ -56,6 +56,8 @@ final class TabStore: TabOpening {
         bookmarks.allBookmarks.compactMap { bookmarkTabs[$0.id] } + tabs
     }
 
+    var contentBlocker: ContentBlocker? { factory.contentBlocker }
+
     var selected: Tab? {
         guard let selectedID else { return nil }
         return tabs.first { $0.id == selectedID } ?? bookmarkTabs.values.first { $0.id == selectedID }
