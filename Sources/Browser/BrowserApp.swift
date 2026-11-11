@@ -7,9 +7,11 @@ struct BrowserApp: App {
     static let windowID = "main"
 
     @State private var store: TabStore
+    @State private var profiles: ProfileSwitcher
     private let control: ControlService
 
     init() {
+        ProfileSwitcher.handOffIfAlreadyRunning()
         let blocker = ContentBlocker.forCurrentProfile()
         Task { await blocker.prepare() }
         let store = TabStore(
@@ -18,11 +20,20 @@ struct BrowserApp: App {
             history: .forCurrentProfile(),
             session: .forCurrentProfile()
         )
+        let profiles = ProfileSwitcher.forCurrentProfile()
         _store = State(initialValue: store)
-        control = ControlService(store: store)
+        _profiles = State(initialValue: profiles)
+        control = ControlService(store: store, profiles: profiles)
         control.start()
         FolderShortcut.install(store: store)
         WindowFrameMemory.install()
+        ProfileMark.install()
+        // 別の実体で足したプロファイルをメニューに出すため、前に出るたびに一覧を読み直す（小さなファイル一つ）。
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
+        ) { _ in
+            MainActor.assumeIsolated { profiles.reload() }
+        }
         // 閲覧状態と履歴は変化から少し遅れて書き出すので、
         // 終了直前の変化を取りこぼさないよう最後にもう一度書く。
         NotificationCenter.default.addObserver(
@@ -37,7 +48,7 @@ struct BrowserApp: App {
 
     var body: some Scene {
         Window("Browser", id: Self.windowID) {
-            BrowserWindow(store: store)
+            BrowserWindow(store: store, profiles: profiles)
         }
         .windowStyle(.hiddenTitleBar)
         .windowBackgroundDragBehavior(.enabled)
@@ -46,7 +57,7 @@ struct BrowserApp: App {
         // ウインドウの状態が変わるたびに窓全体の画像を取って保存し、その写しで本体が25MBほど膨らんだまま戻らない。
         .restorationBehavior(.disabled)
         .commands {
-            BrowserCommands(store: store)
+            BrowserCommands(store: store, profiles: profiles)
         }
     }
 }
@@ -70,5 +81,22 @@ enum WindowFrameMemory {
 
     private static var name: String {
         BrowserProfile.isDefault ? "main" : "main-\(BrowserProfile.name)"
+    }
+}
+
+/// 普段使い以外のプロファイルの実体に、Dock のアイコンで見分けがつく印を付ける。
+///
+/// プロファイルごとに実体が分かれるので、Dock と ⌘Tab には同じアイコンが並ぶ。
+@MainActor
+enum ProfileMark {
+    static func install() {
+        guard !BrowserProfile.isDefault else { return }
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.didFinishLaunchingNotification, object: nil, queue: .main
+        ) { _ in
+            MainActor.assumeIsolated {
+                NSApp.dockTile.badgeLabel = BrowserProfile.name
+            }
+        }
     }
 }

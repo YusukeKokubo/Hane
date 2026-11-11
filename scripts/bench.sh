@@ -26,6 +26,8 @@ case "${BROWSER_PROFILE:-}" in
     ""|default) export BROWSER_PROFILE=bench ;;
     *) export BROWSER_PROFILE ;;
 esac
+# 登録したプロファイルの名前を渡されても、持ち主のそのプロファイルには触らない。
+export BROWSER_EPHEMERAL=1
 SECONDS_PER_PHASE="${BENCH_SECONDS:-10}"
 SETTLE="${BENCH_SETTLE:-15}"
 NAVIGATE_SECONDS="${BENCH_NAVIGATE:-6}"

@@ -1,3 +1,4 @@
+import ControlWire
 import SwiftUI
 import WebKit
 
@@ -7,8 +8,10 @@ import WebKit
 /// 一覧を上に置いて「選んだものの中身」が下へ続くように並べる。
 struct BrowserWindow: View {
     let store: TabStore
+    @Bindable var profiles: ProfileSwitcher
 
     @Environment(\.dismissWindow) private var dismissWindow
+    @State private var newProfileName = ""
 
     /// 左上の信号機ボタンを避けるための余白。
     private static let windowControlsWidth: CGFloat = 78
@@ -18,9 +21,14 @@ struct BrowserWindow: View {
     var body: some View {
         VStack(spacing: 0) {
             // タイトルバーを兼ねる。
-            TabBar(store: store) { id in
-                if !store.close(id) {
-                    dismissWindow(id: BrowserApp.windowID)
+            HStack(spacing: 0) {
+                if !BrowserProfile.isDefault {
+                    ProfileLabel(name: BrowserProfile.name)
+                }
+                TabBar(store: store) { id in
+                    if !store.close(id) {
+                        dismissWindow(id: BrowserApp.windowID)
+                    }
                 }
             }
             .padding(.leading, Self.windowControlsWidth)
@@ -38,7 +46,37 @@ struct BrowserWindow: View {
         }
         .frame(minWidth: 480, minHeight: 320)
         .ignoresSafeArea(edges: .top)
-        .navigationTitle(store.selected?.title ?? "Browser")
+        .navigationTitle((store.selected?.title ?? "Browser") + (BrowserProfile.isDefault ? "" : " — \(BrowserProfile.name)"))
+        .alert("新しいプロファイル", isPresented: $profiles.isCreating) {
+            TextField("名前（例: 仕事）", text: $newProfileName)
+            Button("作成して開く") {
+                profiles.createAndOpen(newProfileName)
+                newProfileName = ""
+            }
+            Button("キャンセル", role: .cancel) { newProfileName = "" }
+        } message: {
+            Text("Cookie、ブックマーク、閲覧履歴、開いているタブをほかのプロファイルと分けて持ちます。別の窓で開きます。")
+        }
+        .alert("プロファイル", isPresented: Binding(get: { profiles.failure != nil }, set: { if !$0 { profiles.failure = nil } })) {
+            Button("OK") {}
+        } message: {
+            Text(profiles.failure ?? "")
+        }
+    }
+}
+
+/// どのプロファイルの窓かを、タブバーの左端に出す。普段使いでは出さない。
+private struct ProfileLabel: View {
+    let name: String
+
+    var body: some View {
+        Label(name, systemImage: "person.crop.circle")
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .fixedSize()
+            .padding(.leading, 6)
+            .accessibilityIdentifier("profile")
     }
 }
 

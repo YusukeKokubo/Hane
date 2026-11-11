@@ -36,9 +36,8 @@ final class HiddenElementStore {
     }
 
     static func forCurrentProfile() -> HiddenElementStore {
-        guard BrowserProfile.isDefault else { return HiddenElementStore() }
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        return HiddenElementStore(fileURL: base.appending(path: "Browser/hidden-elements.json"))
+        guard let directory = BrowserProfile.dataDirectory else { return HiddenElementStore() }
+        return HiddenElementStore(fileURL: directory.appending(path: "hidden-elements.json"))
     }
 
     /// ページのアドレスから、隠す範囲になるサイトを決める。

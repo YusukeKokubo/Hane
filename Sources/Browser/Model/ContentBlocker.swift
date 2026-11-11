@@ -47,6 +47,8 @@ final class ContentBlocker: NSObject, WKScriptMessageHandler {
 
     /// 普段使いのプロファイルは WebKit の既定の置き場を使う。それ以外は置き場を分け、
     /// 開発用の実体が普段使いのコンパイル結果を古いものとして消さないようにする。
+    /// 隠した要素のルールもここに置くので、プロファイルどうしでも分ける。登録したプロファイルは名前でなく
+    /// サイトデータの識別子で分け、同じ名前の使い捨ての実体（開発用の実体から起こしたもの）と混ざらないようにする。
     static func forCurrentProfile() -> ContentBlocker {
         let directory = Bundle.main.resourceURL?.appending(path: "Filters")
         let files = (directory.flatMap { try? FileManager.default.contentsOfDirectory(at: $0, includingPropertiesForKeys: nil) } ?? [])
@@ -57,7 +59,8 @@ final class ContentBlocker: NSObject, WKScriptMessageHandler {
             store = .default()
         } else {
             let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-            store = WKContentRuleListStore(url: caches.appending(path: "Browser/profiles/\(BrowserProfile.name)/ContentRuleLists")) ?? .default()
+            let folder = BrowserProfile.entry?.dataStore.uuidString ?? BrowserProfile.name
+            store = WKContentRuleListStore(url: caches.appending(path: "Browser/profiles/\(folder)/ContentRuleLists")) ?? .default()
         }
         return ContentBlocker(store: store, filterFiles: files, hidden: .forCurrentProfile())
     }

@@ -10,10 +10,17 @@ import WebKit
 @MainActor
 struct PageFactory {
     /// 全タブで共有するサイトデータ（Cookieやキャッシュ）の保存先。
-    /// 普段使い以外のプロファイルでは、終了時に消える使い捨てにする。
-    var dataStore: WKWebsiteDataStore = BrowserProfile.isDefault ? .default() : .nonPersistent()
+    var dataStore: WKWebsiteDataStore = Self.currentProfileDataStore()
     /// 広告ブロック。テストでは付けない。
     var contentBlocker: ContentBlocker?
+
+    /// 普段使いは WebKit の既定の置き場、登録したプロファイルはその識別子の置き場を使う。
+    /// 使い捨てのプロファイルでは、終了時に消えるものにする。
+    static func currentProfileDataStore() -> WKWebsiteDataStore {
+        if BrowserProfile.isDefault { return .default() }
+        if let entry = BrowserProfile.entry { return WKWebsiteDataStore(forIdentifier: entry.dataStore) }
+        return .nonPersistent()
+    }
 
     func makeConfiguration(log: PageLog) -> WebPage.Configuration {
         var configuration = WebPage.Configuration()

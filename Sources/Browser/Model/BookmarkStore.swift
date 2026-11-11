@@ -74,11 +74,10 @@ final class BookmarkStore {
         }
     }
 
-    /// 普段使いのプロファイルなら保存し、それ以外は使い捨てにする。
+    /// 保存するプロファイルならその置き場に保存し、使い捨てのプロファイルでは何も残さない。
     static func forCurrentProfile() -> BookmarkStore {
-        guard BrowserProfile.isDefault else { return BookmarkStore() }
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        return BookmarkStore(fileURL: base.appending(path: "Browser/bookmarks.json"))
+        guard let directory = BrowserProfile.dataDirectory else { return BookmarkStore() }
+        return BookmarkStore(fileURL: directory.appending(path: "bookmarks.json"))
     }
 
     // MARK: 調べる

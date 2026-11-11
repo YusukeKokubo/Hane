@@ -9,6 +9,7 @@ import WebKit
 @MainActor
 final class ControlService {
     private let store: TabStore
+    private let profiles: ProfileSwitcher
     /// 要素の控えを置く実行環境。ページ自身のスクリプトからは見えない。
     private let world = WKContentWorld.world(name: "browserctl")
     /// `ui-snapshot` で振った番号と、窓まわりの部品の対応。
@@ -18,8 +19,9 @@ final class ControlService {
 
     private static let loadTimeout: Duration = .seconds(30)
 
-    init(store: TabStore) {
+    init(store: TabStore, profiles: ProfileSwitcher = ProfileSwitcher(registryURL: nil)) {
         self.store = store
+        self.profiles = profiles
     }
 
     func start() {
@@ -302,6 +304,35 @@ final class ControlService {
                 + "\ntabs: \(tabs.total)（うちページあり \(tabs.withContent)、ブックマークのページ \(tabs.bookmarkPages)）"
                 + (isStaleBuild ? "\n" + describeBuild() : "")
 
+        case "pid":
+            return "pid \(getpid())"
+
+        case "activate":
+            // 最小化していれば戻す。前に出られるかはシステムが決めるので、呼ぶ側が先に譲っておくこと。
+            if let window = NSApp.windows.first(where: \.canBecomeMain) {
+                window.deminiaturize(nil)
+                window.makeKeyAndOrderFront(nil)
+            }
+            NSApp.activate()
+            return "activated pid \(getpid())"
+
+        case "profiles":
+            profiles.reload()
+            return await describeProfiles()
+
+        case "profile-new":
+            let name = try profiles.create(try argument(args, 0, "プロファイルの名前"))
+            return "created \(name)\n" + (await describeProfiles())
+
+        case "profile-open":
+            let name = try argument(args, 0, "プロファイルの名前")
+            profiles.reload()
+            switch try await profiles.switchTo(name) {
+            case .alreadyHere: return "already here: \(name)"
+            case .activated(let pid): return "already running: \(name) (pid \(pid))"
+            case .launched(let pid): return "launched: \(name) (pid \(pid))"
+            }
+
         case "quit":
             // 応答を返し終えてから終了する。
             Task {
@@ -472,6 +503,21 @@ final class ControlService {
             let selectors = blocker.hidden.selectors(on: site)
             lines.append("this site: \(site) (\(selectors.count))")
             lines += selectors.map { "  \($0)" }
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    /// プロファイルの一覧。この実体のものに * を付け、起動しているものには pid を添える。
+    private func describeProfiles() async -> String {
+        var lines = ["this instance: \(profiles.current) (" + (BrowserProfile.isPersistent ? "保存する" : "使い捨て") + ")"]
+        for name in profiles.names {
+            let pid = name == profiles.current ? getpid() : await ProfileSwitcher.pid(at: ControlSocket.path(for: name), activating: false)
+            lines.append((name == profiles.current ? "* " : "  ") + ProfileSwitcher.title(for: name)
+                + (name == BrowserProfile.defaultName ? " (default)" : "")
+                + (pid.map { " — running, pid \($0)" } ?? ""))
+        }
+        if !profiles.isPersistent {
+            lines.append("（使い捨ての実体なので、登録した一覧は見せない。作ったものはこの実体の中だけで、起こす実体も使い捨て）")
         }
         return lines.joined(separator: "\n")
     }

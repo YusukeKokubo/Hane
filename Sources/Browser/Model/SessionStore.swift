@@ -32,11 +32,10 @@ final class SessionStore {
         self.fileURL = fileURL
     }
 
-    /// 普段使いのプロファイルなら保存し、それ以外は使い捨てにする。
+    /// 保存するプロファイルならその置き場に保存し、使い捨てのプロファイルでは何も残さない。
     static func forCurrentProfile() -> SessionStore {
-        guard BrowserProfile.isDefault else { return SessionStore() }
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        return SessionStore(fileURL: base.appending(path: "Browser/session.json"))
+        guard let directory = BrowserProfile.dataDirectory else { return SessionStore() }
+        return SessionStore(fileURL: directory.appending(path: "session.json"))
     }
 
     var isPersistent: Bool { fileURL != nil }

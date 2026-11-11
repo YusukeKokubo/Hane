@@ -4,6 +4,7 @@ import SwiftUI
 /// メニューとキーボードショートカット。
 struct BrowserCommands: Commands {
     let store: TabStore
+    let profiles: ProfileSwitcher
 
     @Environment(\.dismissWindow) private var dismissWindow
 
@@ -80,6 +81,20 @@ struct BrowserCommands: Commands {
                     }
                 }
             }
+        }
+
+        // 選ぶと、そのプロファイルの窓へ移る（起動していなければ起こす）。この窓の中身は入れ替えない。
+        // 項目は後から増えるので、ショートカットは付けない（メニューを開くまで効かないため）。
+        CommandMenu("プロファイル") {
+            Picker("プロファイル", selection: Binding(get: { profiles.current }, set: { profiles.open($0) })) {
+                ForEach(profiles.names, id: \.self) { name in
+                    Text(ProfileSwitcher.title(for: name)).tag(name)
+                }
+            }
+            .pickerStyle(.inline)
+            .labelsHidden()
+            Divider()
+            Button("新しいプロファイル…") { profiles.isCreating = true }
         }
 
         if let blocker = store.contentBlocker {

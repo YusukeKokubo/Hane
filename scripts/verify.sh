@@ -13,6 +13,8 @@ case "${BROWSER_PROFILE:-}" in
     ""|default) export BROWSER_PROFILE=dev ;;
     *) export BROWSER_PROFILE ;;
 esac
+# 登録したプロファイルの名前を渡されても、持ち主のそのプロファイルには触らない。
+export BROWSER_EPHEMERAL=1
 CTL="$ROOT/build/browserctl"
 FIXTURES="file://$ROOT/Tests/Fixtures"
 
@@ -33,9 +35,11 @@ sleep 2
 
 failures=0
 # expect <説明> <含まれるはずの文字列> <命令…>
+# TARGET にプロファイルの名前を入れておくと、その実体へ送る。
+TARGET=""
 expect() {
     label="$1"; wanted="$2"; shift 2
-    output="$("$CTL" "$@" 2>&1)" || true
+    output="$(BROWSER_PROFILE="${TARGET:-$BROWSER_PROFILE}" "$CTL" "$@" 2>&1)" || true
     if printf '%s' "$output" | grep -qF -- "$wanted"; then
         echo "  ok   $label"
     else
@@ -167,6 +171,19 @@ expect "ページのプロセスにタブの番号が付く" '"tabs" : [' stats 
 # 窓の枠はプロファイルごとの名前で覚える。普段使いの窓の位置を動かさないため。
 expect "窓の中身を撮る" 'appearance:' window-screenshot "${TMPDIR:-/tmp}/browser-verify-window.png"
 expect "窓の枠を覚える" "remembered as \"main-${BROWSER_PROFILE}\"" ui
+
+# 別のプロファイルは別の実体になる。使い捨ての実体からは、起こす実体も使い捨てで裏に起こす。
+CHILD="${BROWSER_PROFILE}-child"
+expect "使い捨ての実体は登録した一覧を見せない" "* ${BROWSER_PROFILE}" profiles
+expect "プロファイルを作る" "  ${CHILD}" profile-new "$CHILD"
+expect "別のプロファイルの実体を起こす" "launched: ${CHILD}" profile-open "$CHILD"
+expect "起こした実体は応答する" "already running: ${CHILD}" profile-open "$CHILD"
+TARGET="$CHILD"
+expect "起こした実体のプロファイル" "profile: ${CHILD}" ui
+expect "起こした実体も使い捨て" "${CHILD} (使い捨て)" profiles
+expect "別の実体のタブは混ざらない" 'tabs (left to right):' ui
+expect "起こした実体を止める" 'quitting pid' quit
+TARGET=""
 
 echo "== 資源"
 "$CTL" stats

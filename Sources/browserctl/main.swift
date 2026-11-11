@@ -16,55 +16,27 @@ func siblingApp() -> String? {
     return FileManager.default.fileExists(atPath: path) ? path : nil
 }
 
-/// 実行ファイルを直に、このコマンドとは別のセッションで起こす。環境変数（プロファイル）はそのまま引き継ぐ。
-///
-/// `open` で頼むと前に出て、確かめるたびに持ち主の作業を遮る。`open -g` で裏に起こすと SwiftUI が窓を作らない。
-/// 直に起こせば窓は出て、前には出ない。別のセッションにするのは、呼んだシェルが閉じても巻き添えで止まらないため。
-func spawnDetached(_ executable: String) -> Bool {
-    var attributes: posix_spawnattr_t?
-    posix_spawnattr_init(&attributes)
-    defer { posix_spawnattr_destroy(&attributes) }
-    posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_SETSID))
-    // 起こしたアプリを、端末ではなく自分自身の責任にする。そうしないと端末から起こした実体どうしで
-    // WebKit の補助プロセスの持ち主が同じ端末になり、stats が別の実体のプロセスまで数えてしまう。
-    // 関数は公開されていないので実行時に探し、なければそのまま起こす。
-    if let symbol = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "responsibility_spawnattrs_setdisclaim") {
-        let disclaim = unsafeBitCast(symbol, to: (@convention(c) (UnsafeMutablePointer<posix_spawnattr_t?>, Int32) -> Int32).self)
-        _ = disclaim(&attributes, 1)
-    }
-    var actions: posix_spawn_file_actions_t?
-    posix_spawn_file_actions_init(&actions)
-    defer { posix_spawn_file_actions_destroy(&actions) }
-    posix_spawn_file_actions_addopen(&actions, 0, "/dev/null", O_RDONLY, 0)
-    posix_spawn_file_actions_addopen(&actions, 1, "/dev/null", O_WRONLY, 0)
-    posix_spawn_file_actions_addopen(&actions, 2, "/dev/null", O_WRONLY, 0)
-
-    let argv: [UnsafeMutablePointer<CChar>?] = [strdup(executable), nil]
-    defer { argv.forEach { free($0) } }
-    var pid: pid_t = 0
-    return posix_spawn(&pid, executable, &actions, &attributes, argv, environ) == 0
-}
-
 /// アプリに接続する。起動していなければ起動して、待ち受けが始まるまで待つ。
 func connectLaunchingIfNeeded() -> Int32 {
     if let fd = ControlSocket.connect(to: ControlSocket.path) { return fd }
 
-    // 普段使い以外のプロファイルは、起動済みの実体とは別にもう一つ立ち上げる。
-    // バンドルIDで頼むと Launch Services は ~/Applications に入れてある版を選ぶので、
-    // 隣に作り直したアプリがあればそちらを起こす。でないと古い版を確かめたり測ったりしてしまう。
+    // 使い捨てのプロファイル（dev など）は、隣に作り直したアプリを起こす。バンドルIDで頼むと
+    // Launch Services は ~/Applications に入れてある版を選ぶので、古い版を確かめたり測ったりしてしまう。
+    // 保存するプロファイルは持ち主の普段使いなので、入れてある版を起こす。別のプロファイルの実体が
+    // 動いていると、-n を付けなければそちらを前に出すだけで終わる。
     // BROWSER_LAUNCH=front なら前に出して起こす。bench.sh が、前面での計測を前の結果と比べられるよう使う。
     let front = ProcessInfo.processInfo.environment["BROWSER_LAUNCH"] == "front"
     let launched: Bool
-    if !BrowserProfile.isDefault, !front, let app = siblingApp() {
+    if !BrowserProfile.isPersistent, !front, let app = siblingApp() {
         launched = spawnDetached(app + "/Contents/MacOS/Browser")
     } else {
         let launcher = Process()
         launcher.executableURL = URL(filePath: "/usr/bin/open")
-        let target = BrowserProfile.isDefault
-            ? ["-b", ControlSocket.bundleIdentifier]
-            : siblingApp().map { ["-n", $0] } ?? ["-n", "-b", ControlSocket.bundleIdentifier]
-        launcher.arguments = target
-            + (BrowserProfile.isDefault ? [] : ["--env", "\(BrowserProfile.environmentKey)=\(BrowserProfile.name)"])
+        let target = !BrowserProfile.isPersistent
+            ? siblingApp().map { ["-n", $0] } ?? ["-n", "-b", ControlSocket.bundleIdentifier]
+            : ["-n", "-b", ControlSocket.bundleIdentifier]
+        launcher.arguments = target + ["--env", "\(BrowserProfile.environmentKey)=\(BrowserProfile.name)"]
+            + (BrowserProfile.isPersistent ? [] : ["--env", "\(BrowserProfile.ephemeralKey)=1"])
         launcher.standardError = FileHandle.nullDevice
         try? launcher.run()
         launcher.waitUntilExit()

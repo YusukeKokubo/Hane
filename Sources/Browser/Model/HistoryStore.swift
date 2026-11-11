@@ -46,11 +46,10 @@ final class HistoryStore {
         }
     }
 
-    /// 普段使いのプロファイルなら保存し、それ以外は使い捨てにする。
+    /// 保存するプロファイルならその置き場に保存し、使い捨てのプロファイルでは何も残さない。
     static func forCurrentProfile() -> HistoryStore {
-        guard BrowserProfile.isDefault else { return HistoryStore() }
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        return HistoryStore(fileURL: base.appending(path: "Browser/history.json"))
+        guard let directory = BrowserProfile.dataDirectory else { return HistoryStore() }
+        return HistoryStore(fileURL: directory.appending(path: "history.json"))
     }
 
     // MARK: 記録する
