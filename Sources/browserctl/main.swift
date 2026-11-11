@@ -8,6 +8,14 @@ func fail(_ message: String) -> Never {
     exit(1)
 }
 
+/// このコマンドと同じ場所にある Browser.app（`scripts/bundle.sh` が build/ に並べて置く）。
+func siblingApp() -> String? {
+    guard let executable = Bundle.main.executableURL?.resolvingSymlinksInPath() else { return nil }
+    let app = executable.deletingLastPathComponent().appending(path: "Browser.app")
+    let path = app.path(percentEncoded: false)
+    return FileManager.default.fileExists(atPath: path) ? path : nil
+}
+
 /// アプリに接続する。起動していなければ起動して、待ち受けが始まるまで待つ。
 func connectLaunchingIfNeeded() -> Int32 {
     if let fd = ControlSocket.connect(to: ControlSocket.path) { return fd }
@@ -15,10 +23,14 @@ func connectLaunchingIfNeeded() -> Int32 {
     let launcher = Process()
     launcher.executableURL = URL(filePath: "/usr/bin/open")
     // 普段使い以外のプロファイルは、起動済みの実体とは別にもう一つ立ち上げる。
-    launcher.arguments = BrowserProfile.isDefault
-        ? ["-b", ControlSocket.bundleIdentifier]
-        : ["-n", "-b", ControlSocket.bundleIdentifier,
-           "--env", "\(BrowserProfile.environmentKey)=\(BrowserProfile.name)"]
+    // バンドルIDで頼むと Launch Services は ~/Applications に入れてある版を選ぶので、
+    // 隣に作り直したアプリがあればそちらを起こす。でないと古い版を確かめたり測ったりしてしまう。
+    if BrowserProfile.isDefault {
+        launcher.arguments = ["-b", ControlSocket.bundleIdentifier]
+    } else {
+        let target = siblingApp().map { ["-n", $0] } ?? ["-n", "-b", ControlSocket.bundleIdentifier]
+        launcher.arguments = target + ["--env", "\(BrowserProfile.environmentKey)=\(BrowserProfile.name)"]
+    }
     launcher.standardError = FileHandle.nullDevice
     try? launcher.run()
     launcher.waitUntilExit()

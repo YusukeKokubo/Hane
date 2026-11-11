@@ -15,7 +15,10 @@ final class TabStore: TabOpening {
     private(set) var bookmarkTabs: [UUID: Tab] = [:]
     var selectedID: Tab.ID? {
         // 前回の閲覧から戻しただけのページは、選ばれたここで初めて読み込む。
-        didSet { selected?.loadRestoredPage() }
+        didSet {
+            Signposts.poster.emitEvent("タブの選択")
+            selected?.loadRestoredPage()
+        }
     }
 
     let bookmarks: BookmarkStore

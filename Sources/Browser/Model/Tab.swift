@@ -2,6 +2,7 @@ import Foundation
 import Observation
 import SwiftUI
 import WebKit
+import os
 
 /// タブ1枚ぶんの状態。`WebPage` を1つだけ所有する。
 ///
@@ -34,6 +35,8 @@ final class Tab: Identifiable {
     /// 次に確定する読み込みが、アドレスバーで確定して始めたものか。履歴で「打って訪れた」と数える。
     @ObservationIgnored private var typedNavigationPending = false
     @ObservationIgnored private var monitor: Task<Void, Never>?
+    /// 読み込み中の区間の印。Instruments で読み込みの始まりと終わりを見るため。
+    @ObservationIgnored private var loadSignpost: OSSignpostIntervalState?
 
     init(
         number: Int,
@@ -151,18 +154,22 @@ final class Tab: Identifiable {
         switch update {
         case .started:
             failure = nil
+            endLoadSignpost()
+            loadSignpost = Signposts.poster.beginInterval("ページの読み込み", id: Signposts.poster.makeSignpostID())
         case .committed:
             if let url = page.url {
                 history.recordVisit(to: url, typed: typedNavigationPending)
             }
             typedNavigationPending = false
         case .finished:
+            endLoadSignpost()
             if let url = page.url {
                 history.setTitle(page.title, for: url)
             }
         case .failed(let message):
             // 打ったアドレスが開けなかったときに、次のリンクの移動を打ったものと数えないように。
             typedNavigationPending = false
+            endLoadSignpost()
             if let message {
                 failure = message
                 log.append(level: "navigation", message: message)
@@ -179,7 +186,14 @@ final class Tab: Identifiable {
     func tearDown() {
         monitor?.cancel()
         monitor = nil
+        endLoadSignpost()
         page.stopLoading()
+    }
+
+    private func endLoadSignpost() {
+        guard let loadSignpost else { return }
+        Signposts.poster.endInterval("ページの読み込み", loadSignpost)
+        self.loadSignpost = nil
     }
 
     // MARK: 読み込み結果の監視

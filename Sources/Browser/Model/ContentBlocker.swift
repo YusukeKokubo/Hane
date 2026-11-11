@@ -121,6 +121,8 @@ final class ContentBlocker: NSObject, WKScriptMessageHandler {
             return
         }
         filterState = .preparing
+        let signpost = Signposts.poster.beginInterval("フィルタリストの準備")
+        defer { Signposts.poster.endInterval("フィルタリストの準備", signpost) }
         do {
             let files = filterFiles
             let identifier = try await Task.detached(priority: .utility) { try Self.identifier(for: files) }.value

@@ -233,6 +233,22 @@ import Testing
         #expect(response.ok)
         #expect(response.output.contains("Browser (app)"))
         #expect(response.output.contains("total"))
+        #expect(response.output.contains("wakeups/s"))
+    }
+
+    @Test func statsCanBeReadByMachines() async throws {
+        let response = await run("stats", "--seconds", "0.2", "--json")
+        #expect(response.ok)
+        let object = try #require(try JSONSerialization.jsonObject(with: Data(response.output.utf8)) as? [String: Any])
+        let report = try #require(object["report"] as? [String: Any])
+        #expect((report["seconds"] as? Double ?? 0) >= 0.2)
+        #expect(report["total"] is [String: Any])
+        #expect(object["tabs"] is [String: Any])
+    }
+
+    @Test func statsRejectsTooLongMeasurements() async {
+        let response = await run("stats", "--seconds", "600")
+        #expect(!response.ok)
     }
 
     @Test func snapshotLimitIsReported() async throws {

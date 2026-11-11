@@ -108,8 +108,10 @@ final class HistoryStore {
         guard let fileURL else { return }
         do {
             try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-            let file = SavedFile(entries: entries.values.sorted { $0.lastVisit > $1.lastVisit })
-            try JSONEncoder().encode(file).write(to: fileURL, options: .atomic)
+            try Signposts.interval("閲覧履歴の書き出し") {
+                let file = SavedFile(entries: entries.values.sorted { $0.lastVisit > $1.lastVisit })
+                try JSONEncoder().encode(file).write(to: fileURL, options: .atomic)
+            }
         } catch {
             NSLog("閲覧履歴を保存できませんでした: \(error)")
         }

@@ -220,9 +220,24 @@ final class ControlService {
             return describe(tab) + "\n" + listing
 
         case "stats":
+            let seconds = try takeOption("--seconds", from: &args).map { text in
+                guard let value = Double(text), (0.1...60).contains(value) else {
+                    throw ControlError("--seconds は 0.1〜60 の数で指定すること: \(text)")
+                }
+                return value
+            } ?? 0.5
+            let json = takeFlag("--json", from: &args)
+            let report = await ProcessStats.measure(for: .milliseconds(Int(seconds * 1000)))
             let all = store.allTabs
-            return await ProcessStats.report()
-                + "\ntabs: \(all.count)（うちページあり \(all.count { $0.hasContent })、ブックマークのページ \(store.bookmarkTabs.count)）"
+            let tabs = StatsTabs(total: all.count, withContent: all.count { $0.hasContent }, bookmarkPages: store.bookmarkTabs.count)
+            if json {
+                let encoder = JSONEncoder()
+                encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+                let data = try encoder.encode(StatsOutput(report: report, tabs: tabs))
+                return String(decoding: data, as: UTF8.self)
+            }
+            return ProcessStats.table(report)
+                + "\ntabs: \(tabs.total)（うちページあり \(tabs.withContent)、ブックマークのページ \(tabs.bookmarkPages)）"
 
         case "quit":
             // 応答を返し終えてから終了する。
@@ -586,4 +601,16 @@ struct ControlError: Error {
     init(_ message: String) {
         self.message = message
     }
+}
+
+/// `stats --json` の出力。前後の計測を機械で引き比べるため。
+private struct StatsOutput: Encodable {
+    let report: ProcessStats.Report
+    let tabs: StatsTabs
+}
+
+private struct StatsTabs: Encodable {
+    let total: Int
+    let withContent: Int
+    let bookmarkPages: Int
 }

@@ -61,9 +61,11 @@ final class SessionStore {
         guard let fileURL, session != lastSaved else { return }
         do {
             try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
-            try encoder.encode(session).write(to: fileURL, options: .atomic)
+            try Signposts.interval("閲覧状態の書き出し") {
+                let encoder = JSONEncoder()
+                encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+                try encoder.encode(session).write(to: fileURL, options: .atomic)
+            }
             lastSaved = session
         } catch {
             NSLog("閲覧状態を保存できませんでした: \(error)")
