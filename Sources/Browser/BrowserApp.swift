@@ -25,8 +25,7 @@ struct BrowserApp: App {
         _profiles = State(initialValue: profiles)
         control = ControlService(store: store, profiles: profiles)
         control.start()
-        FolderShortcut.install(store: store)
-        ProfileShortcut.install(profiles: profiles)
+        LocalShortcuts.install(store: store, profiles: profiles)
         WindowFrameMemory.install()
         ProfileMark.install()
         // 別の実体で足したプロファイルをメニューに出すため、前に出るたびに一覧を読み直す（小さなファイル一つ）。

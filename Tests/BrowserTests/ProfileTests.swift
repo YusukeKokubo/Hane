@@ -78,19 +78,30 @@ import Testing
         await #expect(throws: ProfileError.self) { try await switcher.switchTo("ない") }
     }
 
-    /// ⌥⌘N だけを拾い、並んでいない番号やほかの修飾キーはページなど本来の受け手へ流す。
-    @Test func shortcutPicksProfileByPosition() throws {
+    /// ⌃N と ⌃Tab だけを拾い、並んでいない番号やほかの修飾キーはページなど本来の受け手へ流す。
+    @Test func localShortcuts() throws {
         let switcher = ProfileSwitcher(current: "dev", registryURL: nil)
         _ = try switcher.create("仕事")
-        func key(_ number: Int, _ modifiers: NSEvent.ModifierFlags) -> NSEvent {
+        let store = TabStore(factory: PageFactory(dataStore: .nonPersistent()))
+        let first = store.tabs[0]
+        let second = store.newTab()
+        func key(_ characters: String, _ modifiers: NSEvent.ModifierFlags, keyCode: UInt16 = 0) -> NSEvent {
             NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: modifiers, timestamp: 0, windowNumber: 0,
-                             context: nil, characters: "\(number)", charactersIgnoringModifiers: "\(number)",
-                             isARepeat: false, keyCode: 0)!
+                             context: nil, characters: characters, charactersIgnoringModifiers: characters,
+                             isARepeat: false, keyCode: keyCode)!
         }
-        #expect(ProfileShortcut.handle(key(1, [.command, .option]), profiles: switcher), "1 番目はこの実体（移らない）")
-        #expect(!ProfileShortcut.handle(key(3, [.command, .option]), profiles: switcher))
-        #expect(!ProfileShortcut.handle(key(2, .command), profiles: switcher), "⌘2 はタブの切り替え")
-        #expect(!ProfileShortcut.handle(key(2, [.command, .option, .shift]), profiles: switcher))
+        func handle(_ event: NSEvent) -> Bool { LocalShortcuts.handle(event, store: store, profiles: switcher) }
+
+        #expect(handle(key("1", .control)), "1 番目はこの実体（移らない）")
+        #expect(!handle(key("3", .control)))
+        #expect(!handle(key("2", .command)), "⌘2 はメニューのバーの項目")
+        #expect(!handle(key("2", [.command, .option])), "⌥⌘数字はページの見出しなどに残す")
+
+        #expect(handle(key("\t", .control, keyCode: 48)))
+        #expect(store.selectedID == first.id, "最後のタブの次は最初へ巡る")
+        #expect(handle(key("\t", [.control, .shift], keyCode: 48)))
+        #expect(store.selectedID == second.id)
+        #expect(!handle(key("\t", [], keyCode: 48)), "Tab だけはページの入力欄へ")
     }
 
     @Test func profileCommands() async {

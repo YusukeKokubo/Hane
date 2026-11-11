@@ -144,7 +144,7 @@ import Testing
         store.bookmarks.add(title: "B", url: URL(string: "about:blank")!, folder: folder.id)
         #expect(await !run("ui").output.contains("folder list"))
 
-        store.toggleFolder(number: 1)
+        store.toggleFolder(folder.id)
         store.moveFolderHighlight(by: 1)
         #expect(await run("ui").output.contains("folder list: 仕事 [1 A] [>2 B]"))
 

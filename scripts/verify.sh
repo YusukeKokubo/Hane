@@ -81,10 +81,13 @@ expect "ページを開いたブックマークの表示" '[*Second (open)]' ui
 expect "消したブックマークのページはタブに残る" 'ブックマークのページ 1' stats
 expect "残ったページは普通のタブ" 'Second — file' tabs
 "$CTL" bookmark-add "$FIXTURES/second.html" --name 二番 --folder 試験 >/dev/null
-expect "⌃1でフォルダの一覧を開く" 'folder list: 試験 [>1 Smoke] [2 二番]' key ctrl+1
+# ⌘1〜8 はバーの左から数える。ここではバーの1番目がフォルダ、2番目が最初の普通のタブ。
+expect "⌘1でバーの1番目のフォルダの一覧を開く" 'folder list: 試験 [>1 Smoke] [2 二番]' key cmd+1
 expect "↓で次の行を選ぶ" 'folder list: 試験 [1 Smoke] [>2 二番]' key down
 expect "Returnで選んだ行を開く" '[*試験 › 二番 ▾]' key return
-expect "⌘1で最初の普通のタブ" 'window title: Second' key cmd+1
+expect "⌘2でフォルダの次の最初の普通のタブ" 'window title: Second' key cmd+2
+expect "⌃Tabで次のタブ（最後からは最初のブックマークのページへ巡る）" 'window title: Smoke' key ctrl+tab
+expect "⌃⇧Tabで前のタブ" 'window title: Second' key ctrl+shift+tab
 "$CTL" new >/dev/null
 "$CTL" type "$FIXTURES/second.html" >/dev/null
 expect "アドレスバーに打って開く" 'window title: Second' key return
@@ -124,7 +127,7 @@ expect "メニューから編集のポップオーバーを出す" 'overlay: pop
 "$CTL" type --replace 四番 >/dev/null
 expect "選択欄でフォルダを選ぶ" 'chose "試験"' ui-menu 'popup:なし（いちばん上）' 試験
 expect "Returnで編集を終える" 'bookmarks bar: [試験 ▾]' key return
-expect "名前とフォルダが変わる" 'folder list: 試験 [>1 Smoke] [2 二番] [3 四番]' key ctrl+1
+expect "名前とフォルダが変わる" 'folder list: 試験 [>1 Smoke] [2 二番] [3 四番]' key cmd+1
 "$CTL" ui-menu bookmark:四番 名前とフォルダを編集… >/dev/null
 expect "一覧の行から開いた編集欄（ポップオーバーの上に重なる）も一覧に出る" 'textfield "名前" value="四番"' ui-snapshot
 "$CTL" key escape >/dev/null
@@ -142,7 +145,7 @@ expect "固定した外観で撮る" 'appearance: light' window-screenshot "${TM
 # 資源の数字を前と比べられるよう、ここで開いたタブを閉じて元の並びに戻す。
 "$CTL" close >/dev/null
 "$CTL" close >/dev/null
-"$CTL" key cmd+1 >/dev/null
+"$CTL" key cmd+2 >/dev/null
 # 広告ブロック。初回はフィルタリストのコンパイルを待つので時間がかかる。
 expect "フィルタリストの準備" 'filters: ready' adblock
 expect "広告のページを開く" 'Ads' open "$FIXTURES/ads.html"
@@ -185,12 +188,12 @@ expect "別の実体のタブは混ざらない" 'tabs (left to right):' ui
 expect "起こした実体を止める" 'quitting pid' quit
 TARGET=""
 sleep 1
-"$CTL" key cmd+opt+2 >/dev/null
+"$CTL" key ctrl+2 >/dev/null
 for _ in 1 2 3 4 5 6 7 8 9 10; do
     "$CTL" profiles | grep -qF "${CHILD} — running" && break
     sleep 1
 done
-expect "⌥⌘2で2番目のプロファイルへ移る" "${CHILD} — running" profiles
+expect "⌃2で2番目のプロファイルへ移る" "${CHILD} — running" profiles
 TARGET="$CHILD"
 expect "キーで起こした実体を止める" 'quitting pid' quit
 TARGET=""

@@ -634,8 +634,7 @@ final class ControlService {
             isARepeat: false, keyCode: keyCode
         ) else { throw ControlError("キーの事象を作れない: \(spec)") }
 
-        if FolderShortcut.handle(event, store: store) { return }
-        if ProfileShortcut.handle(event, profiles: profiles) { return }
+        if LocalShortcuts.handle(event, store: store, profiles: profiles) { return }
         // メニューより先に窓の部品へ渡す。アラートや編集欄の既定のボタン（Return）とキャンセル（Esc）はここで拾われる。
         if window.performKeyEquivalent(with: event) { return }
         if NSApp.mainMenu?.performKeyEquivalent(with: event) == true { return }
@@ -690,6 +689,7 @@ final class ControlService {
         "return": (36, "\r"),
         "escape": (53, "\u{1b}"),
         "delete": (51, "\u{7f}"),
+        "tab": (48, "\t"),
     ]
 
     /// ブックマークを番号つきで一覧する。番号はフォルダも含めた上からの通し番号。

@@ -35,13 +35,15 @@ struct BrowserCommands: Commands {
                 .keyboardShortcut(".")
                 .disabled(store.selected?.page.isLoading != true)
             Divider()
+            // ⌃Tab / ⌃⇧Tab でも移れる（LocalShortcuts が拾う）。
             Button("次のタブ") { store.select(offset: 1) }
                 .keyboardShortcut("]", modifiers: [.command, .shift])
             Button("前のタブ") { store.select(offset: -1) }
                 .keyboardShortcut("[", modifiers: [.command, .shift])
             Divider()
+            // バーに見えている並びのまま、左から数える。ブックマークとフォルダもタブと同じ一列の項目として扱う。
             ForEach(1...9, id: \.self) { number in
-                Button(number == 9 ? "最後のタブ" : "タブ \(number)") { store.select(number: number) }
+                Button(number == 9 ? "最後のタブ" : "バーの左から \(number) 番目") { store.activateBarItem(number: number) }
                     .keyboardShortcut(KeyEquivalent(Character("\(number)")))
             }
         }
@@ -53,17 +55,6 @@ struct BrowserCommands: Commands {
             }
             .keyboardShortcut("d")
             .disabled(store.selected?.url == nil)
-            // バーのフォルダの一覧を開く。⌘1〜9 はタブの切り替えに使っているので ⌃ にする。
-            // キーそのものは FolderShortcut が拾う。ここはどのキーで開くかを見せるため。
-            if !store.bookmarks.folders.isEmpty {
-                Divider()
-                Section("フォルダの一覧を開く") {
-                    ForEach(Array(store.bookmarks.folders.prefix(9).enumerated()), id: \.element.id) { index, folder in
-                        Button(folder.name) { store.toggleFolder(number: index + 1) }
-                            .keyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: .control)
-                    }
-                }
-            }
             if !store.bookmarks.items.isEmpty {
                 Divider()
             }
@@ -84,7 +75,7 @@ struct BrowserCommands: Commands {
         }
 
         // 選ぶと、そのプロファイルの窓へ移る（起動していなければ起こす）。この窓の中身は入れ替えない。
-        // ⌥⌘1〜9 はどのキーで移るかを見せるため。項目は後から増えるので、キーそのものは ProfileShortcut が拾う。
+        // ⌃1〜9 はどのキーで移るかを見せるため。項目は後から増えるので、キーそのものは LocalShortcuts が拾う。
         CommandMenu("プロファイル") {
             ForEach(Array(profiles.names.enumerated()), id: \.element) { index, name in
                 let toggle = Toggle(ProfileSwitcher.title(for: name), isOn: Binding(
@@ -92,7 +83,7 @@ struct BrowserCommands: Commands {
                     set: { _ in profiles.open(name) }
                 ))
                 if index < 9 {
-                    toggle.keyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: [.command, .option])
+                    toggle.keyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: .control)
                 } else {
                     toggle
                 }
@@ -133,51 +124,36 @@ struct BrowserCommands: Commands {
     }
 }
 
-/// ⌃1〜9 で、バーで左から N 番目のフォルダの一覧を開け閉めする。
+/// メニューのショートカットでは受けられないキーを、AppKit の局所モニタで先に拾う。WebView にフォーカスがあっても届く。
 ///
-/// メニューにも同じ項目を出しているが、SwiftUI はメニューの中身を開く直前まで作らないため、
-/// 起動後に足したフォルダのショートカットは、メニューを一度開くまで効かない。
-/// そのため AppKit の局所モニタでキーを先に拾う。WebView にフォーカスがあっても届く。
+/// - ⌃1〜9: メニューの「プロファイル」で上から N 番目のプロファイルへ移る。プロファイルは起動したあとにも増え、
+///   SwiftUI はメニューの中身を開く直前まで作り直さないので、増えた項目のショートカットはメニューを一度開くまで効かない。
+/// - ⌃Tab / ⌃⇧Tab: 次・前のタブ。メニューの項目には ⇧⌘] / ⇧⌘[ を付けていて、一つの項目にキーは一つしか付かない。
+///
+/// 拾ったキーはページへ届かなくなるので、ページがよく使う組み合わせ（⌥⌘数字は Google ドキュメントや Notion の見出し）は取らない。
 @MainActor
-enum FolderShortcut {
-    static func install(store: TabStore) {
+enum LocalShortcuts {
+    static func install(store: TabStore, profiles: ProfileSwitcher) {
         NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            let handled = MainActor.assumeIsolated { handle(event, store: store) }
-            // そのフォルダがなければ、ページなど本来の受け手へそのまま流す。
+            let handled = MainActor.assumeIsolated { handle(event, store: store, profiles: profiles) }
+            // 当てはまらなければ、ページなど本来の受け手へそのまま流す。
             return handled ? nil : event
         }
     }
 
-    /// ⌃N なら N 番目のフォルダの一覧を開け閉めして true を返す。
-    static func handle(_ event: NSEvent, store: TabStore) -> Bool {
-        guard event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .control,
-              let number = event.charactersIgnoringModifiers.flatMap({ Int($0) }),
-              (1...9).contains(number), number <= store.bookmarks.folders.count
-        else { return false }
-        store.toggleFolder(number: number)
-        return true
-    }
-}
+    private static let tabKeyCode: UInt16 = 48
 
-/// ⌥⌘1〜9 で、メニューで上から N 番目のプロファイルへ移る。
-///
-/// プロファイルは起動したあとにも増え、増えた項目のショートカットはメニューを一度開くまで効かないので、
-/// フォルダの ⌃1〜9 と同じく AppKit の局所モニタで先に拾う。WebView にフォーカスがあっても届く。
-@MainActor
-enum ProfileShortcut {
-    static func install(profiles: ProfileSwitcher) {
-        NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            let handled = MainActor.assumeIsolated { handle(event, profiles: profiles) }
-            return handled ? nil : event
+    static func handle(_ event: NSEvent, store: TabStore, profiles: ProfileSwitcher) -> Bool {
+        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        if event.keyCode == tabKeyCode, modifiers == .control || modifiers == [.control, .shift] {
+            store.select(offset: modifiers.contains(.shift) ? -1 : 1)
+            return true
         }
-    }
-
-    /// ⌥⌘N なら N 番目のプロファイルへ移って true を返す。押しっぱなしの繰り返しでは何度も起こさない。
-    static func handle(_ event: NSEvent, profiles: ProfileSwitcher) -> Bool {
-        guard event.modifierFlags.intersection(.deviceIndependentFlagsMask) == [.command, .option],
+        guard modifiers == .control,
               let number = event.charactersIgnoringModifiers.flatMap({ Int($0) }),
               (1...9).contains(number), number <= profiles.names.count
         else { return false }
+        // 押しっぱなしの繰り返しで何度も起こさない。
         if !event.isARepeat {
             profiles.open(profiles.names[number - 1])
         }

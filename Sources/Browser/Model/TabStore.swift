@@ -133,10 +133,22 @@ final class TabStore: TabOpening {
         selectedID = all[next].id
     }
 
-    /// 1始まりの番号で普通のタブを選ぶ。9は常に末尾のタブ。ブックマークは数えない。
-    func select(number: Int) {
-        guard !tabs.isEmpty else { return }
-        let index = number == 9 ? tabs.count - 1 : number - 1
+    /// バーの左から N 番目（1始まり）の項目を使う。ブックマークは開き、フォルダは一覧を開け閉めし、タブは選ぶ。
+    /// 9 は常に最後の普通のタブ。番号を見た目の並びと合わせるため、ブックマークとフォルダもタブと同じに数える。
+    func activateBarItem(number: Int) {
+        if number == 9 {
+            if let last = tabs.last { selectedID = last.id }
+            return
+        }
+        let items = bookmarks.items
+        if items.indices.contains(number - 1) {
+            switch items[number - 1] {
+            case .bookmark(let bookmark): activate(bookmark: bookmark.id)
+            case .folder(let folder): toggleFolder(folder.id)
+            }
+            return
+        }
+        let index = number - 1 - items.count
         guard tabs.indices.contains(index) else { return }
         selectedID = tabs[index].id
     }
@@ -230,12 +242,6 @@ final class TabStore: TabOpening {
     // MARK: フォルダの一覧
 
     /// バーで左から数えて N 番目のフォルダの一覧を開け閉めする。ブックマーク単体は数えない。
-    func toggleFolder(number: Int) {
-        let folders = bookmarks.folders
-        guard folders.indices.contains(number - 1) else { return }
-        toggleFolder(folders[number - 1].id)
-    }
-
     func toggleFolder(_ id: UUID) {
         if openFolder?.id == id {
             openFolder = nil
