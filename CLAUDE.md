@@ -35,7 +35,7 @@ build/browserctl quit               # 終わったら止める（pkill は普段
 
 `BROWSER_PROFILE=dev` の実体は、操作用ソケットが別で、Cookieなどを保存しない使い捨てになる。命令の一覧は `build/browserctl help`。ページの見た目は `browserctl screenshot <保存先>` で撮って Read で見られる（ページの中だけで、ウインドウの枠は写らない）。
 
-メニューやバーへのキー操作は `browserctl key ctrl+1` のように送れるが、アプリが前面にいないと届かない。`scripts/verify.sh` の起動では前面に出ないので、確かめるときは `open -n build/Browser.app --env BROWSER_PROFILE=dev` で起動する（`-n` で普段使いの実体とは別に立ち上がる）。持ち主が他のアプリを触ると前面が移るので、試す間は手を離してもらう。
+メニューやバーへのキー操作は `browserctl key ctrl+1` のように送れる。アプリが裏にいるとシステムはキーを届けず、前に出すと持ち主の作業を遮るので、そのときは `ControlService` が局所モニタ、メニュー、ウインドウ（出ていればポップオーバー）の順を自分で辿って手渡しする。前面にいるときは本物のキーと同じく待ち行列に積む。
 
 持ち主が普段使いで試すのは `~/Applications/Browser.app` で、`build/` を作り直しただけでは変わらない。試してもらう前に `scripts/bundle.sh --install` し、動いている実体を ⌘Q で終えて起動し直してもらう（普通のタブは戻らず、ブックマークは残る）。入った版は `cmp ~/Applications/Browser.app/Contents/MacOS/Browser build/Browser.app/Contents/MacOS/Browser` で確かめる。
 

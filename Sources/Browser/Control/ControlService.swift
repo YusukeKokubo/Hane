@@ -322,8 +322,9 @@ final class ControlService {
 
     /// ページの外（メニューやバー）へ、利用者が打ったのと同じ道筋でキーを送る。
     ///
-    /// 事象の待ち行列に積むので、局所モニタ、メニュー、ウインドウの順に本物のキーと同じく渡る。
-    /// 裏にいるアプリにはキーを受けるウインドウがなく、自分から前に出ることもシステムに断られる。
+    /// 前面にいれば事象の待ち行列に積み、局所モニタ、メニュー、ウインドウの順に本物のキーと同じく渡す。
+    /// 裏にいるとキーを受けるウインドウがなく、自分から前に出ることもシステムに断られる。
+    /// 動作確認のたびに持ち主の作業を遮らないよう、そのときは同じ順をここで辿って手渡しする。
     private func sendKey(_ spec: String) throws {
         var parts = spec.lowercased().split(separator: "+").map(String.init)
         guard let name = parts.popLast() else { throw ControlError("キーがない。") }
@@ -340,8 +341,9 @@ final class ControlService {
         guard let (keyCode, characters) = Self.keys[name] else {
             throw ControlError("知らないキー: \(name)（\(Self.keys.keys.sorted().joined(separator: ", "))）")
         }
-        guard NSApp.isActive, let window = NSApp.keyWindow else {
-            throw ControlError("アプリが前面にないのでキーが届かない。前面で起動するには: open -n build/Browser.app --env BROWSER_PROFILE=dev")
+        let isActive = NSApp.isActive && NSApp.keyWindow != nil
+        guard let window = isActive ? NSApp.keyWindow : Self.backgroundKeyTarget() else {
+            throw ControlError("ウインドウがない。")
         }
         guard let event = NSEvent.keyEvent(
             with: .keyDown, location: .zero, modifierFlags: flags,
@@ -349,7 +351,20 @@ final class ControlService {
             context: nil, characters: characters, charactersIgnoringModifiers: characters,
             isARepeat: false, keyCode: keyCode
         ) else { throw ControlError("キーの事象を作れない: \(spec)") }
-        NSApp.postEvent(event, atStart: false)
+
+        if isActive {
+            NSApp.postEvent(event, atStart: false)
+            return
+        }
+        if FolderShortcut.handle(event, store: store) { return }
+        if NSApp.mainMenu?.performKeyEquivalent(with: event) == true { return }
+        window.sendEvent(event)
+    }
+
+    /// 裏にいるとき、前に出ていればキーを受けたはずのウインドウ。ポップオーバーが出ていればそちら。
+    private static func backgroundKeyTarget() -> NSWindow? {
+        guard let main = NSApp.windows.first(where: { $0.isVisible && $0.canBecomeMain }) else { return nil }
+        return main.childWindows?.last(where: \.isVisible) ?? main
     }
 
     /// `key` で送れるキー。値は仮想キーコードと、そのキーが打ち出す文字。

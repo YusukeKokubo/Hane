@@ -70,6 +70,11 @@ expect "ページを開いたブックマークの表示" '[*Second (open)]' ui
 "$CTL" bookmark-remove 3 >/dev/null
 expect "消したブックマークのページはタブに残る" 'ブックマークのページ 1' stats
 expect "残ったページは普通のタブ" 'Second — file' tabs
+"$CTL" bookmark-add "$FIXTURES/second.html" --name 二番 --folder 試験 >/dev/null
+expect "⌃1でフォルダの一覧を開く" 'folder list: 試験 [>1 Smoke] [2 二番]' key ctrl+1
+expect "↓で次の行を選ぶ" 'folder list: 試験 [1 Smoke] [>2 二番]' key down
+expect "Returnで選んだ行を開く" '[*試験 › 二番 ▾]' key return
+expect "⌘1で最初の普通のタブ" 'window title: Second' key cmd+1
 expect "読み込み失敗の報告" '読み込みに失敗' open "$FIXTURES/missing.html"
 expect "失敗が記録に残る" '[navigation]' logs
 expect "資源の計測" 'Browser (app)' stats

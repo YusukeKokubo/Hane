@@ -103,16 +103,19 @@ struct BrowserCommands: Commands {
 enum FolderShortcut {
     static func install(store: TabStore) {
         NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            let handled = MainActor.assumeIsolated {
-                guard event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .control,
-                      let number = event.charactersIgnoringModifiers.flatMap({ Int($0) }),
-                      (1...9).contains(number), number <= store.bookmarks.folders.count
-                else { return false }
-                store.toggleFolder(number: number)
-                return true
-            }
+            let handled = MainActor.assumeIsolated { handle(event, store: store) }
             // そのフォルダがなければ、ページなど本来の受け手へそのまま流す。
             return handled ? nil : event
         }
+    }
+
+    /// ⌃N なら N 番目のフォルダの一覧を開け閉めして true を返す。
+    static func handle(_ event: NSEvent, store: TabStore) -> Bool {
+        guard event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .control,
+              let number = event.charactersIgnoringModifiers.flatMap({ Int($0) }),
+              (1...9).contains(number), number <= store.bookmarks.folders.count
+        else { return false }
+        store.toggleFolder(number: number)
+        return true
     }
 }

@@ -43,7 +43,7 @@ public enum ControlHelp {
                              フォルダの一覧が出ていれば folder list に行が並び、選択中の行に > が付く
       key <キー>              ページの外（メニューやバー）へキーを送り、ui の結果を返す
                              キーは 1〜9, up, down, return, escape。cmd+ ctrl+ opt+ shift+ を前に付けられる
-                             例: key ctrl+1（1番目のフォルダの一覧を開く）。アプリが前面にないと送れない
+                             例: key ctrl+1（1番目のフォルダの一覧を開く）。アプリが裏にいても届き、前には出ない
       logs [--limit N] [--clear]
                              console出力、未処理の例外、読み込み失敗の記録（新しい順ではなく時系列）
       stats                  アプリと補助プロセスのメモリ・CPU
