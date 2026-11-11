@@ -17,7 +17,8 @@ swift build                 # デバッグビルド
 swift test                  # 単体テスト
 scripts/bundle.sh [--install] [--run]  # リリースビルド → build/Browser.app と build/browserctl（Ad-hoc署名）。--install で ~/Applications に置く（Raycast から起動できる）
 scripts/verify.sh           # テスト → ビルド → 開発用の別実体で通し確認。変更したら必ずこれを通す
-scripts/bench.sh [--no-build] [URL…]  # 決まった手順で負荷をかけてメモリ・CPU・起床回数を測り、前回と並べる
+scripts/bench.sh [--no-build] [--runs N] [URL…]  # 決まった手順で負荷をかけてメモリ・CPU・起床回数を測り、前回と並べる
+scripts/profile.sh record <秒>  # 動いている実体に Time Profiler を付けて記録し、文字で要約する
 scripts/update-filters.sh   # 広告ブロックのフィルタリストを取ってきて Support/Filters を置き換える
 ```
 
@@ -45,11 +46,15 @@ build/browserctl quit               # 終わったら止める（pkill は普段
 
 ## 測る
 
-`scripts/bench.sh` は `bench` プロファイルの別実体で、起動直後・ページを開き終えた後・タブを閉じた後の三つを、それぞれ15秒待ってから10秒ずつ測る。読み込みの直後はWebKitが15秒ほど動いていて起床回数が跳ねるので、待たずに測ると変更の良し悪しが埋もれる。結果は `build/bench/<日時>/` に残り、前回の要約と並べて出る。一度の計測でも数割ぶれるので、差が小さいときは二、三度走らせる。
+`scripts/bench.sh` は `bench` プロファイルの別実体で、起動直後・ページを開き終えた後・タブを閉じた後の三つを、それぞれ15秒待ってから10秒ずつ測る。読み込みの直後はWebKitが15秒ほど動いていて起床回数が跳ねるので、待たずに測ると変更の良し悪しが埋もれる。結果は `build/bench/<日時>/` に残り、前回の要約と並べて出る。一度の計測でも数割ぶれるので、差が小さいときは `--runs 3` で起動からやり直して何度か測る（真ん中の値と、括弧の中に最小〜最大が出る）。
 
 起床回数（wakeups/s）は、タイマーや割り込みでスレッドが起こされた回数。何もしていないはずの時間にこれが増えていれば、常駐する処理が紛れ込んでいる。`browserctl stats --seconds N --json` で期間を延ばしたり、機械で読める形にしたりできる。最後の行に測った実行ファイルが出るので、入れてある版を測っていないか確かめる。`browserctl` は `dev` などのプロファイルを自動で起こすとき、隣にある `build/Browser.app` を選ぶ（バンドルIDで頼むと `~/Applications` の版が立ち上がるため）。
 
 中身まで見たいときは macOS の道具をそのまま使う。Ad-hoc 署名で Hardened Runtime を付けていないので、`sample`、`vmmap --summary`、`footprint`、`leaks`、`heap` も `xctrace record --template 'Time Profiler' --attach <pid>` も権限なしで刺さる（`bundle.sh` に `--options runtime` を足すとこれらが使えなくなる）。アプリはページの読み込み、タブの選択、閲覧状態と閲覧履歴の書き出し、フィルタリストの準備に区間の印（`Signposts`）を付けていて、Instruments の Points of Interest に出る。書き出すときは `xctrace export --xpath '/trace-toc/run[@number="1"]/data/table[@schema="os-signpost" and @category="PointsOfInterest"]'`。
+
+`scripts/profile.sh record <秒>` はこの記録から、秒ごとのサンプル数、区間の印、重い関数（アプリ自身のコード、その関数自身、呼んだ先も含む全体）を文字にまとめる。操作しながら測るときは裏で走らせ、2秒ほど待ってから `browserctl` で操作する。秒ごとの表で山を見つけたら、`scripts/profile.sh summary <trace> <開始秒> <終了秒>` でその時間帯だけを見る。`xctrace` の書き出しは同じ値の2回目から参照で省くので、grep で数えると少なく見える。
+
+修正が窓まわりに副作用を出していないかは `browserctl ui` の `window frame:` で見る（大きさ、画面の左上からの位置、覚えている名前）。
 
 ## 構成
 

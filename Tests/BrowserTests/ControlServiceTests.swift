@@ -77,6 +77,11 @@ import Testing
         #expect(store.tabs.count == 1)
     }
 
+    @Test func uiReportsWindowFrame() async {
+        // テストには窓がないので、行があって「なし」と出ることだけを見る。
+        #expect(await run("ui").output.contains("window frame: (なし)"))
+    }
+
     @Test func bookmarkCommands() async throws {
         #expect(await run("bookmarks").output.contains("ブックマークなし"))
         #expect(await run("ui").output.contains("bookmarks bar: (なし)"))

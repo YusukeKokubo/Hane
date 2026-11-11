@@ -364,7 +364,7 @@ final class ControlService {
 
     /// ウインドウの枠まわり（ページの外側）が今どう見えているか。
     private func describeUI() -> String {
-        var lines = ["profile: \(BrowserProfile.name)"]
+        var lines = ["profile: \(BrowserProfile.name)", "window frame: " + describeWindowFrame()]
         if let tab = store.selected {
             let state: (Bool) -> String = { $0 ? "enabled" : "disabled" }
             lines.append("window title: \(tab.title)")
@@ -390,6 +390,17 @@ final class ControlService {
         lines.append("tabs (left to right):")
         lines.append(contentsOf: store.allTabs.map(describe))
         return lines.joined(separator: "\n")
+    }
+
+    /// 窓の大きさと位置、覚えている名前。窓の枠を戻す仕組みが効いているかを外から確かめるため。
+    /// 位置は画面の左上からの距離で表す（AppKit の座標は左下から測るので向きを直す）。
+    private func describeWindowFrame() -> String {
+        guard let window = Self.backgroundKeyTarget() else { return "(なし)" }
+        let frame = window.frame
+        let screen = window.screen?.frame ?? .zero
+        let name = window.frameAutosaveName.isEmpty ? "(覚えない)" : "\"\(window.frameAutosaveName)\""
+        return "\(Int(frame.width))x\(Int(frame.height)) at (\(Int(frame.minX - screen.minX)), \(Int(screen.maxY - frame.maxY)))"
+            + " on \(Int(screen.width))x\(Int(screen.height)) screen, remembered as \(name)"
     }
 
     /// バーの左側を、画面に出ている文字のとおりに一行で表す。
