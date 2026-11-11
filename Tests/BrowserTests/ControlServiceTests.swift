@@ -124,8 +124,20 @@ import Testing
         #expect(await !run("key", "hyper+1").ok)
     }
 
+    @Test func listsHistory() async throws {
+        #expect(await run("history").output == "（履歴なし）")
+        try await open(html: "<title>Visited</title>")
+        for _ in 0..<50 where store.history.entries.values.first?.title.isEmpty != false {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let listing = await run("history").output
+        #expect(listing.contains("typed 0 visits 1  Visited — file://"))
+    }
+
     @Test func rejectsBadInput() async {
         #expect(await !run("bogus").ok)
+        #expect(await !run("type").ok)
+        #expect(await !run("type", "abc").ok, "入力欄にフォーカスがない（テストではウインドウがない）")
         #expect(await !run("--tab", "99", "wait").ok)
         #expect(await !run("--tab").ok)
         #expect(await !run("click", "one").ok)

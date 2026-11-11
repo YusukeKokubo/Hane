@@ -19,6 +19,7 @@ final class TabStore: TabOpening {
     }
 
     let bookmarks: BookmarkStore
+    let history: HistoryStore
 
     /// アドレスバーにフォーカスを移してほしいときに増やす合図。
     private(set) var addressFocusRequest = 0
@@ -38,10 +39,12 @@ final class TabStore: TabOpening {
     init(
         factory: PageFactory = PageFactory(),
         bookmarks: BookmarkStore = BookmarkStore(),
+        history: HistoryStore = HistoryStore(),
         session: SessionStore = SessionStore()
     ) {
         self.factory = factory
         self.bookmarks = bookmarks
+        self.history = history
         self.session = session
         if !restore(session.load()) {
             newTab()
@@ -276,6 +279,8 @@ final class TabStore: TabOpening {
     struct AddressBarState {
         var text = ""
         var isFocused = false
+        /// 履歴から補って、選択された状態で入っている続き。
+        var completion: String?
     }
 
     // MARK: 閲覧状態
@@ -335,7 +340,7 @@ final class TabStore: TabOpening {
 
     private func makeTab(restoring saved: SavedPage? = nil) -> Tab {
         lastTabNumber += 1
-        return Tab(number: lastTabNumber, factory: factory, opener: self, restoring: saved)
+        return Tab(number: lastTabNumber, factory: factory, opener: self, history: history, restoring: saved)
     }
 
     private func insertTab(after anchor: Tab.ID?) -> Tab {

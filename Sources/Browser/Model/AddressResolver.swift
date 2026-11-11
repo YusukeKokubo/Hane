@@ -13,6 +13,12 @@ enum AddressResolver {
         return searchURL(for: text)
     }
 
+    /// 検索先の結果ページか。
+    static func isSearch(_ url: URL) -> Bool {
+        guard let endpoint = URL(string: BrowserSettings.searchEndpoint) else { return false }
+        return url.host() == endpoint.host() && url.path() == endpoint.path()
+    }
+
     static func searchURL(for query: String) -> URL? {
         var components = URLComponents(string: BrowserSettings.searchEndpoint)
         components?.queryItems = [URLQueryItem(name: BrowserSettings.searchQueryName, value: query)]

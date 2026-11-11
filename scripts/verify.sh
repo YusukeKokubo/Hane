@@ -79,6 +79,21 @@ expect "⌃1でフォルダの一覧を開く" 'folder list: 試験 [>1 Smoke] [
 expect "↓で次の行を選ぶ" 'folder list: 試験 [1 Smoke] [>2 二番]' key down
 expect "Returnで選んだ行を開く" '[*試験 › 二番 ▾]' key return
 expect "⌘1で最初の普通のタブ" 'window title: Second' key cmd+1
+"$CTL" new >/dev/null
+"$CTL" type "$FIXTURES/second.html" >/dev/null
+expect "アドレスバーに打って開く" 'window title: Second' key return
+"$CTL" new >/dev/null
+expect "打って訪れたページを履歴から補う" 'completion="cond.html"' type "$FIXTURES/se"
+expect "消すキーで補った部分だけ消える" "address bar: \"$FIXTURES/se\" (focused)" key delete
+expect "打ち足すと補い直す" 'completion="ond.html"' type c
+expect "Escで補った部分だけ取り消す" "address bar: \"$FIXTURES/sec\" (focused)" key escape
+"$CTL" type o >/dev/null
+expect "補ったまま確定して移る" 'window title: Second' key return
+expect "打って訪れた回数を数える" 'typed 2 visits' history
+# 資源の数字を前と比べられるよう、ここで開いたタブを閉じて元の並びに戻す。
+"$CTL" close >/dev/null
+"$CTL" close >/dev/null
+"$CTL" key cmd+1 >/dev/null
 # 広告ブロック。初回はフィルタリストのコンパイルを待つので時間がかかる。
 expect "フィルタリストの準備" 'filters: ready' adblock
 expect "広告のページを開く" 'Ads' open "$FIXTURES/ads.html"

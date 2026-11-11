@@ -142,6 +142,20 @@ final class ControlService {
             try? await Task.sleep(for: .milliseconds(300))
             return describeUI()
 
+        case "type":
+            guard !args.isEmpty else { throw ControlError("打つ文字列がない。例: type github") }
+            try await typeText(args.joined(separator: " "))
+            try? await Task.sleep(for: .milliseconds(300))
+            return describeUI()
+
+        case "history":
+            let recent = store.history.entries.values.sorted { $0.lastVisit > $1.lastVisit }.prefix(limit ?? 30)
+            guard !recent.isEmpty else { return "（履歴なし）" }
+            return recent.map { entry in
+                "\(Self.clock.string(from: entry.lastVisit)) typed \(entry.typedCount) visits \(entry.visitCount)  "
+                    + "\(entry.title.isEmpty ? "(無題)" : entry.title) — \(entry.url.absoluteString)"
+            }.joined(separator: "\n")
+
         case "bookmarks":
             return describeBookmarks()
 
@@ -339,7 +353,8 @@ final class ControlService {
         if let tab = store.selected {
             let state: (Bool) -> String = { $0 ? "enabled" : "disabled" }
             lines.append("window title: \(tab.title)")
-            lines.append("address bar: \"\(store.addressBar.text)\"" + (store.addressBar.isFocused ? " (focused)" : ""))
+            lines.append("address bar: \"\(store.addressBar.text)\"" + (store.addressBar.isFocused ? " (focused)" : "")
+                + (store.addressBar.completion.map { " completion=\"\($0)\"" } ?? ""))
             lines.append("buttons: back=\(state(tab.canGoBack)) forward=\(state(tab.canGoForward)) "
                 + (tab.page.isLoading ? "stop=enabled" : "reload=\(state(tab.hasContent))"))
             lines.append("page: " + (tab.hasContent
@@ -421,6 +436,22 @@ final class ControlService {
         window.sendEvent(event)
     }
 
+    /// フォーカスのある入力欄へ、1文字ずつ打ち込んだのと同じように差し込む。
+    ///
+    /// キーの事象を作って送ると、持ち主の入力方式が日本語のときに仮名へ変換されてしまうので、
+    /// 入力欄の編集部品（フィールドエディタ）へ文字を直接入れる。文字ごとに間を置き、
+    /// 画面が1文字ずつ変化を受け取れるようにする。
+    private func typeText(_ text: String) async throws {
+        let window = NSApp.keyWindow ?? Self.backgroundKeyTarget()
+        for character in text {
+            guard let editor = window?.firstResponder as? NSTextView else {
+                throw ControlError("文字を受け付ける入力欄にフォーカスがない。")
+            }
+            editor.insertText(String(character), replacementRange: NSRange(location: NSNotFound, length: 0))
+            try? await Task.sleep(for: .milliseconds(30))
+        }
+    }
+
     /// 裏にいるとき、前に出ていればキーを受けたはずのウインドウ。ポップオーバーが出ていればそちら。
     private static func backgroundKeyTarget() -> NSWindow? {
         guard let main = NSApp.windows.first(where: { $0.isVisible && $0.canBecomeMain }) else { return nil }
@@ -433,8 +464,11 @@ final class ControlService {
         "6": (22, "6"), "7": (26, "7"), "8": (28, "8"), "9": (25, "9"),
         "up": (126, String(UnicodeScalar(NSUpArrowFunctionKey)!)),
         "down": (125, String(UnicodeScalar(NSDownArrowFunctionKey)!)),
+        "left": (123, String(UnicodeScalar(NSLeftArrowFunctionKey)!)),
+        "right": (124, String(UnicodeScalar(NSRightArrowFunctionKey)!)),
         "return": (36, "\r"),
         "escape": (53, "\u{1b}"),
+        "delete": (51, "\u{7f}"),
     ]
 
     /// ブックマークを番号つきで一覧する。番号はフォルダも含めた上からの通し番号。

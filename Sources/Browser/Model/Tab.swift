@@ -30,16 +30,26 @@ final class Tab: Identifiable {
     /// タブの行き先を見失わないように持っておく（オフラインで起動したときなど）。
     private var requestedURL: URL?
 
+    @ObservationIgnored private let history: HistoryStore
+    /// 次に確定する読み込みが、アドレスバーで確定して始めたものか。履歴で「打って訪れた」と数える。
+    @ObservationIgnored private var typedNavigationPending = false
     @ObservationIgnored private var monitor: Task<Void, Never>?
 
-    init(number: Int, factory: PageFactory, opener: any TabOpening, restoring saved: SavedPage? = nil) {
+    init(
+        number: Int,
+        factory: PageFactory,
+        opener: any TabOpening,
+        history: HistoryStore,
+        restoring saved: SavedPage? = nil
+    ) {
         self.number = number
+        self.history = history
         restored = saved
         requestedURL = saved?.url
         page = factory.makePage(navigationDecider: NavigationDecider(opener: opener), log: log)
         monitor = Task { [weak self, page] in
-            await Self.watchNavigations(of: page) { failure in
-                self?.record(failure: failure)
+            await Self.watchNavigations(of: page) { update in
+                self?.handle(update)
             }
         }
     }
@@ -80,8 +90,15 @@ final class Tab: Identifiable {
     @discardableResult
     func open(_ input: String) -> URL? {
         guard let url = AddressResolver.resolve(input) else { return nil }
-        load(URLRequest(url: url))
+        open(typed: url)
         return url
+    }
+
+    /// アドレスバーで確定したアドレスを開く。
+    func open(typed url: URL) {
+        load(URLRequest(url: url))
+        // 検索結果のページは打って訪れたものと数えない。検索語ごとの結果ページが補われてしまうため。
+        typedNavigationPending = !AddressResolver.isSearch(url)
     }
 
     func load(_ request: URLRequest) {
@@ -130,10 +147,26 @@ final class Tab: Identifiable {
         page.stopLoading()
     }
 
-    private func record(failure: String?) {
-        self.failure = failure
-        if let failure {
-            log.append(level: "navigation", message: failure)
+    private func handle(_ update: NavigationUpdate) {
+        switch update {
+        case .started:
+            failure = nil
+        case .committed:
+            if let url = page.url {
+                history.recordVisit(to: url, typed: typedNavigationPending)
+            }
+            typedNavigationPending = false
+        case .finished:
+            if let url = page.url {
+                history.setTitle(page.title, for: url)
+            }
+        case .failed(let message):
+            // 打ったアドレスが開けなかったときに、次のリンクの移動を打ったものと数えないように。
+            typedNavigationPending = false
+            if let message {
+                failure = message
+                log.append(level: "navigation", message: message)
+            }
         }
     }
 
@@ -151,24 +184,33 @@ final class Tab: Identifiable {
 
     // MARK: 読み込み結果の監視
 
-    /// ページ内リンクも含めたすべてのナビゲーションを見張り、失敗を報告する。
+    private enum NavigationUpdate {
+        case started, committed, finished
+        /// 失敗の文言。利用者による中断のように見せなくてよい失敗なら `nil`。
+        case failed(String?)
+    }
+
+    /// ページ内リンクも含めたすべてのナビゲーションを見張り、進み具合と失敗を報告する。
     /// 失敗のたびに列が終わるので、キャンセルされるまで購読し直す。
     private static func watchNavigations(
         of page: WebPage,
-        report: @MainActor (String?) -> Void
+        report: @MainActor (NavigationUpdate) -> Void
     ) async {
         while !Task.isCancelled {
             do {
-                for try await event in page.navigations where event == .startedProvisionalNavigation {
-                    report(nil)
+                for try await event in page.navigations {
+                    switch event {
+                    case .startedProvisionalNavigation: report(.started)
+                    case .committed: report(.committed)
+                    case .finished: report(.finished)
+                    default: break
+                    }
                 }
                 return
             } catch WebPage.NavigationError.pageClosed {
                 return
             } catch {
-                if let message = Self.message(for: error) {
-                    report(message)
-                }
+                report(.failed(Self.message(for: error)))
                 try? await Task.sleep(for: .milliseconds(50))
             }
         }

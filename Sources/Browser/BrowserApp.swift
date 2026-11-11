@@ -13,18 +13,22 @@ struct BrowserApp: App {
         let store = TabStore(
             factory: PageFactory(contentBlocker: blocker),
             bookmarks: .forCurrentProfile(),
+            history: .forCurrentProfile(),
             session: .forCurrentProfile()
         )
         _store = State(initialValue: store)
         control = ControlService(store: store)
         control.start()
         FolderShortcut.install(store: store)
-        // 変化のたびに書き出してはいるが、その書き出しは処理の回の終わりまで待つので、
+        // 閲覧状態と履歴は変化から少し遅れて書き出すので、
         // 終了直前の変化を取りこぼさないよう最後にもう一度書く。
         NotificationCenter.default.addObserver(
             forName: NSApplication.willTerminateNotification, object: nil, queue: .main
         ) { _ in
-            MainActor.assumeIsolated { store.saveSession() }
+            MainActor.assumeIsolated {
+                store.saveSession()
+                store.history.saveNow()
+            }
         }
     }
 

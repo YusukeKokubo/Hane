@@ -49,8 +49,13 @@ public enum ControlHelp {
       ui                     ウインドウの枠まわりの状態（アドレスバー、ボタン、ブックマークとタブの並び）
                              フォルダの一覧が出ていれば folder list に行が並び、選択中の行に > が付く
       key <キー>              ページの外（メニューやバー）へキーを送り、ui の結果を返す
-                             キーは 1〜9, up, down, return, escape。cmd+ ctrl+ opt+ shift+ を前に付けられる
+                             キーは 1〜9, up, down, left, right, return, escape, delete。
+                             cmd+ ctrl+ opt+ shift+ を前に付けられる
                              例: key ctrl+1（1番目のフォルダの一覧を開く）。アプリが裏にいても届き、前には出ない
+      type <文字列>           フォーカスのある入力欄（アドレスバーなど）へ1文字ずつ打ち込み、ui の結果を返す
+                             入力方式に左右されない。履歴から補った続きは ui の completion に出る
+                             例: new → type git → key return（補ったページへ移る）
+      history [--limit N]    閲覧履歴を新しい順に。typed はアドレスバーで確定して訪れた回数
       logs [--limit N] [--clear]
                              console出力、未処理の例外、読み込み失敗の記録（新しい順ではなく時系列）
       stats                  アプリと補助プロセスのメモリ・CPU
