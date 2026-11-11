@@ -1,8 +1,9 @@
 #!/bin/sh
 # 決まった手順で負荷をかけ、メモリ・CPU・起床回数を測る。変更の前後で走らせて見比べる。
 #
-# 手順は「起動して何もしない」「ページを開き終えて何もしない」「タブを閉じて何もしない」の三つで、
-# それぞれ BENCH_SETTLE 秒（既定 15）待ってから BENCH_SECONDS 秒（既定 10）の平均を取る。
+# 手順は「起動して何もしない」「ページを開き終えて何もしない」「同じタブでページを5回移る」
+# 「タブを閉じて何もしない」の四つ。何もしない段階は BENCH_SETTLE 秒（既定 15）待ってから
+# BENCH_SECONDS 秒（既定 10）の平均を取る。ページを移る段階は、移っている間の CPU が操作の重さの目安になる。
 # 読み込みの直後は WebKit がしばらく動いていて起床回数が跳ねるので、落ち着くのを待つ。
 # 何もしていないはずの時間に CPU や起床回数が増えていたら、常駐する処理が紛れ込んでいる。
 #
@@ -22,6 +23,7 @@ case "${BROWSER_PROFILE:-}" in
 esac
 SECONDS_PER_PHASE="${BENCH_SECONDS:-10}"
 SETTLE="${BENCH_SETTLE:-15}"
+NAVIGATE_SECONDS="${BENCH_NAVIGATE:-6}"
 CTL="$ROOT/build/browserctl"
 
 BUILD=1
@@ -38,6 +40,9 @@ if [ "$#" -eq 0 ]; then
            "file://$ROOT/Tests/Fixtures/second.html" \
            "file://$ROOT/Tests/Fixtures/ads.html"
 fi
+
+FIRST="$1"
+SECOND="${2:-$1}"
 
 if [ "$BUILD" = 1 ]; then
     scripts/bundle.sh | tail -1
@@ -75,12 +80,26 @@ while [ "$run" -le "$RUNS" ]; do
     sleep "$SETTLE"
     measure "$run" 2-loaded
 
+    # 選んでいるタブで、最初の二つのページを交互に5回開く。測る期間は移り終えるまでより長くとり、
+    # 足りなければ知らせる（遅いページでは移り終える前に測り終えてしまうため）。
+    "$CTL" stats --seconds "$NAVIGATE_SECONDS" --json > "$OUT/run$run/3-navigate.json" &
+    stats_pid=$!
+    started=$(date +%s)
+    for target in "$FIRST" "$SECOND" "$FIRST" "$SECOND" "$FIRST"; do
+        "$CTL" open "$target" >/dev/null
+    done
+    if [ $(( $(date +%s) - started )) -ge "$NAVIGATE_SECONDS" ]; then
+        echo "  注意: ページを移り終えるのに ${NAVIGATE_SECONDS} 秒以上かかった。BENCH_NAVIGATE を延ばすこと" >&2
+    fi
+    wait "$stats_pid"
+    sleep "$SETTLE"
+
     # 最初のタブだけ残して閉じる。閉じたタブのページとプロセスが手放されるかを見る。
     while [ "$("$CTL" tabs | wc -l)" -gt 1 ]; do
         "$CTL" close >/dev/null
     done
     sleep "$SETTLE"
-    measure "$run" 3-closed
+    measure "$run" 4-closed
     echo "  $run 回目 済"
     run=$((run + 1))
 done
@@ -101,7 +120,7 @@ def cell(values, digits=1):
     return f"{middle:.{digits}f} ({min(values):.{digits}f}-{max(values):.{digits}f})"
 
 
-print(f"{'phase':<12} {'processes':>9} {'memory MB':>20} {'app MB':>20} {'cpu %':>16} {'wakeups/s':>20}")
+print(f"{'phase':<12} {'processes':>9} {'memory MB':>20} {'app MB':>20} {'cpu %':>16} {'app cpu %':>16} {'wakeups/s':>20}")
 for phase in phases:
     reports = [json.load(open(os.path.join(run, phase + ".json")))["report"] for run in runs]
     app = [next(p for p in r["processes"] if p["name"] == "Browser (app)") for r in reports]
@@ -109,6 +128,7 @@ for phase in phases:
           f" {cell([r['total']['memoryBytes'] / 1048576 for r in reports]):>20}"
           f" {cell([a['memoryBytes'] / 1048576 for a in app]):>20}"
           f" {cell([r['total']['cpuPercent'] for r in reports], 2):>16}"
+          f" {cell([a['cpuPercent'] for a in app], 2):>16}"
           f" {cell([r['total']['wakeupsPerSecond'] for r in reports]):>20}")
 print(f"回数: {len(runs)}、実行ファイル: {reports[0]['executable']}")
 PY
