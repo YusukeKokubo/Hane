@@ -73,6 +73,7 @@ SwiftUI の中で重いときは、Time Profiler の関数名がレイアウト�
 ## はまりどころ
 
 - **APIは定義ファイルで確かめる。** `WebPage` は新しく、記憶と食い違うことがある。`$(xcrun --show-sdk-path)/System/Library/Frameworks/WebKit.framework/Modules/WebKit.swiftmodule/arm64e-apple-macos.swiftinterface` と、同じ場所の `_WebKit_SwiftUI.framework` を grep する。たとえば戻る・進むの専用メソッドはなく、`page.load(backForwardList.backList.last!)` のように履歴の項目を読み込む。
+- **`ViewThatFits` を使わない。** 候補を全部作って、中身が変わるたびに全部測り直す。タブバーで使っていたときは、ページを移るたびにメインスレッドが0.1秒ほど取られていた（取り除いて三分の一）。タブを縮めるか横に流すかは、縮めきった幅を足し算で出して選んでいる。
 - **入力欄を標準ツールバーに置かない。** `.toolbar` の中の `TextField` には `FocusState` が効かず、Cmd+L が動かなくなる。そのためタイトルバーを隠し、タブバーとナビゲーションの段をウインドウの中身として並べている。タブバーがタイトルバーを兼ねるので、左端の信号機ボタンの余白と、右端のウインドウを掴むための余白を削らない。
 - **起動直後のフォーカスは一度では入らない。** ウインドウが前面に出る前の要求は黙って捨てられるので、`AddressBar` は入るまで短くやり直している。
 - **Cmd+W をタブに割り当てる仕組み。** メニューの「タブを閉じる」を標準の「閉じる」より前（`.newItem` の位置）に置くことで先に拾わせている。順番を変えるとウインドウごと閉じるようになる。

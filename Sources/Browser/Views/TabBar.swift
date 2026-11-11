@@ -7,25 +7,44 @@ struct TabBar: View {
     let store: TabStore
     let onClose: (Tab.ID) -> Void
 
+    /// タブの並びに使える幅。窓の大きさが変わったときだけ更新される。
+    @State private var rowWidth: CGFloat = .infinity
+
+    private static let spacing: CGFloat = 4
+    /// 新規タブのボタンの幅。少し多めに見積もり、ぎりぎりで溢れないようにする。
+    private static let newTabButtonWidth: CGFloat = 32
+
     var body: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: Self.spacing) {
             BookmarkStrip(store: store)
                 .fixedSize()
             // 入りきらないときは、まずタブを縮め、それでも足りなければ横に流す。
-            ViewThatFits(in: .horizontal) {
-                tabRow
-                ScrollView(.horizontal) { tabRow }
-                    .scrollIndicators(.never)
+            // ViewThatFits で両方を候補に出すと、並びを二組作って変化のたびに両方を測り直すので、
+            // ページを移るたびにメインスレッドが0.1秒ほど取られていた。縮めきった幅を足し算で出して自分で選ぶ。
+            Group {
+                if needsScrolling {
+                    ScrollView(.horizontal) { tabRow }
+                        .scrollIndicators(.never)
+                } else {
+                    tabRow
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { rowWidth = $0 }
         }
         .padding(.horizontal, 6)
         // 信号機ボタンと縦の中心がそろう高さ（32）にする。
         .padding(.vertical, 3)
     }
 
+    /// すべてのタブを最小の幅まで縮めても入りきらないか。
+    private var needsScrolling: Bool {
+        let tabs = CGFloat(store.tabs.count)
+        return tabs * (TabItem.minimumWidth + Self.spacing) + Self.newTabButtonWidth > rowWidth
+    }
+
     private var tabRow: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: Self.spacing) {
             ForEach(store.tabs) { tab in
                 TabItem(
                     tab: tab,
@@ -43,6 +62,8 @@ struct TabBar: View {
 }
 
 private struct TabItem: View {
+    static let minimumWidth: CGFloat = 48
+
     let tab: Tab
     let isSelected: Bool
     let onSelect: () -> Void
@@ -64,8 +85,8 @@ private struct TabItem: View {
         }
         .font(.callout)
         .padding(.horizontal, 8)
-        // 理想の幅を最小にしておくと、収まるかどうかを縮めた幅で判定してくれる。
-        .frame(minWidth: 48, idealWidth: 48, maxWidth: 220, minHeight: 26)
+        // 横に流すときは理想の幅で並ぶので、最小と同じにして縮めた幅で並べる。
+        .frame(minWidth: Self.minimumWidth, idealWidth: Self.minimumWidth, maxWidth: 220, minHeight: 26)
         .barItemBackground(isSelected ? .selected : .idle, isHovered: isHovered)
         .overlay(alignment: .bottom) {
             // 裏のタブでも読み込み中かどうかが分かるようにする。
