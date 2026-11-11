@@ -56,7 +56,7 @@ final class ControlService {
             return ControlHelp.text
 
         case "tabs":
-            return store.tabs.map(describe).joined(separator: "\n")
+            return store.allTabs.map(describe).joined(separator: "\n")
 
         case "new":
             if args.isEmpty {
@@ -73,11 +73,12 @@ final class ControlService {
         case "close":
             let number = try args.first.map { try integer($0, "タブ番号") } ?? tabNumber
             let tab = try tab(numbered: number)
-            guard store.tabs.count > 1 else {
+            // ブックマークのページは閉じてもウインドウが残るので、最後の1枚でも閉じてよい。
+            guard store.allTabs.count > 1 || tab.bookmarkID != nil else {
                 throw ControlError("最後の1枚は閉じられない（ウインドウが閉じてアプリが終了するため）。")
             }
             store.close(tab.id)
-            return "closed tab \(tab.number)\n" + store.tabs.map(describe).joined(separator: "\n")
+            return "closed tab \(tab.number)\n" + store.allTabs.map(describe).joined(separator: "\n")
 
         case "open":
             let tab = try target()
@@ -135,6 +136,34 @@ final class ControlService {
         case "ui":
             return describeUI()
 
+        case "bookmarks":
+            return describeBookmarks()
+
+        case "bookmark-add":
+            let name = try takeOption("--name", from: &args)
+            let folderName = try takeOption("--folder", from: &args)
+            let folderID = folderName.map { store.bookmarks.folder(named: $0)?.id ?? store.bookmarks.addFolder(named: $0).id }
+            if args.isEmpty {
+                let tab = try target()
+                guard tab.bookmarkID == nil else { throw ControlError("このタブはすでにブックマークのページ。") }
+                guard store.pin(tab.id, title: name, folder: folderID) != nil else {
+                    throw ControlError("このタブにはまだページがない。")
+                }
+            } else {
+                let url = try url(from: args)
+                store.bookmarks.add(title: name ?? "", url: url, folder: folderID)
+            }
+            return describeBookmarks()
+
+        case "bookmark-open":
+            let id = try bookmarkID(try argument(args, 0, "ブックマークの番号"))
+            guard let tab = store.activate(bookmark: id) else { throw ControlError("フォルダは開けない。中のブックマークの番号を指定すること。") }
+            return try await settled(tab)
+
+        case "bookmark-remove":
+            store.removeBookmark(try bookmarkID(try argument(args, 0, "ブックマークの番号")))
+            return describeBookmarks()
+
         case "logs":
             let tab = try target()
             let entries = tab.log.entries.suffix(limit ?? 50)
@@ -145,7 +174,9 @@ final class ControlService {
             return describe(tab) + "\n" + listing
 
         case "stats":
-            return await ProcessStats.report() + "\ntabs: \(store.tabs.count)（うちページあり \(store.tabs.count { $0.hasContent })）"
+            let all = store.allTabs
+            return await ProcessStats.report()
+                + "\ntabs: \(all.count)（うちページあり \(all.count { $0.hasContent })、ブックマークのページ \(store.bookmarkTabs.count)）"
 
         case "quit":
             // 応答を返し終えてから終了する。
@@ -252,9 +283,70 @@ final class ControlService {
                 lines.append("failure shown: \(failure)")
             }
         }
+        lines.append("bookmarks bar: " + describeBookmarkBar())
         lines.append("tabs (left to right):")
-        lines.append(contentsOf: store.tabs.map(describe))
+        lines.append(contentsOf: store.allTabs.map(describe))
         return lines.joined(separator: "\n")
+    }
+
+    /// バーの左側を、画面に出ている文字のとおりに一行で表す。
+    /// 選ばれている項目には *、ページを開いている項目には (open) を付ける。
+    private func describeBookmarkBar() -> String {
+        guard !store.bookmarks.items.isEmpty else { return "(なし)" }
+        return store.bookmarks.items.map { item in
+            switch item {
+            case .bookmark(let bookmark):
+                let tab = store.bookmarkTabs[bookmark.id]
+                let label = store.awayTitle(for: bookmark).map { "\(bookmark.title) / \($0)" } ?? bookmark.title
+                return "[" + mark(tab) + label + (tab != nil ? " (open)" : "") + "]"
+            case .folder(let folder):
+                let selected = folder.bookmarks.first { store.bookmarkTabs[$0.id]?.id == store.selectedID }
+                let label = selected.map { "\(folder.name) › \(store.awayTitle(for: $0) ?? $0.title)" } ?? folder.name
+                return "[" + (selected != nil ? "*" : "") + label + " ▾]"
+            }
+        }.joined(separator: " ")
+    }
+
+    /// ブックマークを番号つきで一覧する。番号はフォルダも含めた上からの通し番号。
+    private func describeBookmarks() -> String {
+        var lines: [String] = []
+        var number = 0
+        func line(_ bookmark: Bookmark, indent: String) -> String {
+            number += 1
+            let tab = store.bookmarkTabs[bookmark.id]
+            let open = tab.map { " (open: tab \($0.number))" } ?? ""
+            return "\(mark(tab).isEmpty ? " " : "*") \(indent)\(number) \(bookmark.title) — \(bookmark.url.absoluteString)\(open)"
+        }
+        for item in store.bookmarks.items {
+            switch item {
+            case .bookmark(let bookmark):
+                lines.append(line(bookmark, indent: ""))
+            case .folder(let folder):
+                number += 1
+                lines.append("  \(number) \(folder.name)/")
+                lines.append(contentsOf: folder.bookmarks.map { line($0, indent: "  ") })
+            }
+        }
+        return lines.isEmpty ? "（ブックマークなし）" : lines.joined(separator: "\n")
+    }
+
+    private func mark(_ tab: Tab?) -> String {
+        tab != nil && tab?.id == store.selectedID ? "*" : ""
+    }
+
+    /// `bookmarks` の一覧に出る番号を、ブックマークかフォルダのIDに引き直す。
+    private func bookmarkID(_ text: String) throws -> UUID {
+        let number = try integer(text, "ブックマークの番号")
+        let ids = store.bookmarks.items.flatMap { item -> [UUID] in
+            switch item {
+            case .bookmark(let bookmark): [bookmark.id]
+            case .folder(let folder): [folder.id] + folder.bookmarks.map(\.id)
+            }
+        }
+        guard ids.indices.contains(number - 1) else {
+            throw ControlError("ブックマーク \(number) はない。`bookmarks` で一覧を見ること。")
+        }
+        return ids[number - 1]
     }
 
     private static let clock: DateFormatter = {
@@ -270,7 +362,7 @@ final class ControlService {
             guard let selected = store.selected else { throw ControlError("タブがない。") }
             return selected
         }
-        guard let tab = store.tabs.first(where: { $0.number == number }) else {
+        guard let tab = store.allTabs.first(where: { $0.number == number }) else {
             throw ControlError("タブ \(number) はない。`tabs` で一覧を見ること。")
         }
         return tab
@@ -280,7 +372,8 @@ final class ControlService {
         let mark = tab.id == store.selectedID ? "*" : " "
         let url = tab.page.url?.absoluteString ?? "(空)"
         let loading = tab.page.isLoading ? " [loading]" : ""
-        return "\(mark) tab \(tab.number): \(tab.title) — \(url)\(loading)"
+        let bookmark = tab.bookmarkID.flatMap(store.bookmarks.bookmark).map { " [bookmark: \($0.title)]" } ?? ""
+        return "\(mark) tab \(tab.number): \(tab.title) — \(url)\(loading)\(bookmark)"
     }
 
     private func url(from args: [String]) throws -> URL {

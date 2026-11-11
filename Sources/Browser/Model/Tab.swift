@@ -16,6 +16,8 @@ final class Tab: Identifiable {
     let page: WebPage
     /// このタブのコンソール出力と読み込み失敗の記録。
     let log = PageLog()
+    /// ブックマークから開いたページなら、そのブックマーク。普通のタブなら `nil`。
+    var bookmarkID: UUID?
 
     /// 一度でも読み込みを始めたか。まっさらなタブでは Web ビューを作らない。
     private(set) var hasContent = false

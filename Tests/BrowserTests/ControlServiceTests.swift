@@ -55,6 +55,37 @@ import Testing
         #expect(store.tabs.count == 1)
     }
 
+    @Test func bookmarkCommands() async throws {
+        #expect(await run("bookmarks").output.contains("ブックマークなし"))
+        #expect(await run("ui").output.contains("bookmarks bar: (なし)"))
+
+        try await open(html: "<title>Pinned</title>")
+        var response = await run("bookmark-add", "--folder", "仕事")
+        #expect(response.ok, "\(response.output)")
+        #expect(response.output.contains("  1 仕事/"))
+        #expect(response.output.contains("*   2 Pinned"))
+        #expect(store.tabs.isEmpty, "今のタブはブックマークの側へ移る")
+        #expect(await !run("bookmark-add").ok, "ブックマークのページは重ねて登録できない")
+
+        response = await run("bookmark-add", "about:blank", "--name", "Blank")
+        #expect(response.output.contains("  3 Blank — about:blank"))
+        #expect(!response.output.contains("3 Blank — about:blank (open"), "URLで足しただけではページを開かない")
+
+        response = await run("ui")
+        #expect(response.output.contains("bookmarks bar: [*仕事 › Pinned ▾] [Blank]"))
+
+        response = await run("bookmark-open", "3")
+        #expect(response.ok, "\(response.output)")
+        #expect(response.output.contains("[bookmark: Blank]"))
+        #expect(await run("ui").output.contains("[仕事 ▾] [*Blank (open)]"))
+        #expect(await !run("bookmark-open", "1").ok, "フォルダは開けない")
+        #expect(await !run("bookmark-open", "9").ok)
+
+        response = await run("bookmark-remove", "1")
+        #expect(!response.output.contains("Pinned"))
+        #expect(store.tabs.map(\.title) == ["Pinned"], "消したブックマークのページはタブに残る")
+    }
+
     @Test func rejectsBadInput() async {
         #expect(await !run("bogus").ok)
         #expect(await !run("--tab", "99", "wait").ok)

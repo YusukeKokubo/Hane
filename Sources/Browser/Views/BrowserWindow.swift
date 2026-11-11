@@ -49,6 +49,7 @@ private struct NavigationRow: View {
             Button("進む", systemImage: "chevron.right") { tab.goForward() }
                 .disabled(!tab.canGoForward)
             AddressBar(tab: tab, store: store)
+            BookmarkStarButton(tab: tab, store: store)
             if tab.page.isLoading {
                 Button("読み込みを中止", systemImage: "xmark") { tab.stop() }
             } else {

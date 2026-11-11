@@ -43,6 +43,36 @@ struct BrowserCommands: Commands {
                     .keyboardShortcut(KeyEquivalent(Character("\(number)")))
             }
         }
+
+        // バーと同じものを、キーボードやメニューからも選べるようにする。
+        CommandMenu("ブックマーク") {
+            Button(hasBookmarkForSelectedPage ? "ブックマークを編集…" : "ブックマークを追加…") {
+                store.requestBookmarkEditor()
+            }
+            .keyboardShortcut("d")
+            .disabled(store.selected?.page.url == nil)
+            if !store.bookmarks.items.isEmpty {
+                Divider()
+            }
+            ForEach(store.bookmarks.items) { item in
+                switch item {
+                case .bookmark(let bookmark):
+                    Button(bookmark.title) { store.activate(bookmark: bookmark.id) }
+                case .folder(let folder):
+                    Menu {
+                        ForEach(folder.bookmarks) { bookmark in
+                            Button(bookmark.title) { store.activate(bookmark: bookmark.id) }
+                        }
+                    } label: {
+                        Label(folder.name, systemImage: "folder")
+                    }
+                }
+            }
+        }
+    }
+
+    private var hasBookmarkForSelectedPage: Bool {
+        store.selected.flatMap(store.bookmark(for:)) != nil
     }
 
     private func closeTab() {

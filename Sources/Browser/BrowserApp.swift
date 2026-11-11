@@ -8,7 +8,7 @@ struct BrowserApp: App {
     private let control: ControlService
 
     init() {
-        let store = TabStore()
+        let store = TabStore(bookmarks: .forCurrentProfile())
         _store = State(initialValue: store)
         control = ControlService(store: store)
         control.start()

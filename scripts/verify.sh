@@ -61,6 +61,15 @@ expect "JavaScriptの実行" '"Second"' eval document.title
 sleep 1
 expect "新しいウインドウ宛てのリンクは新規タブで開く" '* tab 2: Second' tabs
 expect "タブを閉じる" 'closed tab 2' close 2
+"$CTL" open "$FIXTURES/smoke.html" >/dev/null
+expect "今のタブをブックマークにする" '2 Smoke' bookmark-add --folder 試験
+expect "フォルダの中のページを選んでいる表示" '[*試験 › Smoke ▾]' ui
+expect "URLでブックマークを足す" '3 Second' bookmark-add "$FIXTURES/second.html" --name Second
+expect "ブックマークをその場で開く" '[bookmark: Second]' bookmark-open 3
+expect "ページを開いたブックマークの表示" '[*Second (open)]' ui
+"$CTL" bookmark-remove 3 >/dev/null
+expect "消したブックマークのページはタブに残る" 'ブックマークのページ 1' stats
+expect "残ったページは普通のタブ" 'Second — file' tabs
 expect "読み込み失敗の報告" '読み込みに失敗' open "$FIXTURES/missing.html"
 expect "失敗が記録に残る" '[navigation]' logs
 expect "資源の計測" 'Browser (app)' stats

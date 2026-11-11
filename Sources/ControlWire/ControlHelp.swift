@@ -12,6 +12,15 @@ public enum ControlHelp {
       select <番号>           タブを選択する
       close [番号]            タブを閉じる（最後の1枚は閉じられない）
 
+    ブックマーク（タブバーの左側に並ぶ。フォルダは一段だけ）
+      bookmarks              番号つきの一覧。番号はフォルダも含めた上からの通し番号
+                             ページを開いているものには (open: tab N)、選択中には * が付く
+      bookmark-add [URL|検索語] [--name 名前] [--folder フォルダ名]
+                             URLを省くと、今のタブをページごとブックマークへ移す
+                             フォルダがなければ作る
+      bookmark-open <番号>    ブックマークをその場で開く（ページがあれば切り替えるだけ）
+      bookmark-remove <番号>  ブックマークかフォルダを消す。開いていたページはタブとして残る
+
     移動（どれも読み込みが終わるまで待ってから返る）
       open <URL|検索語>       ページを開く。URLでなければ検索する
       back / forward / reload
@@ -30,7 +39,7 @@ public enum ControlHelp {
       press <キー> [番号]      キーを送る（Enter, Escape, Tab, ArrowDown など）。Enter はフォームを送信する
 
     開発と調査
-      ui                     ウインドウの枠まわりの状態（アドレスバー、ボタン、タブの並び）
+      ui                     ウインドウの枠まわりの状態（アドレスバー、ボタン、ブックマークとタブの並び）
       logs [--limit N] [--clear]
                              console出力、未処理の例外、読み込み失敗の記録（新しい順ではなく時系列）
       stats                  アプリと補助プロセスのメモリ・CPU
