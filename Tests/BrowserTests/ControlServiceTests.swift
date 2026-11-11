@@ -77,6 +77,13 @@ import Testing
         #expect(store.tabs.count == 1)
     }
 
+    @Test func windowScreenshotNeedsAWindow() async {
+        // テストには窓がないので、撮れないことを分かる言葉で返すことだけを見る。
+        let response = await run("window-screenshot")
+        #expect(!response.ok)
+        #expect(response.output.contains("窓が出ていない"))
+    }
+
     @Test func uiReportsWindowFrame() async {
         // テストには窓がないので、行があって「なし」と出ることだけを見る。
         #expect(await run("ui").output.contains("window frame: (なし)"))

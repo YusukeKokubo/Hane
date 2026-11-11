@@ -250,6 +250,9 @@ final class ControlService {
         case "screenshot":
             return try await screenshot(of: try target(), to: args.first, fullPage: fullPage)
 
+        case "window-screenshot":
+            return try windowScreenshot(to: args.first)
+
         default:
             throw ControlError("未知の命令: \(command)。`browserctl help` で一覧を見ること。")
         }
@@ -300,6 +303,48 @@ final class ControlService {
         let destination = URL(filePath: path ?? NSTemporaryDirectory() + "browser-\(UUID().uuidString.prefix(8)).png")
         try data.write(to: destination)
         return destination.path(percentEncoded: false)
+    }
+
+    /// 窓の中身をアプリ自身に描かせて画像にする。画面収録の権限が要らず、窓が裏にいても撮れる。
+    ///
+    /// `cacheDisplay` で描かせるとバーの背景が明るい外観の白で塗られて実物と違ってしまうので、
+    /// Core Animation の層をそのまま描く。窓の背景の素材は中身の外にあって写らないので、
+    /// 外観に合わせた窓の背景色を下に敷く。
+    private func windowScreenshot(to path: String?) throws -> String {
+        guard let window = Self.backgroundKeyTarget(), let view = window.contentView, let layer = view.layer else {
+            throw ControlError("窓が出ていない。")
+        }
+        view.layoutSubtreeIfNeeded()
+        let scale = window.backingScaleFactor
+        let size = view.bounds.size
+        guard let bitmap = NSBitmapImageRep(
+            bitmapDataPlanes: nil, pixelsWide: Int(size.width * scale), pixelsHigh: Int(size.height * scale),
+            bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+            colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0
+        ), let context = NSGraphicsContext(bitmapImageRep: bitmap) else {
+            throw ControlError("窓を画像にできなかった。")
+        }
+        let cg = context.cgContext
+        view.effectiveAppearance.performAsCurrentDrawingAppearance {
+            // 外観で変わる色は、外観を当てた中で具体的な色に直さないと明るい外観の色になる。
+            cg.setFillColor(NSColor.windowBackgroundColor.cgColor)
+            cg.fill(CGRect(x: 0, y: 0, width: bitmap.pixelsWide, height: bitmap.pixelsHigh))
+            cg.scaleBy(x: scale, y: scale)
+            if view.isFlipped {
+                cg.translateBy(x: 0, y: size.height)
+                cg.scaleBy(x: 1, y: -1)
+            }
+            layer.render(in: cg)
+        }
+        bitmap.size = size
+
+        guard let data = bitmap.representation(using: .png, properties: [:]) else {
+            throw ControlError("窓を画像にできなかった。")
+        }
+        let destination = URL(filePath: path ?? NSTemporaryDirectory() + "browser-window-\(UUID().uuidString.prefix(8)).png")
+        try data.write(to: destination)
+        let appearance = view.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? "dark" : "light"
+        return destination.path(percentEncoded: false) + "\nappearance: \(appearance)"
     }
 
     private func script(

@@ -24,7 +24,7 @@ scripts/update-filters.sh   # 広告ブロックのフィルタリストを取�
 
 ## 動かして確かめる
 
-画面キャプチャ（`screencapture`）はこの環境では権限がなく撮れない。UIの確認は `browserctl` で行う。
+画面キャプチャ（`screencapture`）はこの環境では権限がなく撮れない。UIの確認は `browserctl` で行う。見た目は `browserctl window-screenshot <保存先>` で窓の中身を撮って Read で見る（アプリが自分の層を描くので権限が要らず、窓が裏にいても撮れる）。
 
 ```sh
 export BROWSER_PROFILE=dev          # 必ず付ける。付けないと持ち主の普段使いのブラウザを操作してしまう
@@ -36,7 +36,7 @@ build/browserctl stats              # アプリと補助プロセスのメモリ
 build/browserctl quit               # 終わったら止める（pkill は普段使いの実体も殺すので使わない）
 ```
 
-`BROWSER_PROFILE=dev` の実体は、操作用ソケットが別で、Cookieなどを保存しない使い捨てになる。命令の一覧は `build/browserctl help`。ページの見た目は `browserctl screenshot <保存先>` で撮って Read で見られる（ページの中だけで、ウインドウの枠は写らない）。
+`BROWSER_PROFILE=dev` の実体は、操作用ソケットが別で、Cookieなどを保存しない使い捨てになる。命令の一覧は `build/browserctl help`。ページだけを撮るなら `browserctl screenshot <保存先>`。`window-screenshot` を `cacheDisplay` で作ると、バーの背景が明るい外観の白で塗られて実物と違ってしまうので、層を直に描いている。撮った画像を `sips -c` で切り抜くと真ん中が切り出されるので、縮めて見るなら `sips -Z 1200`。
 
 アドレスバーへの入力は `browserctl type <文字列>` で打てる。キーの事象を作ると持ち主の入力方式が日本語のとき仮名に化けるので、入力欄の編集部品へ文字を直接差し込んでいる。履歴から補った続きは `ui` の `completion=` に出る。
 

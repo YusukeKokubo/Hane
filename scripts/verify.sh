@@ -119,6 +119,7 @@ expect "読み込み失敗の報告" '読み込みに失敗' open "$FIXTURES/mis
 expect "失敗が記録に残る" '[navigation]' logs
 expect "資源の計測" 'Browser (app)' stats
 # 窓の枠はプロファイルごとの名前で覚える。普段使いの窓の位置を動かさないため。
+expect "窓の中身を撮る" 'appearance:' window-screenshot "${TMPDIR:-/tmp}/browser-verify-window.png"
 expect "窓の枠を覚える" "remembered as \"main-${BROWSER_PROFILE}\"" ui
 
 echo "== 資源"
