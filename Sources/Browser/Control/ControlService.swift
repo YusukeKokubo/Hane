@@ -635,6 +635,7 @@ final class ControlService {
         ) else { throw ControlError("キーの事象を作れない: \(spec)") }
 
         if FolderShortcut.handle(event, store: store) { return }
+        if ProfileShortcut.handle(event, profiles: profiles) { return }
         // メニューより先に窓の部品へ渡す。アラートや編集欄の既定のボタン（Return）とキャンセル（Esc）はここで拾われる。
         if window.performKeyEquivalent(with: event) { return }
         if NSApp.mainMenu?.performKeyEquivalent(with: event) == true { return }

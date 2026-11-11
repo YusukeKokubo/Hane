@@ -26,6 +26,7 @@ struct BrowserApp: App {
         control = ControlService(store: store, profiles: profiles)
         control.start()
         FolderShortcut.install(store: store)
+        ProfileShortcut.install(profiles: profiles)
         WindowFrameMemory.install()
         ProfileMark.install()
         // 別の実体で足したプロファイルをメニューに出すため、前に出るたびに一覧を読み直す（小さなファイル一つ）。

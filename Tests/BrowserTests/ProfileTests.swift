@@ -1,3 +1,4 @@
+import AppKit
 import ControlWire
 import Foundation
 import Testing
@@ -75,6 +76,21 @@ import Testing
         let switcher = ProfileSwitcher(current: "dev", registryURL: nil)
         #expect(try await switcher.switchTo("dev") == .alreadyHere)
         await #expect(throws: ProfileError.self) { try await switcher.switchTo("ない") }
+    }
+
+    /// ⌥⌘N だけを拾い、並んでいない番号やほかの修飾キーはページなど本来の受け手へ流す。
+    @Test func shortcutPicksProfileByPosition() throws {
+        let switcher = ProfileSwitcher(current: "dev", registryURL: nil)
+        _ = try switcher.create("仕事")
+        func key(_ number: Int, _ modifiers: NSEvent.ModifierFlags) -> NSEvent {
+            NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: modifiers, timestamp: 0, windowNumber: 0,
+                             context: nil, characters: "\(number)", charactersIgnoringModifiers: "\(number)",
+                             isARepeat: false, keyCode: 0)!
+        }
+        #expect(ProfileShortcut.handle(key(1, [.command, .option]), profiles: switcher), "1 番目はこの実体（移らない）")
+        #expect(!ProfileShortcut.handle(key(3, [.command, .option]), profiles: switcher))
+        #expect(!ProfileShortcut.handle(key(2, .command), profiles: switcher), "⌘2 はタブの切り替え")
+        #expect(!ProfileShortcut.handle(key(2, [.command, .option, .shift]), profiles: switcher))
     }
 
     @Test func profileCommands() async {

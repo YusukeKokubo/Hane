@@ -84,15 +84,19 @@ struct BrowserCommands: Commands {
         }
 
         // 選ぶと、そのプロファイルの窓へ移る（起動していなければ起こす）。この窓の中身は入れ替えない。
-        // 項目は後から増えるので、ショートカットは付けない（メニューを開くまで効かないため）。
+        // ⌥⌘1〜9 はどのキーで移るかを見せるため。項目は後から増えるので、キーそのものは ProfileShortcut が拾う。
         CommandMenu("プロファイル") {
-            Picker("プロファイル", selection: Binding(get: { profiles.current }, set: { profiles.open($0) })) {
-                ForEach(profiles.names, id: \.self) { name in
-                    Text(ProfileSwitcher.title(for: name)).tag(name)
+            ForEach(Array(profiles.names.enumerated()), id: \.element) { index, name in
+                let toggle = Toggle(ProfileSwitcher.title(for: name), isOn: Binding(
+                    get: { name == profiles.current },
+                    set: { _ in profiles.open(name) }
+                ))
+                if index < 9 {
+                    toggle.keyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: [.command, .option])
+                } else {
+                    toggle
                 }
             }
-            .pickerStyle(.inline)
-            .labelsHidden()
             Divider()
             Button("新しいプロファイル…") { profiles.isCreating = true }
         }
@@ -151,6 +155,32 @@ enum FolderShortcut {
               (1...9).contains(number), number <= store.bookmarks.folders.count
         else { return false }
         store.toggleFolder(number: number)
+        return true
+    }
+}
+
+/// ⌥⌘1〜9 で、メニューで上から N 番目のプロファイルへ移る。
+///
+/// プロファイルは起動したあとにも増え、増えた項目のショートカットはメニューを一度開くまで効かないので、
+/// フォルダの ⌃1〜9 と同じく AppKit の局所モニタで先に拾う。WebView にフォーカスがあっても届く。
+@MainActor
+enum ProfileShortcut {
+    static func install(profiles: ProfileSwitcher) {
+        NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            let handled = MainActor.assumeIsolated { handle(event, profiles: profiles) }
+            return handled ? nil : event
+        }
+    }
+
+    /// ⌥⌘N なら N 番目のプロファイルへ移って true を返す。押しっぱなしの繰り返しでは何度も起こさない。
+    static func handle(_ event: NSEvent, profiles: ProfileSwitcher) -> Bool {
+        guard event.modifierFlags.intersection(.deviceIndependentFlagsMask) == [.command, .option],
+              let number = event.charactersIgnoringModifiers.flatMap({ Int($0) }),
+              (1...9).contains(number), number <= profiles.names.count
+        else { return false }
+        if !event.isARepeat {
+            profiles.open(profiles.names[number - 1])
+        }
         return true
     }
 }

@@ -184,6 +184,16 @@ expect "起こした実体も使い捨て" "${CHILD} (使い捨て)" profiles
 expect "別の実体のタブは混ざらない" 'tabs (left to right):' ui
 expect "起こした実体を止める" 'quitting pid' quit
 TARGET=""
+sleep 1
+"$CTL" key cmd+opt+2 >/dev/null
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+    "$CTL" profiles | grep -qF "${CHILD} — running" && break
+    sleep 1
+done
+expect "⌥⌘2で2番目のプロファイルへ移る" "${CHILD} — running" profiles
+TARGET="$CHILD"
+expect "キーで起こした実体を止める" 'quitting pid' quit
+TARGET=""
 
 echo "== 資源"
 "$CTL" stats
