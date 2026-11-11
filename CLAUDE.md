@@ -15,7 +15,7 @@
 ```sh
 swift build                 # デバッグビルド
 swift test                  # 単体テスト
-scripts/bundle.sh [--run]   # リリースビルド → build/Browser.app と build/browserctl（Ad-hoc署名）
+scripts/bundle.sh [--install] [--run]  # リリースビルド → build/Browser.app と build/browserctl（Ad-hoc署名）。--install で ~/Applications に置く（Raycast から起動できる）
 scripts/verify.sh           # テスト → ビルド → 開発用の別実体で通し確認。変更したら必ずこれを通す
 ```
 
