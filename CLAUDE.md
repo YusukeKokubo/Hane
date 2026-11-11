@@ -54,6 +54,8 @@ build/browserctl quit               # 終わったら止める（pkill は普段
 
 `scripts/profile.sh record <秒>` はこの記録から、秒ごとのサンプル数、区間の印、重い関数（アプリ自身のコード、その関数自身、呼んだ先も含む全体）を文字にまとめる。操作しながら測るときは裏で走らせ、2秒ほど待ってから `browserctl` で操作する。秒ごとの表で山を見つけたら、`scripts/profile.sh summary <trace> <開始秒> <終了秒>` でその時間帯だけを見る。`xctrace` の書き出しは同じ値の2回目から参照で省くので、grep で数えると少なく見える。
 
+SwiftUI の中で重いときは、Time Profiler の関数名がレイアウトの内部ばかりになり、どの画面の部品かは分からない。そのときは部品を一つずつ `Color.clear` などに差し替えて、同じ操作の間のメインスレッドのサンプル数を比べると早い。Instruments の SwiftUI テンプレートは、attach でも起動からでも（get-task-allow を付けても）更新の表が空だったので頼れない。
+
 修正が窓まわりに副作用を出していないかは `browserctl ui` の `window frame:` で見る（大きさ、画面の左上からの位置、覚えている名前）。
 
 ## 構成

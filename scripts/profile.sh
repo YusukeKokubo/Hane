@@ -6,8 +6,9 @@
 #   scripts/profile.sh record <秒>
 #       BROWSER_PROFILE（既定 dev）の実体のアプリ本体を記録し、build/profile/<日時>.trace に置いて要約を出す。
 #       記録の間に browserctl で操作するなら、これを裏で走らせて、2秒ほど待ってから操作する。
-#   scripts/profile.sh summary <trace> [開始秒 終了秒] [--top N]
+#   scripts/profile.sh summary <trace> [開始秒 終了秒] [--top N] [--step 秒]
 #       記録済みのものを要約する。秒ごとの表で山を見つけたら、その時間帯を指定して中身を見る。
+#       --step 0.1 のように刻みを細かくすると、区間の印と山の前後を突き合わせやすい。
 #
 # 数字はサンプルの数で、1サンプルがおよそ1ミリ秒のCPU。ページのプロセス（WebContent）は含まない。
 set -eu
@@ -19,7 +20,7 @@ case "${BROWSER_PROFILE:-}" in
 esac
 
 usage() {
-    sed -n '5,10p' "$0" | sed 's/^# \{0,1\}//' >&2
+    sed -n '5,11p' "$0" | sed 's/^# \{0,1\}//' >&2
     exit 2
 }
 
@@ -43,7 +44,14 @@ if "--top" in rest:
     index = rest.index("--top")
     top = int(rest[index + 1])
     del rest[index:index + 2]
-window = (float(rest[0]), float(rest[1])) if len(rest) >= 2 else None
+step = 1.0
+if "--step" in rest:
+    index = rest.index("--step")
+    step = float(rest[index + 1])
+    del rest[index:index + 2]
+if len(rest) not in (0, 2):
+    sys.exit(f"時間帯は「開始秒 終了秒」の二つで指定すること: {rest}")
+window = (float(rest[0]), float(rest[1])) if rest else None
 
 
 def rows(path):
@@ -107,12 +115,13 @@ if not samples:
     print("サンプルがない（記録の間、アプリ本体はほとんど動いていなかった）")
 end = max([s[0] for s in samples] + [m[0] for m in marks] + [0])
 
-print("== 秒ごとのサンプル数")
-per_second = collections.Counter(int(s[0]) for s in samples)
-peak = max(per_second.values(), default=1)
-for second in range(int(end) + 1):
-    count = per_second.get(second, 0)
-    print(f"{second:4d}s {count:5d} " + "#" * round(count / peak * 40))
+print(f"== {step:g} 秒ごとのサンプル数" + ("（時間帯の中だけ）" if window else ""))
+per_step = collections.Counter(int(s[0] / step) for s in samples)
+peak = max(per_step.values(), default=1)
+first, last = (int(window[0] / step), int(window[1] / step)) if window else (0, int(end / step) + 1)
+for index in range(first, last):
+    count = per_step.get(index, 0)
+    print(f"{index * step:7.2f}s {count:5d} " + "#" * round(count / peak * 40))
 
 print("\n== 区間の印")
 for at, name, note in marks:
