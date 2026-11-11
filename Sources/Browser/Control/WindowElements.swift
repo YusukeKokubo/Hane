@@ -91,9 +91,14 @@ final class WindowElements {
     static func windows() -> [(window: NSWindow, kind: String)] {
         guard let main = NSApp.windows.first(where: { $0.isVisible && $0.canBecomeMain }) else { return [] }
         var result: [(NSWindow, String)] = [(main, "window")]
-        for child in main.childWindows ?? [] where child.isVisible {
-            result.append((child, String(describing: type(of: child)).contains("Popover") ? "popover" : "child window"))
+        // フォルダの一覧から開く編集欄のように、ポップオーバーの上に重なるものは孫の窓になる。
+        func appendChildren(of window: NSWindow) {
+            for child in window.childWindows ?? [] where child.isVisible {
+                result.append((child, String(describing: type(of: child)).contains("Popover") ? "popover" : "child window"))
+                appendChildren(of: child)
+            }
         }
+        appendChildren(of: main)
         if let sheet = main.attachedSheet, sheet.isVisible {
             result.append((sheet, "sheet"))
         }

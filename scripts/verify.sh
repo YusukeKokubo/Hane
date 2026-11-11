@@ -114,12 +114,14 @@ fi
 "$CTL" bookmark-add "$FIXTURES/second.html" --name 三番 >/dev/null
 expect "ブックマークの右クリックのメニュー" '名前とフォルダを編集…' ui-menu bookmark:三番
 expect "メニューから編集のポップオーバーを出す" 'overlay: popover' ui-menu bookmark:三番 名前とフォルダを編集…
-# 名前の欄は見出しが別の部品になっていて、欄そのものの名前は空。
-"$CTL" ui-click textfield: >/dev/null
+"$CTL" ui-click textfield:名前 >/dev/null
 "$CTL" type --replace 四番 >/dev/null
 expect "選択欄でフォルダを選ぶ" 'chose "試験"' ui-menu 'popup:なし（いちばん上）' 試験
 expect "Returnで編集を終える" 'bookmarks bar: [試験 ▾]' key return
 expect "名前とフォルダが変わる" 'folder list: 試験 [>1 Smoke] [2 二番] [3 四番]' key ctrl+1
+"$CTL" ui-menu bookmark:四番 名前とフォルダを編集… >/dev/null
+expect "一覧の行から開いた編集欄（ポップオーバーの上に重なる）も一覧に出る" 'textfield "名前" value="四番"' ui-snapshot
+"$CTL" key escape >/dev/null
 "$CTL" key escape >/dev/null
 expect "フォルダの名前を変えるアラート" 'overlay: sheet' ui-menu folder:試験 名前を変更…
 "$CTL" type --replace 検証 >/dev/null

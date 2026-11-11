@@ -366,6 +366,8 @@ struct BookmarkEditor: View {
             }
             Form {
                 TextField("名前:", text: $name)
+                    // フォームの中では見出しが別の部品になり、欄そのものは名前を持たないので付ける。
+                    .accessibilityLabel("名前")
                 Picker("フォルダ:", selection: $folderChoice) {
                     Text("なし（いちばん上）").tag(FolderChoice.none)
                     if !store.bookmarks.folders.isEmpty {
@@ -379,6 +381,7 @@ struct BookmarkEditor: View {
                 }
                 if folderChoice == .new {
                     TextField("フォルダ名:", text: $newFolderName)
+                        .accessibilityLabel("フォルダ名")
                 }
             }
             HStack {

@@ -308,7 +308,9 @@ final class ControlService {
                 }
                 NSApp.terminate(nil)
             }
-            return "quitting"
+            // どの実体を止めたかを残す。同じプロファイルの古い実体が残っていて、思わぬ方を止めたことがあった。
+            let executable = Bundle.main.executableURL?.path(percentEncoded: false) ?? "?"
+            return "quitting pid \(getpid()) (\(executable))"
 
         case "screenshot":
             return try await screenshot(of: try target(), to: args.first, fullPage: fullPage)
