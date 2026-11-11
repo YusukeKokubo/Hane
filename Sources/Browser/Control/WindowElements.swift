@@ -18,7 +18,11 @@ final class WindowElements {
         let object: NSObject
         let window: NSWindow
         let kind: String
-        let label: String
+        let name: String
+        /// 一覧に出した行。名前が重なったときに候補として見せる。
+        let line: String
+
+        var label: String { "\(kind) \"\(name)\"" }
     }
 
     /// 部品から出るメニュー。右クリックのメニューか、選択欄（ポップアップボタン）の選択肢。
@@ -40,6 +44,9 @@ final class WindowElements {
         "AXCheckBox": "checkbox", "AXRadioButton": "radio", "AXPopUpButton": "popup",
         "AXMenuButton": "menubutton", "AXLink": "link", "AXSlider": "slider",
     ]
+
+    /// 画面の側でアクセシビリティの識別子を付けた、バーの項目のまとまり。中の部品ではなく項目ごと一行に出す。
+    private static let itemKinds: Set<String> = ["tab", "bookmark", "folder"]
 
     // MARK: 一覧
 
@@ -73,7 +80,7 @@ final class WindowElements {
         for (window, kind) in windows {
             lines.append("\(kind):")
             if let content = window.contentView {
-                collect(content, in: window, relativeTo: main, depth: 0, into: &lines)
+                collect(content, in: window, relativeTo: main, depth: 0, insideItem: false, into: &lines)
             }
         }
         lines.append("（座標は窓の左上から。window-screenshot の画像と同じ向き）")
@@ -93,14 +100,27 @@ final class WindowElements {
         return result
     }
 
-    private func collect(_ element: Any, in window: NSWindow, relativeTo main: NSWindow, depth: Int, into lines: inout [String]) {
+    private func collect(
+        _ element: Any, in window: NSWindow, relativeTo main: NSWindow, depth: Int, insideItem: Bool, into lines: inout [String]
+    ) {
         guard depth < 40, let object = element as? NSObject else { return }
         // ページの中身は snapshot の受け持ち。
         if object is WKWebView { return }
 
         let role = Self.attribute(object, "accessibilityRole") as? String ?? ""
+        let identifier = Self.text(object, "accessibilityIdentifier")
+        var kind = Self.kinds[role]
+        var childrenInsideItem = insideItem
+        if role == "AXGroup", Self.itemKinds.contains(identifier) {
+            kind = identifier
+            childrenInsideItem = true
+        } else if insideItem, role == "AXStaticText" {
+            // 項目の題名は項目の行に出ているので重ねない。中のボタンは別に出す。
+            kind = nil
+        }
+
         let frame = Self.frame(of: object)
-        if let kind = Self.kinds[role], frame.width > 0, frame.height > 0 {
+        if let kind, frame.width > 0, frame.height > 0 {
             let label = Self.text(object, "accessibilityLabel")
             let title = Self.text(object, "accessibilityTitle")
             let value = Self.text(object, "accessibilityValue")
@@ -108,17 +128,45 @@ final class WindowElements {
             let placeholder = Self.text(object, "accessibilityPlaceholderValue")
             let name = [label, title, kind == "textfield" ? "" : value, placeholder].first { !$0.isEmpty } ?? ""
 
-            elements.append(Element(object: object, window: window, kind: kind, label: "\(kind) \"\(name)\""))
-            var line = "[\(elements.count)] \(kind) \"\(Self.clip(name, 80))\""
+            var line = "[\(elements.count + 1)] \(kind) \"\(Self.clip(name, 80))\""
             if kind == "textfield" { line += " value=\"\(Self.clip(value, 80))\"" }
             if !help.isEmpty, help != name { line += " help=\"\(Self.clip(help, 80))\"" }
             if Self.attribute(object, "accessibilityEnabled") as? Bool == false { line += " (disabled)" }
             let x = Int(frame.minX - main.frame.minX), y = Int(main.frame.maxY - frame.maxY)
             line += " @\(x),\(y) \(Int(frame.width))x\(Int(frame.height))"
+            elements.append(Element(object: object, window: window, kind: kind, name: name, line: line))
             lines.append("  " + line)
         }
         for child in Self.attribute(object, "accessibilityChildren") as? [Any] ?? [] {
-            collect(child, in: window, relativeTo: main, depth: depth + 1, into: &lines)
+            collect(child, in: window, relativeTo: main, depth: depth + 1, insideItem: childrenInsideItem, into: &lines)
+        }
+    }
+
+    /// 番号か名前で指された部品の番号。
+    ///
+    /// 名前なら今の窓から一覧を取り直して探す（番号は振り直しになる）。並びが変わったあとに古い番号で
+    /// 別の部品を押す取り違えを避けるため。`tab:Second` のように種類を前に付けると、同じ名前を見分けられる。
+    func resolve(_ reference: String) async throws -> Int {
+        if let number = Int(reference) { return number }
+        var kind: String?
+        var name = reference
+        if let colon = reference.firstIndex(of: ":") {
+            let prefix = String(reference[..<colon])
+            if Self.kinds.values.contains(prefix) || Self.itemKinds.contains(prefix) {
+                kind = prefix
+                name = String(reference[reference.index(after: colon)...])
+            }
+        }
+        _ = try await snapshot()
+        let matches = elements.indices.filter { elements[$0].name == name && (kind == nil || elements[$0].kind == kind) }
+        switch matches.count {
+        case 1:
+            return matches[0] + 1
+        case 0:
+            throw ControlError("「\(reference)」という部品はない。`ui-snapshot` で名前を確かめること。")
+        default:
+            throw ControlError("「\(reference)」に合う部品が \(matches.count) 個ある。番号か、tab:名前 のように種類を付けて指すこと。\n"
+                + matches.map { "  " + elements[$0].line }.joined(separator: "\n"))
         }
     }
 

@@ -13,6 +13,8 @@ final class ControlService {
     private let world = WKContentWorld.world(name: "browserctl")
     /// `ui-snapshot` で振った番号と、窓まわりの部品の対応。
     private let windowElements = WindowElements()
+    /// アプリの起動とほぼ同時に作られるので、起動した時刻として使う。
+    private let launchedAt = Date()
 
     private static let loadTimeout: Duration = .seconds(30)
 
@@ -142,15 +144,15 @@ final class ControlService {
             return try await windowElements.snapshot()
 
         case "ui-click":
-            let result = try windowElements.click(try integer(try argument(args, 0, "部品の番号"), "部品の番号"))
+            let result = try windowElements.click(try await windowElements.resolve(try argument(args, 0, "部品の番号か名前")))
             return await afterUIAction(result)
 
         case "ui-hover":
-            let result = try windowElements.hover(try integer(try argument(args, 0, "部品の番号"), "部品の番号"))
+            let result = try windowElements.hover(try await windowElements.resolve(try argument(args, 0, "部品の番号か名前")))
             return await afterUIAction(result)
 
         case "ui-menu":
-            let menu = try windowElements.menu(try integer(try argument(args, 0, "部品の番号"), "部品の番号"))
+            let menu = try windowElements.menu(try await windowElements.resolve(try argument(args, 0, "部品の番号か名前")))
             guard args.count > 1 else {
                 return "menu of \(menu.label):\n" + menu.items.enumerated().map { index, item in
                     "  [\(index + 1)] " + (item === menu.selected ? "* " : "") + item.title
@@ -294,6 +296,7 @@ final class ControlService {
             }
             return ProcessStats.table(report)
                 + "\ntabs: \(tabs.total)（うちページあり \(tabs.withContent)、ブックマークのページ \(tabs.bookmarkPages)）"
+                + (isStaleBuild ? "\n" + describeBuild() : "")
 
         case "quit":
             // 応答を返し終えてから終了する。
@@ -469,7 +472,7 @@ final class ControlService {
 
     /// ウインドウの枠まわり（ページの外側）が今どう見えているか。
     private func describeUI() -> String {
-        var lines = ["profile: \(BrowserProfile.name)", "window frame: " + describeWindowFrame()]
+        var lines = ["profile: \(BrowserProfile.name)", describeBuild(), "window frame: " + describeWindowFrame()]
         if let tab = store.selected {
             let state: (Bool) -> String = { $0 ? "enabled" : "disabled" }
             lines.append("window title: \(tab.title)")
@@ -498,6 +501,25 @@ final class ControlService {
         lines.append("tabs (left to right):")
         lines.append(contentsOf: store.allTabs.map(describe))
         return lines.joined(separator: "\n")
+    }
+
+    /// 動いている実体と、その実行ファイルがいつ作られたか。
+    ///
+    /// 作り直したのに古い実体が動き続けていて（シートが出ていて終われなかったなど）、
+    /// 古い版を確かめていたことがあった。起動のあとに作り直されていればそう書く。
+    private func describeBuild() -> String {
+        let built = Self.executableDate().map { Self.clock.string(from: $0) } ?? "?"
+        return "app: pid \(getpid()), started \(Self.clock.string(from: launchedAt)), built \(built)"
+            + (isStaleBuild ? "（起動したあとに作り直されている。古い版が動いているので quit して起動し直すこと）" : "")
+    }
+
+    private var isStaleBuild: Bool {
+        Self.executableDate().map { $0 > launchedAt } ?? false
+    }
+
+    private static func executableDate() -> Date? {
+        guard let path = Bundle.main.executableURL?.path(percentEncoded: false) else { return nil }
+        return (try? FileManager.default.attributesOfItem(atPath: path))?[.modificationDate] as? Date
     }
 
     /// 窓の大きさと位置、覚えている名前。窓の枠を戻す仕組みが効いているかを外から確かめるため。

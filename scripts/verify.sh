@@ -90,15 +90,14 @@ expect "Escで補った部分だけ取り消す" "address bar: \"$FIXTURES/sec\"
 "$CTL" type o >/dev/null
 expect "補ったまま確定して移る" 'window title: Second' key return
 expect "打って訪れた回数を数える" 'typed 2 visits' history
-# 窓まわりの部品をマウスで操作する。番号は並びで変わるので、ui-snapshot から名前で引く。
-ui_number() { "$CTL" ui-snapshot | grep -F -- "$1" | head -1 | sed 's/^ *\[\([0-9]*\)\].*/\1/'; }
-"$CTL" new "$FIXTURES/second.html" >/dev/null
-expect "窓まわりの部品の一覧" 'button "新規タブ"' ui-snapshot
-expect "新規タブのボタンを押す" 'window title: 新規タブ' ui-click "$(ui_number 'button "新規タブ"')"
+# 窓まわりの部品をマウスで操作する。部品は名前で指す（tab: のように種類を付けると同じ名前を見分けられる）。
+"$CTL" new "$FIXTURES/smoke.html" >/dev/null
+expect "窓まわりの部品の一覧" 'tab "Smoke"' ui-snapshot
+expect "新規タブのボタンを押す" 'window title: 新規タブ' ui-click button:新規タブ
+expect "名前が重なると候補を出して断る（新規タブのタブとボタン）" 'に合う部品が 2 個ある' ui-click 新規タブ
 closers="$("$CTL" ui-snapshot | grep -c 'タブを閉じる' || true)"
-expect "選んでいないタブにポインタを乗せる" 'hovering text "Second"' ui-hover "$(ui_number 'text "Second"')"
 # SwiftUI の onHover は前面にいるときしか効かない。持ち主の作業を遮らないよう、前には出さずに飛ばす。
-if "$CTL" ui-hover "$(ui_number 'text "Second"')" | grep -q '裏にいる'; then
+if "$CTL" ui-hover tab:Smoke | grep -q '裏にいる'; then
     echo "  skip 乗せたタブにも閉じるボタンが出る（アプリが裏にいる）"
 else
     after="$("$CTL" ui-snapshot | grep -c 'タブを閉じる' || true)"
@@ -113,15 +112,16 @@ fi
 "$CTL" close >/dev/null
 "$CTL" close >/dev/null
 "$CTL" bookmark-add "$FIXTURES/second.html" --name 三番 >/dev/null
-expect "ブックマークの右クリックのメニュー" '名前とフォルダを編集…' ui-menu "$(ui_number 'text "三番"')"
-expect "メニューから編集のポップオーバーを出す" 'overlay: popover' ui-menu "$(ui_number 'text "三番"')" 名前とフォルダを編集…
-"$CTL" ui-click "$(ui_number 'value="三番"')" >/dev/null
+expect "ブックマークの右クリックのメニュー" '名前とフォルダを編集…' ui-menu bookmark:三番
+expect "メニューから編集のポップオーバーを出す" 'overlay: popover' ui-menu bookmark:三番 名前とフォルダを編集…
+# 名前の欄は見出しが別の部品になっていて、欄そのものの名前は空。
+"$CTL" ui-click textfield: >/dev/null
 "$CTL" type --replace 四番 >/dev/null
-expect "選択欄でフォルダを選ぶ" 'chose "試験"' ui-menu "$(ui_number 'popup "')" 試験
+expect "選択欄でフォルダを選ぶ" 'chose "試験"' ui-menu 'popup:なし（いちばん上）' 試験
 expect "Returnで編集を終える" 'bookmarks bar: [試験 ▾]' key return
 expect "名前とフォルダが変わる" 'folder list: 試験 [>1 Smoke] [2 二番] [3 四番]' key ctrl+1
 "$CTL" key escape >/dev/null
-expect "フォルダの名前を変えるアラート" 'overlay: sheet' ui-menu "$(ui_number 'text "試験"')" 名前を変更…
+expect "フォルダの名前を変えるアラート" 'overlay: sheet' ui-menu folder:試験 名前を変更…
 "$CTL" type --replace 検証 >/dev/null
 expect "Returnでアラートを確定する" 'bookmarks bar: [検証 ▾]' key return
 frame="$("$CTL" ui | sed -n 's/^window frame: \([0-9]*\)x\([0-9]*\) .*/\1 \2/p')"

@@ -25,6 +25,8 @@ SECONDS_PER_PHASE="${BENCH_SECONDS:-10}"
 SETTLE="${BENCH_SETTLE:-15}"
 NAVIGATE_SECONDS="${BENCH_NAVIGATE:-6}"
 CTL="$ROOT/build/browserctl"
+# 前面で測る。裏のアプリは macOS に間引かれることがあり、前の結果と比べられなくなるため。
+export BROWSER_LAUNCH=front
 
 BUILD=1
 RUNS=1

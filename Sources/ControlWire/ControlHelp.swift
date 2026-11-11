@@ -87,6 +87,8 @@ public enum ControlHelp {
     環境変数
       BROWSER_PROFILE=<名前>  普段使いとは別の実体を相手にする。ソケットが別になり、
                              Cookieなどは保存されない。開発や検証では dev を使うこと。
+                             起動していなければ、隣の build/Browser.app を裏で起こす（前には出ない）
+      BROWSER_LAUNCH=front   自動で起こすとき前に出す。乗せたときだけ出る表示（ui-hover）は前面でしか確かめられない
 
     典型的な流れ
       browserctl open example.com

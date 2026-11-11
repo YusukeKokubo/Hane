@@ -71,6 +71,10 @@ private struct BookmarkChip: View {
         }
         .draggable(BarDragItem.bookmark(bookmark.id))
         .barDropTarget(.leading) { store.drop($0, into: nil, before: bookmark.id) }
+        // タブとブックマークとフォルダを、VoiceOver や browserctl の ui-snapshot から見分けられるようにする。
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(bookmark.title)
+        .accessibilityIdentifier("bookmark")
     }
 
     private func state(of tab: Tab?) -> BarItemState {
@@ -183,6 +187,10 @@ private struct FolderChip: View {
         }
         .draggable(BarDragItem.bookmark(folder.id))
         .barDropTarget(.highlight) { store.drop($0, into: folder.id, before: nil) }
+        // タブとブックマークとフォルダを、VoiceOver や browserctl の ui-snapshot から見分けられるようにする。
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(folder.name)
+        .accessibilityIdentifier("folder")
     }
 }
 
@@ -290,6 +298,10 @@ private struct FolderRow: View {
         }
         .draggable(BarDragItem.bookmark(bookmark.id))
         .barDropTarget(.top) { store.drop($0, into: folderID, before: bookmark.id) }
+        // タブとブックマークとフォルダを、VoiceOver や browserctl の ui-snapshot から見分けられるようにする。
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(bookmark.title)
+        .accessibilityIdentifier("bookmark")
     }
 }
 

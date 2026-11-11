@@ -91,6 +91,7 @@ import Testing
         #expect(response.output.contains("ui-snapshot"))
         #expect(await !run("ui-click").ok)
         #expect(await !run("ui-hover", "x").ok)
+        #expect(await run("ui-hover", "tab:Second").output.contains("窓が出ていない"), "名前で指すときは窓から拾い直す")
         #expect(await !run("ui-menu", "1").ok)
 
         response = await run("window-size", "800", "600")
@@ -100,7 +101,9 @@ import Testing
 
     @Test func uiReportsWindowFrame() async {
         // テストには窓がないので、行があって「なし」と出ることだけを見る。
-        #expect(await run("ui").output.contains("window frame: (なし)"))
+        let ui = await run("ui").output
+        #expect(ui.contains("window frame: (なし)"))
+        #expect(ui.contains("app: pid \(getpid()), started "), "古い版が動いていないか確かめられるよう、起動と作った時刻を出す")
     }
 
     @Test func bookmarkCommands() async throws {

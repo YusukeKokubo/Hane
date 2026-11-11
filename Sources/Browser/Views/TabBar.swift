@@ -115,6 +115,10 @@ private struct TabItem: View {
         .onHover { isHovered = $0 }
         .help(tab.url?.absoluteString ?? tab.title)
         .draggable(BarDragItem.tab(tab.id))
+        // タブとブックマークとフォルダを、VoiceOver や browserctl の ui-snapshot から見分けられるようにする。
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(tab.title)
+        .accessibilityIdentifier("tab")
     }
 }
 
