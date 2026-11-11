@@ -76,7 +76,7 @@ private struct TabItem: View {
         .contentShape(.rect)
         .onTapGesture(perform: onSelect)
         .onHover { isHovered = $0 }
-        .help(tab.page.url?.absoluteString ?? tab.title)
+        .help(tab.url?.absoluteString ?? tab.title)
         .draggable(BarDragItem.tab(tab.id))
     }
 }

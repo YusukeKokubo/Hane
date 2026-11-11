@@ -51,7 +51,7 @@ struct BrowserCommands: Commands {
                 store.requestBookmarkEditor()
             }
             .keyboardShortcut("d")
-            .disabled(store.selected?.page.url == nil)
+            .disabled(store.selected?.url == nil)
             // バーのフォルダの一覧を開く。⌘1〜9 はタブの切り替えに使っているので ⌃ にする。
             // キーそのものは FolderShortcut が拾う。ここはどのキーで開くかを見せるため。
             if !store.bookmarks.folders.isEmpty {

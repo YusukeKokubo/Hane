@@ -311,12 +311,12 @@ struct BookmarkStarButton: View {
             isEditing = true
         }
         .foregroundStyle(existing == nil ? AnyShapeStyle(.secondary) : AnyShapeStyle(.tint))
-        .disabled(tab.page.url == nil)
+        .disabled(tab.url == nil)
         .popover(isPresented: $isEditing, arrowEdge: .bottom) {
             BookmarkEditor(store: store, target: existing.map { .bookmark($0.id) } ?? .page(tab.id))
         }
         .onChange(of: store.bookmarkEditorRequest) {
-            if tab.page.url != nil { isEditing = true }
+            if tab.url != nil { isEditing = true }
         }
     }
 }
@@ -397,7 +397,7 @@ struct BookmarkEditor: View {
 
     private var address: String {
         switch target {
-        case .page(let id): store.tabs.first { $0.id == id }?.page.url?.absoluteString ?? ""
+        case .page(let id): store.tabs.first { $0.id == id }?.url?.absoluteString ?? ""
         case .bookmark(let id): store.bookmarks.bookmark(id)?.url.absoluteString ?? ""
         }
     }

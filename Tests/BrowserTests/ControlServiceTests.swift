@@ -34,6 +34,28 @@ import Testing
     <input type="hidden" name="secret"><a href="#next">Next</a>
     """
 
+    /// 前回の閲覧から戻しただけのタブは一覧で分かり、reload で読み込める。
+    @Test func restoredTabsWaitUntilAsked() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: "control-session-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let file = directory.appending(path: "session.json")
+        let waiting = directory.appending(path: "waiting.html")
+        SessionStore(fileURL: file).save(SavedSession(
+            pages: [SavedPage(url: directory.appending(path: "shown.html"), title: "Shown"), SavedPage(url: waiting, title: "Waiting")],
+            selected: 0
+        ))
+        let store = TabStore(factory: PageFactory(dataStore: .nonPersistent()), session: SessionStore(fileURL: file))
+        let service = ControlService(store: store)
+
+        let listing = await service.respond(to: ControlRequest(args: ["tabs"])).output
+        #expect(listing.contains("tab 2: Waiting — \(waiting.absoluteString) [not loaded]"))
+        #expect(!listing.contains("Shown — \(directory.appending(path: "shown.html").absoluteString) [not loaded]"))
+
+        _ = await service.respond(to: ControlRequest(args: ["--tab", "2", "reload"]))
+        #expect(store.tabs[1].hasContent)
+        #expect(store.selectedID == store.tabs[0].id, "読み込んでも選択は動かさない")
+    }
+
     @Test func tabCommands() async {
         var response = await run("tabs")
         #expect(response.ok)

@@ -23,11 +23,19 @@ final class Tab: Identifiable {
     private(set) var hasContent = false
     /// 直近の読み込み失敗。次の読み込みが始まると消える。
     private(set) var failure: String?
+    /// 前回の閲覧から戻したページ。`hasContent` が `false` のうちは、選ばれるのを待っている。
+    /// 戻したタブを一斉に読み込むと、タブの数だけページのプロセスが立ち上がってしまうため。
+    private(set) var restored: SavedPage?
+    /// 最後に読み込みを頼んだアドレス。読み込みに失敗して `page.url` が空のままでも、
+    /// タブの行き先を見失わないように持っておく（オフラインで起動したときなど）。
+    private var requestedURL: URL?
 
     @ObservationIgnored private var monitor: Task<Void, Never>?
 
-    init(number: Int, factory: PageFactory, opener: any TabOpening) {
+    init(number: Int, factory: PageFactory, opener: any TabOpening, restoring saved: SavedPage? = nil) {
         self.number = number
+        restored = saved
+        requestedURL = saved?.url
         page = factory.makePage(navigationDecider: NavigationDecider(opener: opener), log: log)
         monitor = Task { [weak self, page] in
             await Self.watchNavigations(of: page) { failure in
@@ -38,9 +46,25 @@ final class Tab: Identifiable {
 
     // MARK: 表示用
 
+    /// タブの行き先。読み込む前の戻したページや、読み込みに失敗したページでも返す。
+    var url: URL? { page.url ?? requestedURL }
+
+    /// 戻したページの読み込みを待つあいだ、ページ自身の題名が届くまで出しておく前回の題名。
+    /// 別のページへ移ったら使わない。
+    private var restoredTitle: String? {
+        guard let restored, !restored.title.isEmpty,
+              page.url.map({ $0.isSameDestination(as: restored.url) }) ?? true
+        else { return nil }
+        return restored.title
+    }
+
+    /// 戻しただけで、まだ読み込んでいないか。
+    var isWaitingToLoad: Bool { restored != nil && !hasContent }
+
     var title: String {
         if !page.title.isEmpty { return page.title }
-        if let url = page.url {
+        if let restoredTitle { return restoredTitle }
+        if let url {
             // ローカルファイルなどホストのないURLは、ファイル名で代える。
             return url.host() ?? (url.lastPathComponent.isEmpty ? url.absoluteString : url.lastPathComponent)
         }
@@ -61,9 +85,27 @@ final class Tab: Identifiable {
     }
 
     func load(_ request: URLRequest) {
+        restored = nil
+        start(request)
+    }
+
+    /// 戻しただけのページなら読み込みを始める。
+    func loadRestoredPage() {
+        guard isWaitingToLoad, let restored else { return }
+        start(URLRequest(url: restored.url))
+    }
+
+    private func start(_ request: URLRequest) {
         hasContent = true
         failure = nil
+        requestedURL = request.url
         page.load(request)
+    }
+
+    /// 閲覧状態として残す内容。行き先のないまっさらなタブは残さない。
+    var savedPage: SavedPage? {
+        guard let url else { return nil }
+        return SavedPage(url: url, title: page.title.isEmpty ? restoredTitle ?? "" : page.title, bookmark: bookmarkID)
     }
 
     func goBack() {
@@ -79,7 +121,7 @@ final class Tab: Identifiable {
     }
 
     func reload() {
-        guard hasContent else { return }
+        guard hasContent else { return loadRestoredPage() }
         failure = nil
         page.reload()
     }

@@ -440,8 +440,8 @@ final class ControlService {
 
     private func describe(_ tab: Tab) -> String {
         let mark = tab.id == store.selectedID ? "*" : " "
-        let url = tab.page.url?.absoluteString ?? "(空)"
-        let loading = tab.page.isLoading ? " [loading]" : ""
+        let url = tab.url?.absoluteString ?? "(空)"
+        let loading = tab.page.isLoading ? " [loading]" : tab.isWaitingToLoad ? " [not loaded]" : ""
         let bookmark = tab.bookmarkID.flatMap(store.bookmarks.bookmark).map { " [bookmark: \($0.title)]" } ?? ""
         return "\(mark) tab \(tab.number): \(tab.title) — \(url)\(loading)\(bookmark)"
     }

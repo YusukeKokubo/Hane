@@ -37,12 +37,12 @@ build/browserctl quit               # 終わったら止める（pkill は普段
 
 メニューやバーへのキー操作は `browserctl key ctrl+1` のように送れる。アプリが裏にいるとシステムはキーを届けず、前に出すと持ち主の作業を遮るので、そのときは `ControlService` が局所モニタ、メニュー、ウインドウ（出ていればポップオーバー）の順を自分で辿って手渡しする。前面にいるときは本物のキーと同じく待ち行列に積む。
 
-持ち主が普段使いで試すのは `~/Applications/Browser.app` で、`build/` を作り直しただけでは変わらない。試してもらう前に `scripts/bundle.sh --install` し、動いている実体を ⌘Q で終えて起動し直してもらう（普通のタブは戻らず、ブックマークは残る）。入った版は `cmp ~/Applications/Browser.app/Contents/MacOS/Browser build/Browser.app/Contents/MacOS/Browser` で確かめる。
+持ち主が普段使いで試すのは `~/Applications/Browser.app` で、`build/` を作り直しただけでは変わらない。試してもらう前に `scripts/bundle.sh --install` し、動いている実体を ⌘Q で終えて起動し直してもらう（タブは前回の閲覧状態から戻る。ただし入れ替え前の版で終えたときは、その版が状態を書き出していないので戻らない）。入った版は `cmp ~/Applications/Browser.app/Contents/MacOS/Browser build/Browser.app/Contents/MacOS/Browser` で確かめる。
 
 ## 構成
 
 - `Sources/Browser` 直下 — `BrowserApp`（入口）、`BrowserCommands`（メニューとキーボードショートカット）。
-- `Sources/Browser/Model` — 状態。`TabStore`（タブの一覧と選択。普通のタブと、ブックマークからその場で開いたページを分けて持つ）、`Tab`（`WebPage` を1つ所有）、`BookmarkStore`（ブックマークとフォルダの並びと保存。フォルダは一段だけ）、`PageFactory`（`WebPage` の設定をすべてここで行う）、`NavigationDecider`、`AddressResolver`、`PageLog`、`BrowserSettings`（検索先やUser-Agentなどの固定値。変えたい値はここに集める）。
+- `Sources/Browser/Model` — 状態。`TabStore`（タブの一覧と選択。普通のタブと、ブックマークからその場で開いたページを分けて持つ）、`Tab`（`WebPage` を1つ所有）、`BookmarkStore`（ブックマークとフォルダの並びと保存。フォルダは一段だけ）、`SessionStore`（閲覧状態の保存。再起動したときにタブを戻す）、`PageFactory`（`WebPage` の設定をすべてここで行う）、`NavigationDecider`、`AddressResolver`、`PageLog`、`BrowserSettings`（検索先やUser-Agentなどの固定値。変えたい値はここに集める）。
 - `Sources/Browser/Views` — 画面。`BrowserWindow`（上からタブバー、ナビゲーションの段、ページ）、`AddressBar`、`TabBar`（左にブックマーク、右に普通のタブを一列に並べる）、`BookmarkBar`（ブックマークとフォルダの項目、追加・編集のポップオーバー）。
 - `Sources/Browser/Control` — 外部操作。`ControlServer`（ソケット）、`ControlService`（命令の解釈）、`PageScripts`（ページ内で走らせるJavaScript）、`ProcessStats`。
 - `Sources/ControlWire` — アプリと `browserctl` が共有する通信の取り決めと、命令の説明文（`ControlHelp`。これが仕様の正本）。
@@ -59,6 +59,8 @@ build/browserctl quit               # 終わったら止める（pkill は普段
 - **中身が変わるメニュー項目のショートカットは当てにしない。** SwiftUI はメニューの中身を開く直前まで作り直さないので、起動後に増えた項目のキーはメニューを一度開くまで効かない。フォルダの ⌃1〜9 は、このため `FolderShortcut`（AppKitの局所モニタ）で拾っている。⌘1〜9 のように起動時から決まっている項目は問題ない。
 - **`WebPage` の解放。** `Tab` はナビゲーションを見張るタスクを持つ。`TabStore.close` が `tearDown()` で止めないと `WebPage` が残る。`closedTabReleasesItsPage` のテストが見張っている。
 - **ブックマークはArcのピン留めと同じ考え方。** 押すと新しいタブを作らずその場でページを開き、閉じてもブックマークは残る。開いていないブックマークは `WebPage` を持たない。ブックマークは普段使いのプロファイルだけ `~/Library/Application Support/Browser/bookmarks.json` に保存し、`dev` では保存しない。テストで `TabStore` を作ると保存しないブックマークになる。
+- **閲覧状態は変化を拾って書き出す。** `TabStore` が `withObservationTracking` で開いているページの並び・アドレス・題名・選択を見張り、変わったら書き出す（同じ中身なら書かない）。タイマーは使わない。終了直前にも `BrowserApp` から一度書く。普段使いのプロファイルだけ `~/Library/Application Support/Browser/session.json` に保存し、`dev` とテストでは保存しない。戻る・進むの履歴は `WebPage` に書き出す手段がないので持ち越さない。
+- **戻したタブは選ばれるまで読み込まない。** 一斉に読み込むとタブの数だけ WebContent プロセスが立ち上がるため。`TabStore.selectedID` の `didSet` で読み込みを始める。行き先は `page.url` ではなく `Tab.url` で読む（読み込み前や、読み込みに失敗して `page.url` が空のタブでも返す）。
 - **バーのドラッグは専用の型で運ぶ。** `BarDragItem` の型 `local.personal.browser.bar-item` は `Support/Info.plist` で宣言している。文字列で運ぶと、ページの入力欄に落としたとき文字として入ってしまう。
 - **テストはネットワークに出さない。** HTMLは一時ファイルに書いて `file://` で開く。`data:` や検索語はアドレスの解釈に巻き込まれやすい。
 - **`file://` のページでは例外の中身が「Script error.」に潰れる。** WebKitの仕様で、http(s) のページでは普通に取れる。

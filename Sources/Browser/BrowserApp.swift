@@ -8,11 +8,18 @@ struct BrowserApp: App {
     private let control: ControlService
 
     init() {
-        let store = TabStore(bookmarks: .forCurrentProfile())
+        let store = TabStore(bookmarks: .forCurrentProfile(), session: .forCurrentProfile())
         _store = State(initialValue: store)
         control = ControlService(store: store)
         control.start()
         FolderShortcut.install(store: store)
+        // 変化のたびに書き出してはいるが、その書き出しは処理の回の終わりまで待つので、
+        // 終了直前の変化を取りこぼさないよう最後にもう一度書く。
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification, object: nil, queue: .main
+        ) { _ in
+            MainActor.assumeIsolated { store.saveSession() }
+        }
     }
 
     var body: some Scene {

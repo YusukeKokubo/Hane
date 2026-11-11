@@ -45,7 +45,7 @@ struct AddressBar: View {
     }
 
     private func showCurrentURL() {
-        show(tab.page.url)
+        show(tab.url)
     }
 
     private func show(_ url: URL?) {

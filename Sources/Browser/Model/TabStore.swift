@@ -13,7 +13,10 @@ final class TabStore: TabOpening {
     private(set) var tabs: [Tab] = []
     /// ページを開いているブックマーク。ブックマークのIDで引く。
     private(set) var bookmarkTabs: [UUID: Tab] = [:]
-    var selectedID: Tab.ID?
+    var selectedID: Tab.ID? {
+        // 前回の閲覧から戻しただけのページは、選ばれたここで初めて読み込む。
+        didSet { selected?.loadRestoredPage() }
+    }
 
     let bookmarks: BookmarkStore
 
@@ -29,12 +32,23 @@ final class TabStore: TabOpening {
     @ObservationIgnored var addressBar = AddressBarState()
 
     @ObservationIgnored private let factory: PageFactory
+    @ObservationIgnored private let session: SessionStore
     @ObservationIgnored private var lastTabNumber = 0
 
-    init(factory: PageFactory = PageFactory(), bookmarks: BookmarkStore = BookmarkStore()) {
+    init(
+        factory: PageFactory = PageFactory(),
+        bookmarks: BookmarkStore = BookmarkStore(),
+        session: SessionStore = SessionStore()
+    ) {
         self.factory = factory
         self.bookmarks = bookmarks
-        newTab()
+        self.session = session
+        if !restore(session.load()) {
+            newTab()
+        }
+        if session.isPersistent {
+            watchSession()
+        }
     }
 
     /// バーに見える順のすべてのページ。ブックマークのページが先、普通のタブが後。
@@ -148,7 +162,7 @@ final class TabStore: TabOpening {
     /// 普通のタブをブックマークにして、ページごとブックマークの側へ移す。
     @discardableResult
     func pin(_ tabID: Tab.ID, title: String? = nil, folder: UUID? = nil, before anchor: UUID? = nil) -> Bookmark? {
-        guard let index = tabs.firstIndex(where: { $0.id == tabID }), let url = tabs[index].page.url else { return nil }
+        guard let index = tabs.firstIndex(where: { $0.id == tabID }), let url = tabs[index].url else { return nil }
         let tab = tabs.remove(at: index)
         let bookmark = bookmarks.add(title: title ?? tab.title, url: url, folder: folder, before: anchor)
         tab.bookmarkID = bookmark.id
@@ -187,19 +201,19 @@ final class TabStore: TabOpening {
 
     /// ブックマークの行き先を、そこから開いているページの今のアドレスに付け替える。
     func updateBookmarkToCurrentPage(_ id: UUID) {
-        guard let url = bookmarkTabs[id]?.page.url else { return }
+        guard let url = bookmarkTabs[id]?.url else { return }
         bookmarks.setURL(id, to: url)
     }
 
     /// そのページに対応するブックマーク。ブックマークから開いたページか、同じアドレスのもの。
     func bookmark(for tab: Tab) -> Bookmark? {
-        tab.bookmarkID.flatMap(bookmarks.bookmark) ?? bookmarks.bookmark(matching: tab.page.url)
+        tab.bookmarkID.flatMap(bookmarks.bookmark) ?? bookmarks.bookmark(matching: tab.url)
     }
 
     /// ブックマークから開いたページがブックマークのアドレスから離れていれば、そのページ名を返す。
     func awayTitle(for bookmark: Bookmark) -> String? {
         guard let tab = bookmarkTabs[bookmark.id],
-              let url = tab.page.url,
+              let url = tab.url,
               !url.isSameDestination(as: bookmark.url)
         else { return nil }
         return tab.title
@@ -262,9 +276,64 @@ final class TabStore: TabOpening {
         var isFocused = false
     }
 
-    private func makeTab() -> Tab {
+    // MARK: 閲覧状態
+
+    /// 今の閲覧状態。まっさらなタブは含めない。
+    func sessionSnapshot() -> SavedSession {
+        var snapshot = SavedSession()
+        for tab in allTabs {
+            guard let page = tab.savedPage else { continue }
+            if tab.id == selectedID { snapshot.selected = snapshot.pages.count }
+            snapshot.pages.append(page)
+        }
+        return snapshot
+    }
+
+    func saveSession() {
+        session.save(sessionSnapshot())
+    }
+
+    /// 前回の閲覧状態からタブを並べ直す。戻せるページがひとつもなければ `false`。
+    ///
+    /// 読み込むのは選んでいたページだけで、ほかは選ばれるまで待たせる。
+    private func restore(_ saved: SavedSession?) -> Bool {
+        guard let saved else { return false }
+        var selectedTab: Tab?
+        for (index, page) in saved.pages.enumerated() {
+            let tab = makeTab(restoring: page)
+            if let id = page.bookmark, bookmarks.bookmark(id) != nil, bookmarkTabs[id] == nil {
+                tab.bookmarkID = id
+                bookmarkTabs[id] = tab
+            } else {
+                // ブックマークが見つからないページは、ブックマークを消したときと同じく普通のタブとして残す。
+                tabs.append(tab)
+            }
+            if index == saved.selected { selectedTab = tab }
+        }
+        guard let fallback = selectedTab ?? tabs.last ?? allTabs.first else { return false }
+        selectedID = fallback.id
+        return true
+    }
+
+    /// 閲覧状態が変わるたびに書き出す。
+    ///
+    /// 変化を一度拾うと同じ処理の回の終わりまでまとめて待ち、書き出してから見張り直す。
+    /// タイマーで定期的に書くのではなく、変化があったときだけ動く。
+    private func watchSession() {
+        withObservationTracking {
+            _ = sessionSnapshot()
+        } onChange: { [weak self] in
+            Task { @MainActor in
+                guard let self else { return }
+                self.saveSession()
+                self.watchSession()
+            }
+        }
+    }
+
+    private func makeTab(restoring saved: SavedPage? = nil) -> Tab {
         lastTabNumber += 1
-        return Tab(number: lastTabNumber, factory: factory, opener: self)
+        return Tab(number: lastTabNumber, factory: factory, opener: self, restoring: saved)
     }
 
     private func insertTab(after anchor: Tab.ID?) -> Tab {
