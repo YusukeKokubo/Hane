@@ -25,7 +25,9 @@ scripts/bundle.sh | tail -1
 
 echo "== 通し確認（プロファイル: ${BROWSER_PROFILE}）"
 "$CTL" quit >/dev/null 2>&1 && sleep 1 || true
-"$ROOT/build/Browser.app/Contents/MacOS/Browser" >/dev/null 2>&1 &
+# browserctl に起こさせる。自分で直に起こすと、端末から起こした別の実体と補助プロセスの持ち主が
+# 同じになり、stats がそちらのプロセスまで数えてしまう。
+"$CTL" ui >/dev/null
 trap '"$CTL" quit >/dev/null 2>&1 || true' EXIT
 sleep 2
 

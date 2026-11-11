@@ -25,6 +25,13 @@ func spawnDetached(_ executable: String) -> Bool {
     posix_spawnattr_init(&attributes)
     defer { posix_spawnattr_destroy(&attributes) }
     posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_SETSID))
+    // 起こしたアプリを、端末ではなく自分自身の責任にする。そうしないと端末から起こした実体どうしで
+    // WebKit の補助プロセスの持ち主が同じ端末になり、stats が別の実体のプロセスまで数えてしまう。
+    // 関数は公開されていないので実行時に探し、なければそのまま起こす。
+    if let symbol = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "responsibility_spawnattrs_setdisclaim") {
+        let disclaim = unsafeBitCast(symbol, to: (@convention(c) (UnsafeMutablePointer<posix_spawnattr_t?>, Int32) -> Int32).self)
+        _ = disclaim(&attributes, 1)
+    }
     var actions: posix_spawn_file_actions_t?
     posix_spawn_file_actions_init(&actions)
     defer { posix_spawn_file_actions_destroy(&actions) }

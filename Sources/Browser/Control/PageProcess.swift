@@ -11,14 +11,20 @@ import WebKit
 enum PageProcess {
     /// まだ Web ビューを作っていないページ（読み込む前のタブ）では `nil`。ここで作らせはしない。
     static func identifier(of page: WebPage) -> pid_t? {
-        // 遅れて作る Web ビューの置き場は Optional なので、中身があるときだけ子が一つ見える。
-        guard let stored = Mirror(reflecting: page).children.first(where: { $0.label == "$__lazy_storage_$_backingWebView" }),
-              let view = Mirror(reflecting: stored.value).children.first?.value as? NSObject,
+        guard let view = webView(of: page),
               view.responds(to: selector),
               let pid = (view.value(forKey: "_webProcessIdentifier") as? NSNumber)?.int32Value,
               pid > 0
         else { return nil }
         return pid
+    }
+
+    /// ページが中に持っている Web ビュー。まだ作っていなければ `nil`（ここで作らせはしない）。
+    static func webView(of page: WebPage) -> WKWebView? {
+        // 遅れて作る Web ビューの置き場は Optional なので、中身があるときだけ子が一つ見える。
+        guard let stored = Mirror(reflecting: page).children.first(where: { $0.label == "$__lazy_storage_$_backingWebView" })
+        else { return nil }
+        return Mirror(reflecting: stored.value).children.first?.value as? WKWebView
     }
 
     private static let selector = NSSelectorFromString("_webProcessIdentifier")

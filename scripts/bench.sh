@@ -3,15 +3,19 @@
 #
 # 手順は「起動して何もしない」「ページを開き終えて何もしない」「同じタブでページを5回移る」
 # 「タブを閉じて何もしない」「タブを BENCH_TABS 枚（既定 10）足して何もしない」「それを閉じて何もしない」の六つ。
-# 後ろの二つで、タブ1枚あたりに増えるメモリと、閉じたあとに戻りきらない分（漏れの目安）を出す。何もしない段階は BENCH_SETTLE 秒（既定 15）待ってから
-# BENCH_SECONDS 秒（既定 10）の平均を取る。ページを移る段階は、移っている間の CPU が操作の重さの目安になる。
+# 後ろの二つで、タブ1枚あたりに増えるメモリと、閉じたあとに戻りきらない分（漏れの目安）を出す。
+# 足すタブはどれも、別のサイトへ一度移る。WebKit は別のサイトへ移るとプロセスを乗り換え、戻るときのために
+# 前のページをプロセスごと残すので、普段の使い方に近い重さになる（同じサイトの中だけだと少なく出る）。
+# 別のサイトは、手元で立てた HTTP サーバーを localhost と 127.0.0.1 の二つの名前で引いて作る。
+# 何もしない段階は BENCH_SETTLE 秒（既定 15）待ってから BENCH_SECONDS 秒（既定 10）の平均を取る。ページを移る段階は、移っている間の CPU が操作の重さの目安になる。
 # 読み込みの直後は WebKit がしばらく動いていて起床回数が跳ねるので、落ち着くのを待つ。
 # 何もしていないはずの時間に CPU や起床回数が増えていたら、常駐する処理が紛れ込んでいる。
 #
 # 使い方: scripts/bench.sh [--no-build] [--runs N] [URL…]
 #   一度の計測でも数割ぶれるので、差が小さいときは --runs 3 などで起動からやり直して何度か測る。
 #   要約には真ん中の値と、括弧の中に最小〜最大が出る。
-#   URL を省くと Tests/Fixtures のページを使う（ネットワークに出ない）。
+#   URL を省くと Tests/Fixtures のページを使う（ネットワークに出ない）。URL を渡したときは、
+#   タブを足す段階で一つ目を開いてから二つ目へ移る。
 #   実体は BROWSER_PROFILE（既定 bench）で分けるので、普段使いにも verify.sh の dev にも触れない。
 #   結果は build/bench/<日時>/ に段階ごとの JSON と要約を残し、前回の要約と並べて出す。
 set -eu
@@ -39,7 +43,9 @@ while [ "$#" -gt 0 ]; do
         *) break ;;
     esac
 done
+DEFAULT_PAGES=0
 if [ "$#" -eq 0 ]; then
+    DEFAULT_PAGES=1
     set -- "file://$ROOT/Tests/Fixtures/smoke.html" \
            "file://$ROOT/Tests/Fixtures/second.html" \
            "file://$ROOT/Tests/Fixtures/ads.html"
@@ -47,6 +53,17 @@ fi
 
 FIRST="$1"
 SECOND="${2:-$1}"
+# タブを足す段階で、開くページと、そこから移るページ。
+MANY_FROM="$FIRST"
+MANY_TO="$SECOND"
+SERVER_PID=""
+if [ "$DEFAULT_PAGES" = 1 ]; then
+    port="$(python3 -I -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')"
+    python3 -I -m http.server "$port" --bind 127.0.0.1 --directory "$ROOT/Tests/Fixtures" >/dev/null 2>&1 &
+    SERVER_PID=$!
+    MANY_FROM="http://localhost:$port/smoke.html"
+    MANY_TO="http://127.0.0.1:$port/second.html"
+fi
 
 if [ "$BUILD" = 1 ]; then
     scripts/bundle.sh | tail -1
@@ -55,7 +72,7 @@ fi
 PREVIOUS="$(ls -d build/bench/*/ 2>/dev/null | tail -1 || true)"
 OUT="build/bench/$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$OUT"
-trap '"$CTL" quit >/dev/null 2>&1 || true' EXIT
+trap '"$CTL" quit >/dev/null 2>&1 || true; [ -z "$SERVER_PID" ] || kill "$SERVER_PID" 2>/dev/null || true' EXIT
 
 # measure <回> <段階の名前>
 measure() {
@@ -105,14 +122,12 @@ while [ "$run" -le "$RUNS" ]; do
     sleep "$SETTLE"
     measure "$run" 4-closed
 
-    # タブを足して、1枚あたりの重さを見る。ページは渡されたものを順に使い回す。
+    # タブを足して、1枚あたりの重さを見る。どのタブも別のサイトへ一度移る。
     added=0
     while [ "$added" -lt "$MANY_TABS" ]; do
-        for url in "$@"; do
-            [ "$added" -lt "$MANY_TABS" ] || break
-            "$CTL" new "$url" >/dev/null
-            added=$((added + 1))
-        done
+        "$CTL" new "$MANY_FROM" >/dev/null
+        "$CTL" open "$MANY_TO" >/dev/null
+        added=$((added + 1))
     done
     sleep "$SETTLE"
     measure "$run" 5-many-tabs

@@ -292,6 +292,18 @@ import Testing
         #expect(row["tabs"] as? [Int] == [tab.number])
     }
 
+    /// タブごとにプロセスプールが分かれると、「戻る」用のページと予備のプロセスがタブの数だけ溜まる。
+    /// 共有は WebKit の中を差し替えて行っているので、効かなくなったらここで分かる。
+    @Test func pagesShareOneProcessPool() async throws {
+        try await open(html: "<title>One</title>")
+        _ = await run("new")
+        try await open(html: "<title>Two</title>")
+        let views = store.allTabs.compactMap { PageProcess.webView(of: $0.page) }
+        try #require(views.count == 2)
+        let pools = views.map { $0.configuration.value(forKey: "processPool") as AnyObject }
+        #expect(pools[0] === pools[1])
+    }
+
     /// 読み込む前のタブのために Web ビューを作らせない。
     @Test func pageProcessIsNotCreatedForEmptyTabs() {
         let tab = store.newTab()

@@ -36,7 +36,7 @@ build/browserctl stats              # アプリと補助プロセスのメモリ
 build/browserctl quit               # 終わったら止める（pkill は普段使いの実体も殺すので使わない）
 ```
 
-`BROWSER_PROFILE=dev` の実体は、操作用ソケットが別で、Cookieなどを保存しない使い捨てになる。起動していなければ `browserctl` が隣の `build/Browser.app` の実行ファイルを直に、別のセッションで起こすので、前に出て持ち主の作業を遮ることはない（`open -g` で裏に起こすと SwiftUI が窓を作らない）。前に出したいときは `BROWSER_LAUNCH=front`。`bench.sh` は前の結果と比べられるよう前面で測る。`ui` の二行目に pid と起動した時刻、実行ファイルを作った時刻が出て、起動のあとに作り直していれば古い版が動いていると書く。命令の一覧は `build/browserctl help`。ページだけを撮るなら `browserctl screenshot <保存先>`。`window-screenshot` を `cacheDisplay` で作ると、バーの背景が明るい外観の白で塗られて実物と違ってしまうので、層を直に描いている。撮った画像を `sips -c` で切り抜くと真ん中が切り出されるので、縮めて見るなら `sips -Z 1200`。
+`BROWSER_PROFILE=dev` の実体は、操作用ソケットが別で、Cookieなどを保存しない使い捨てになる。起動していなければ `browserctl` が隣の `build/Browser.app` の実行ファイルを直に、別のセッションで起こすので、前に出て持ち主の作業を遮ることはない（`open -g` で裏に起こすと SwiftUI が窓を作らない）。前に出したいときは `BROWSER_LAUNCH=front`。直に起こすときは、アプリを端末ではなく自分自身の責任プロセスにしている。端末から起こした実体どうしで WebKit の補助プロセスの持ち主が同じになると、`stats` が別の実体のプロセスまで数えてしまうため（`verify.sh` もこのため `browserctl` に起こさせる）。`bench.sh` は前の結果と比べられるよう前面で測る。`ui` の二行目に pid と起動した時刻、実行ファイルを作った時刻が出て、起動のあとに作り直していれば古い版が動いていると書く。命令の一覧は `build/browserctl help`。ページだけを撮るなら `browserctl screenshot <保存先>`。`window-screenshot` を `cacheDisplay` で作ると、バーの背景が明るい外観の白で塗られて実物と違ってしまうので、層を直に描いている。撮った画像を `sips -c` で切り抜くと真ん中が切り出されるので、縮めて見るなら `sips -Z 1200`。
 
 アドレスバーへの入力は `browserctl type <文字列>` で打てる（`--replace` で今の中身を置き換える）。キーの事象を作ると持ち主の入力方式が日本語のとき仮名に化けるので、入力欄の編集部品へ文字を直接差し込んでいる。履歴から補った続きは `ui` の `completion=` に出る。
 
@@ -54,7 +54,7 @@ build/browserctl ui-menu 二番 名前とフォルダを編集…   # 選ぶと�
 
 ## 測る
 
-`scripts/bench.sh` は `bench` プロファイルの別実体で、起動直後・ページを開き終えた後・タブを閉じた後・タブを10枚足した後・それをまた閉じた後の五つを、それぞれ15秒待ってから10秒ずつ測る。後ろの二つから、タブ1枚あたりに増えるメモリと、閉じても戻らない分（閉じたタブが残っていないかの目安）を要約の下に出す。その間に、同じタブでページを5回移る間の CPU も測る（`3-navigate` の `app cpu %` が操作の重さの目安。何もしない段階と違って待たずに測る）。読み込みの直後はWebKitが15秒ほど動いていて起床回数が跳ねるので、待たずに測ると変更の良し悪しが埋もれる。結果は `build/bench/<日時>/` に残り、前回の要約と並べて出る。一度の計測でも数割ぶれるので、差が小さいときは `--runs 3` で起動からやり直して何度か測る（真ん中の値と、括弧の中に最小〜最大が出る）。
+`scripts/bench.sh` は `bench` プロファイルの別実体で、起動直後・ページを開き終えた後・タブを閉じた後・タブを10枚足した後・それをまた閉じた後の五つを、それぞれ15秒待ってから10秒ずつ測る。後ろの二つから、タブ1枚あたりに増えるメモリと、閉じても戻らない分（閉じたタブが残っていないかの目安）を要約の下に出す。足すタブはどれも別のサイトへ一度移る（手元で立てた HTTP サーバーを `localhost` と `127.0.0.1` の二つの名前で引く）。WebKit は別のサイトへ移るとプロセスを乗り換えて前のページを残すので、同じサイトの中だけで測ると少なく出る。その間に、同じタブでページを5回移る間の CPU も測る（`3-navigate` の `app cpu %` が操作の重さの目安。何もしない段階と違って待たずに測る）。読み込みの直後はWebKitが15秒ほど動いていて起床回数が跳ねるので、待たずに測ると変更の良し悪しが埋もれる。結果は `build/bench/<日時>/` に残り、前回の要約と並べて出る。一度の計測でも数割ぶれるので、差が小さいときは `--runs 3` で起動からやり直して何度か測る（真ん中の値と、括弧の中に最小〜最大が出る）。
 
 起床回数（wakeups/s）は、タイマーや割り込みでスレッドが起こされた回数。何もしていないはずの時間にこれが増えていれば、常駐する処理が紛れ込んでいる。`browserctl stats --seconds N --json` で期間を延ばしたり、機械で読める形にしたりできる。ページのプロセス（WebContent）の行には、描いているタブの番号が付く（`PageProcess` が `WebPage` の中の Web ビューから非公開のプロセス番号を読んでいる。WebKit が変わって引けなくなると `pageProcessIsFound` のテストが落ちる）。番号のないページのプロセスは、どのタブにも結びついていないもの。最後の行に測った実行ファイルが出るので、入れてある版を測っていないか確かめる。`browserctl` は `dev` などのプロファイルを自動で起こすとき、隣にある `build/Browser.app` を選ぶ（バンドルIDで頼むと `~/Applications` の版が立ち上がるため）。
 
@@ -69,7 +69,7 @@ SwiftUI の中で重いときは、Time Profiler の関数名がレイアウト�
 ## 構成
 
 - `Sources/Browser` 直下 — `BrowserApp`（入口）、`BrowserCommands`（メニューとキーボードショートカット）。
-- `Sources/Browser/Model` — 状態。`TabStore`（タブの一覧と選択。普通のタブと、ブックマークからその場で開いたページを分けて持つ）、`Tab`（`WebPage` を1つ所有）、`BookmarkStore`（ブックマークとフォルダの並びと保存。フォルダは一段だけ）、`SessionStore`（閲覧状態の保存。再起動したときにタブを戻す）、`HistoryStore`（閲覧履歴と、アドレスバーで補う候補選び）、`PageFactory`（`WebPage` の設定をすべてここで行う）、`Signposts`（Instruments に出す区間の印）、`NavigationDecider`、`AddressResolver`、`PageLog`、`BrowserSettings`（検索先やUser-Agentなどの固定値。変えたい値はここに集める）。
+- `Sources/Browser/Model` — 状態。`TabStore`（タブの一覧と選択。普通のタブと、ブックマークからその場で開いたページを分けて持つ）、`Tab`（`WebPage` を1つ所有）、`BookmarkStore`（ブックマークとフォルダの並びと保存。フォルダは一段だけ）、`SessionStore`（閲覧状態の保存。再起動したときにタブを戻す）、`HistoryStore`（閲覧履歴と、アドレスバーで補う候補選び）、`PageFactory`（`WebPage` の設定をすべてここで行う）、`SharedProcessPool`（全タブで一つのプロセスプールを使わせる）、`Signposts`（Instruments に出す区間の印）、`NavigationDecider`、`AddressResolver`、`PageLog`、`BrowserSettings`（検索先やUser-Agentなどの固定値。変えたい値はここに集める）。
 - `Sources/Browser/Views` — 画面。`BrowserWindow`（上からタブバー、ナビゲーションの段、ページ）、`AddressBar`、`TabBar`（左にブックマーク、右に普通のタブを一列に並べる）、`BookmarkBar`（ブックマークとフォルダの項目、追加・編集のポップオーバー）。
 - `Sources/Browser/Model` の広告ブロック — `ContentBlocker`（ルールリストのコンパイルと全ページへの配布）、`FilterList`（Adblock Plus 形式をWebKitのルールに訳す）、`ContentRule`（WebKitのルールのJSON）、`HiddenElementStore`（⌥右クリックで隠した要素の保存）、`ElementPicker`（⌥右クリックで要素を選ぶページ内スクリプト）。フィルタリストの本体は `Support/Filters`。
 - `Sources/Browser/Control` — 外部操作。`ControlServer`（ソケット）、`ControlService`（命令の解釈）、`PageScripts`（ページ内で走らせるJavaScript）、`WindowElements`（窓まわりの部品の一覧とマウス操作）、`ProcessStats`、`PageProcess`（タブとページのプロセスの対応）。
@@ -90,6 +90,7 @@ SwiftUI の中で重いときは、Time Profiler の関数名がレイアウト�
 - **ブックマークはArcのピン留めと同じ考え方。** 押すと新しいタブを作らずその場でページを開き、閉じてもブックマークは残る。開いていないブックマークは `WebPage` を持たない。ブックマークは普段使いのプロファイルだけ `~/Library/Application Support/Browser/bookmarks.json` に保存し、`dev` では保存しない。テストで `TabStore` を作ると保存しないブックマークになる。
 - **閲覧状態は変化を拾って書き出す。** `TabStore` が `withObservationTracking` で開いているページの並び・アドレス・題名・選択を見張り、変わったら書き出す（同じ中身なら書かない）。タイマーは使わない。終了直前にも `BrowserApp` から一度書く。普段使いのプロファイルだけ `~/Library/Application Support/Browser/session.json` に保存し、`dev` とテストでは保存しない。戻る・進むの履歴は `WebPage` に書き出す手段がないので持ち越さない。
 - **macOS の再開は切ってある（`restorationBehavior(.disabled)`）。** 任せるとウインドウの状態が変わるたびに窓全体の画像を取って保存し、アプリ本体が25MBほど膨らんだまま戻らない（その瞬間は倍）。タブは閲覧状態で戻すので要らない。その代わり窓の位置と大きさは戻らなくなるので、`WindowFrameMemory` が AppKit の自動保存で覚える。名前はプロファイルごとに分け、開発用の実体が普段使いの窓を動かさないようにしている。
+- **プロセスプールは全タブで一つにしている（`SharedProcessPool`）。** `WebPage` はページごとに別のプールを作り、公開の設定にはプールを渡す口がない。プールが別々だと、別のサイトへ移ったとき「戻る」用に残すページ（プールごとに2つ）と先に立ち上げる予備のプロセス（プールごとに1つ）がタブの数だけ溜まり、タブ10枚で別のサイトへ一度ずつ移るとページのプロセスが34個になった（共有すると16個）。`WKWebViewConfiguration` 自身の `init` を差し替えて共有のプールを入れている。効かなくなると `pagesShareOneProcessPool` のテストが落ちる。
 - **戻したタブは選ばれるまで読み込まない。** 一斉に読み込むとタブの数だけ WebContent プロセスが立ち上がるため。`TabStore.selectedID` の `didSet` で読み込みを始める。行き先は `page.url` ではなく `Tab.url` で読む（読み込み前や、読み込みに失敗して `page.url` が空のタブでも返す）。
 - **閲覧履歴は少し遅れてまとめて書く。** 数千件を訪問のたびに書き直さないよう、変化から数秒待って書き出し、終了直前にも書く（待つのは変化のあった後の一度きりで、常駐するタイマーではない）。保存先は普段使いのプロファイルだけ `~/Library/Application Support/Browser/history.json`。上限は5000件で、超えたら最後に訪れたのが古いものから捨てる。
 - **アドレスバーで補うのは、打って訪れたページとサイトの入口だけ。** リンクで通っただけの深いページまで補うと、打つたびに思わぬ所へ飛ばされるため。「打って訪れた」は `Tab.open(typed:)` を通った読み込みで、検索結果のページは数えない。補った続きは `TextSelection` で選択した状態で入れ、打ち足すと置き換わる。打った部分を消している間は補わない（補うと消した文字が戻ってくる）。

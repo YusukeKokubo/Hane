@@ -37,6 +37,7 @@ struct PageFactory {
     }
 
     func makePage(navigationDecider: some WebPage.NavigationDeciding, log: PageLog) -> WebPage {
+        SharedProcessPool.install()
         let page = WebPage(configuration: makeConfiguration(log: log), navigationDecider: navigationDecider)
         page.isInspectable = true
         return page
