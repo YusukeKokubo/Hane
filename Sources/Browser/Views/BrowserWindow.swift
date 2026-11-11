@@ -1,21 +1,32 @@
 import SwiftUI
 import WebKit
 
-/// ウインドウの中身。上からツールバー、タブバー、ページ。
+/// ウインドウの中身。上からタブバー、ナビゲーション、ページ。
+///
+/// タブバーは開いているページの一覧、その下の段は選んだページへの操作なので、
+/// 一覧を上に置いて「選んだものの中身」が下へ続くように並べる。
 struct BrowserWindow: View {
     let store: TabStore
 
     @Environment(\.dismissWindow) private var dismissWindow
 
+    /// 左上の信号機ボタンを避けるための余白。
+    private static let windowControlsWidth: CGFloat = 78
+    /// タブが増えてもウインドウを掴んで動かせるよう、タブバーの右端に必ず残す余白。
+    private static let dragAreaWidth: CGFloat = 40
+
     var body: some View {
         VStack(spacing: 0) {
-            if let tab = store.selected {
-                NavigationRow(tab: tab, store: store)
-            }
+            // タイトルバーを兼ねる。
             TabBar(store: store) { id in
                 if !store.close(id) {
                     dismissWindow(id: BrowserApp.windowID)
                 }
+            }
+            .padding(.leading, Self.windowControlsWidth)
+            .padding(.trailing, Self.dragAreaWidth)
+            if let tab = store.selected {
+                NavigationRow(tab: tab, store: store)
             }
             Divider()
             if let tab = store.selected {
@@ -31,16 +42,13 @@ struct BrowserWindow: View {
     }
 }
 
-/// 戻る・進む、アドレスバー、再読み込みを並べた最上段。タイトルバーを兼ねる。
+/// 戻る・進む、アドレスバー、再読み込みを並べた段。タブバーの下に置く。
 ///
 /// 標準のツールバーに入力欄を置くと `FocusState` でフォーカスを移せないため、
 /// ウインドウの中身として自前で並べている。
 private struct NavigationRow: View {
     let tab: Tab
     let store: TabStore
-
-    /// 左上の信号機ボタンを避けるための余白。
-    private static let windowControlsWidth: CGFloat = 78
 
     var body: some View {
         HStack(spacing: 8) {
@@ -59,9 +67,8 @@ private struct NavigationRow: View {
         }
         .labelStyle(.iconOnly)
         .buttonStyle(.borderless)
-        .padding(.leading, Self.windowControlsWidth)
-        .padding(.trailing, 10)
-        .frame(height: 32)
+        .padding(.horizontal, 10)
+        .frame(height: 34)
     }
 }
 

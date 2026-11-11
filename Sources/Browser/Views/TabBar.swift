@@ -20,7 +20,8 @@ struct TabBar: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.horizontal, 6)
-        .padding(.vertical, 4)
+        // 信号機ボタンと縦の中心がそろう高さ（32）にする。
+        .padding(.vertical, 3)
     }
 
     private var tabRow: some View {
