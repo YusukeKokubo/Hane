@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// メニューとキーボードショートカット。
@@ -51,6 +52,17 @@ struct BrowserCommands: Commands {
             }
             .keyboardShortcut("d")
             .disabled(store.selected?.page.url == nil)
+            // バーのフォルダの一覧を開く。⌘1〜9 はタブの切り替えに使っているので ⌃ にする。
+            // キーそのものは FolderShortcut が拾う。ここはどのキーで開くかを見せるため。
+            if !store.bookmarks.folders.isEmpty {
+                Divider()
+                Section("フォルダの一覧を開く") {
+                    ForEach(Array(store.bookmarks.folders.prefix(9).enumerated()), id: \.element.id) { index, folder in
+                        Button(folder.name) { store.toggleFolder(number: index + 1) }
+                            .keyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: .control)
+                    }
+                }
+            }
             if !store.bookmarks.items.isEmpty {
                 Divider()
             }
@@ -78,6 +90,29 @@ struct BrowserCommands: Commands {
     private func closeTab() {
         if !store.closeSelected() {
             dismissWindow(id: BrowserApp.windowID)
+        }
+    }
+}
+
+/// ⌃1〜9 で、バーで左から N 番目のフォルダの一覧を開け閉めする。
+///
+/// メニューにも同じ項目を出しているが、SwiftUI はメニューの中身を開く直前まで作らないため、
+/// 起動後に足したフォルダのショートカットは、メニューを一度開くまで効かない。
+/// そのため AppKit の局所モニタでキーを先に拾う。WebView にフォーカスがあっても届く。
+@MainActor
+enum FolderShortcut {
+    static func install(store: TabStore) {
+        NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            let handled = MainActor.assumeIsolated {
+                guard event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .control,
+                      let number = event.charactersIgnoringModifiers.flatMap({ Int($0) }),
+                      (1...9).contains(number), number <= store.bookmarks.folders.count
+                else { return false }
+                store.toggleFolder(number: number)
+                return true
+            }
+            // そのフォルダがなければ、ページなど本来の受け手へそのまま流す。
+            return handled ? nil : event
         }
     }
 }

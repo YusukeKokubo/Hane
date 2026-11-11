@@ -56,6 +56,45 @@ import WebKit
         #expect(store.selectedID == last.id)
     }
 
+    /// ⌃1〜9 と一覧の中のキー操作。番号はフォルダだけを数え、行の選択は端で止まる。
+    @Test func folderListByKeyboard() {
+        let store = makeStore()
+        let url = URL(string: "about:blank")!
+        store.bookmarks.add(title: "Loose", url: url)
+        let first = store.bookmarks.addFolder(named: "First")
+        let second = store.bookmarks.addFolder(named: "Second")
+        let a = store.bookmarks.add(title: "A", url: url, folder: second.id)
+        let b = store.bookmarks.add(title: "B", url: url, folder: second.id)
+
+        store.toggleFolder(number: 2)
+        #expect(store.openFolder == .init(id: second.id, highlighted: 0))
+        store.moveFolderHighlight(by: -1)
+        #expect(store.openFolder?.highlighted == 0)
+        store.moveFolderHighlight(by: 5)
+        #expect(store.openFolder?.highlighted == 1)
+
+        // 別のフォルダへ切り替えた後に、古い一覧が閉じた知らせが来ても新しい方は残る。
+        store.toggleFolder(number: 1)
+        store.closeFolder(second.id)
+        #expect(store.openFolder?.id == first.id)
+        store.toggleFolder(number: 1)
+        #expect(store.openFolder == nil)
+
+        store.toggleFolder(number: 3)
+        #expect(store.openFolder == nil)
+
+        store.toggleFolder(second.id)
+        let opened = store.activateFolderRow()
+        #expect(opened?.bookmarkID == a.id)
+        #expect(store.openFolder == nil)
+
+        store.activate(bookmark: b.id)
+        store.toggleFolder(second.id)
+        #expect(store.openFolder?.highlighted == 1, "見ているページの行から選び始める")
+        store.removeBookmark(second.id)
+        #expect(store.openFolder == nil)
+    }
+
     /// 閉じたタブの `WebPage` が、読み込み途中でも解放されること。
     @Test func closedTabReleasesItsPage() async throws {
         let store = makeStore()

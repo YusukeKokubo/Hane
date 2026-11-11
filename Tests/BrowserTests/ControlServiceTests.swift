@@ -86,6 +86,22 @@ import Testing
         #expect(store.tabs.map(\.title) == ["Pinned"], "消したブックマークのページはタブに残る")
     }
 
+    /// フォルダの一覧が出ているあいだ、ui に行と選択の当たりが出ること。
+    @Test func folderListInUI() async {
+        let folder = store.bookmarks.addFolder(named: "仕事")
+        store.bookmarks.add(title: "A", url: URL(string: "about:blank")!, folder: folder.id)
+        store.bookmarks.add(title: "B", url: URL(string: "about:blank")!, folder: folder.id)
+        #expect(await !run("ui").output.contains("folder list"))
+
+        store.toggleFolder(number: 1)
+        store.moveFolderHighlight(by: 1)
+        #expect(await run("ui").output.contains("folder list: 仕事 [1 A] [>2 B]"))
+
+        #expect(await !run("key").ok)
+        #expect(await !run("key", "f13").ok)
+        #expect(await !run("key", "hyper+1").ok)
+    }
+
     @Test func rejectsBadInput() async {
         #expect(await !run("bogus").ok)
         #expect(await !run("--tab", "99", "wait").ok)

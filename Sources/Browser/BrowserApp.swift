@@ -12,6 +12,7 @@ struct BrowserApp: App {
         _store = State(initialValue: store)
         control = ControlService(store: store)
         control.start()
+        FolderShortcut.install(store: store)
     }
 
     var body: some Scene {

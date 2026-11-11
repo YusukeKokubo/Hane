@@ -119,7 +119,6 @@ private struct FolderChip: View {
     let store: TabStore
     let folder: BookmarkFolder
 
-    @State private var isOpen = false
     @State private var isHovered = false
     @State private var isRenaming = false
     @State private var isConfirmingDelete = false
@@ -129,6 +128,7 @@ private struct FolderChip: View {
         // 中のページを見ているときは、どのページかをフォルダ名の後ろに出す。
         let selected = folder.bookmarks.first { store.bookmarkTabs[$0.id]?.id == store.selectedID }
         let hasLivePage = folder.bookmarks.contains { store.bookmarkTabs[$0.id] != nil }
+        let isOpen = store.openFolder?.id == folder.id
 
         HStack(spacing: 6) {
             Image(systemName: "folder").foregroundStyle(.tint)
@@ -149,10 +149,13 @@ private struct FolderChip: View {
         .frame(height: 26)
         .barItemBackground(selected != nil ? .selected : (hasLivePage ? .live : .idle), isHovered: isHovered)
         .contentShape(.rect)
-        .onTapGesture { isOpen.toggle() }
+        .onTapGesture { store.toggleFolder(folder.id) }
         .onHover { isHovered = $0 }
-        .popover(isPresented: $isOpen, arrowEdge: .bottom) {
-            FolderPanel(store: store, folderID: folder.id) { isOpen = false }
+        .popover(isPresented: Binding(
+            get: { isOpen },
+            set: { if !$0 { store.closeFolder(folder.id) } }
+        ), arrowEdge: .bottom) {
+            FolderPanel(store: store, folderID: folder.id)
         }
         .contextMenu {
             Button("名前を変更…") {
@@ -183,11 +186,12 @@ private struct FolderChip: View {
     }
 }
 
-/// フォルダを押したときに下へ出す一覧。
+/// フォルダを押したときに下へ出す一覧。矢印キーで行を選び、Return か数字キーで開く。
 private struct FolderPanel: View {
     let store: TabStore
     let folderID: UUID
-    let dismiss: () -> Void
+
+    @FocusState private var isFocused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -200,13 +204,42 @@ private struct FolderPanel: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .barDropTarget(.highlight) { store.drop($0, into: folderID, before: nil) }
                 }
-                ForEach(folder.bookmarks) { bookmark in
-                    FolderRow(store: store, folderID: folderID, bookmark: bookmark, dismiss: dismiss)
+                ForEach(Array(folder.bookmarks.enumerated()), id: \.element.id) { index, bookmark in
+                    FolderRow(store: store, folderID: folderID, bookmark: bookmark, index: index)
                 }
             }
         }
         .padding(6)
         .frame(width: 300)
+        // 文字入力の欄がないので、キーを受けるには一覧そのものにフォーカスを持たせる。
+        // .edit にしておくと、システム設定の「キーボードナビゲーション」が切ってあってもフォーカスが入る。
+        .focusable(interactions: .edit)
+        .focusEffectDisabled()
+        .focused($isFocused)
+        .onAppear { isFocused = true }
+        .onKeyPress(.upArrow) {
+            store.moveFolderHighlight(by: -1)
+            return .handled
+        }
+        .onKeyPress(.downArrow) {
+            store.moveFolderHighlight(by: 1)
+            return .handled
+        }
+        .onKeyPress(.return) {
+            store.activateFolderRow()
+            return .handled
+        }
+        .onKeyPress(.escape) {
+            store.closeFolder(folderID)
+            return .handled
+        }
+        .onKeyPress(characters: .decimalDigits) { press in
+            guard press.modifiers.isEmpty, let number = Int(press.characters), (1...9).contains(number) else {
+                return .ignored
+            }
+            store.activateFolderRow(number - 1)
+            return .handled
+        }
     }
 }
 
@@ -214,9 +247,8 @@ private struct FolderRow: View {
     let store: TabStore
     let folderID: UUID
     let bookmark: Bookmark
-    let dismiss: () -> Void
+    let index: Int
 
-    @State private var isHovered = false
     @State private var isEditing = false
 
     var body: some View {
@@ -241,13 +273,16 @@ private struct FolderRow: View {
         .padding(.leading, 10)
         .padding(.trailing, 6)
         .frame(height: 28)
-        .barItemBackground(tab == nil ? .idle : (tab?.id == store.selectedID ? .selected : .live), isHovered: isHovered)
-        .contentShape(.rect)
-        .onTapGesture {
-            store.activate(bookmark: bookmark.id)
-            dismiss()
+        .barItemBackground(tab == nil ? .idle : (tab?.id == store.selectedID ? .selected : .live), isHovered: false)
+        // キーボードとマウスで同じ行を指すよう、メニューと同じく選択の当たりを一つにまとめる。
+        .background {
+            if store.openFolder?.highlighted == index {
+                RoundedRectangle(cornerRadius: 6).fill(.tint.opacity(0.2))
+            }
         }
-        .onHover { isHovered = $0 }
+        .contentShape(.rect)
+        .onTapGesture { store.activateFolderRow(index) }
+        .onHover { if $0 { store.highlightFolderRow(index) } }
         .help(bookmark.url.absoluteString)
         .contextMenu { BookmarkActions(store: store, bookmark: bookmark) { isEditing = true } }
         .popover(isPresented: $isEditing, arrowEdge: .trailing) {

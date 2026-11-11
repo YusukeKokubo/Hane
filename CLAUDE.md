@@ -35,6 +35,10 @@ build/browserctl quit               # 終わったら止める（pkill は普段
 
 `BROWSER_PROFILE=dev` の実体は、操作用ソケットが別で、Cookieなどを保存しない使い捨てになる。命令の一覧は `build/browserctl help`。ページの見た目は `browserctl screenshot <保存先>` で撮って Read で見られる（ページの中だけで、ウインドウの枠は写らない）。
 
+メニューやバーへのキー操作は `browserctl key ctrl+1` のように送れるが、アプリが前面にいないと届かない。`scripts/verify.sh` の起動では前面に出ないので、確かめるときは `open -n build/Browser.app --env BROWSER_PROFILE=dev` で起動する（`-n` で普段使いの実体とは別に立ち上がる）。持ち主が他のアプリを触ると前面が移るので、試す間は手を離してもらう。
+
+持ち主が普段使いで試すのは `~/Applications/Browser.app` で、`build/` を作り直しただけでは変わらない。試してもらう前に `scripts/bundle.sh --install` し、動いている実体を ⌘Q で終えて起動し直してもらう（普通のタブは戻らず、ブックマークは残る）。入った版は `cmp ~/Applications/Browser.app/Contents/MacOS/Browser build/Browser.app/Contents/MacOS/Browser` で確かめる。
+
 ## 構成
 
 - `Sources/Browser` 直下 — `BrowserApp`（入口）、`BrowserCommands`（メニューとキーボードショートカット）。
@@ -52,6 +56,7 @@ build/browserctl quit               # 終わったら止める（pkill は普段
 - **入力欄を標準ツールバーに置かない。** `.toolbar` の中の `TextField` には `FocusState` が効かず、Cmd+L が動かなくなる。そのためタイトルバーを隠し、タブバーとナビゲーションの段をウインドウの中身として並べている。タブバーがタイトルバーを兼ねるので、左端の信号機ボタンの余白と、右端のウインドウを掴むための余白を削らない。
 - **起動直後のフォーカスは一度では入らない。** ウインドウが前面に出る前の要求は黙って捨てられるので、`AddressBar` は入るまで短くやり直している。
 - **Cmd+W をタブに割り当てる仕組み。** メニューの「タブを閉じる」を標準の「閉じる」より前（`.newItem` の位置）に置くことで先に拾わせている。順番を変えるとウインドウごと閉じるようになる。
+- **中身が変わるメニュー項目のショートカットは当てにしない。** SwiftUI はメニューの中身を開く直前まで作り直さないので、起動後に増えた項目のキーはメニューを一度開くまで効かない。フォルダの ⌃1〜9 は、このため `FolderShortcut`（AppKitの局所モニタ）で拾っている。⌘1〜9 のように起動時から決まっている項目は問題ない。
 - **`WebPage` の解放。** `Tab` はナビゲーションを見張るタスクを持つ。`TabStore.close` が `tearDown()` で止めないと `WebPage` が残る。`closedTabReleasesItsPage` のテストが見張っている。
 - **ブックマークはArcのピン留めと同じ考え方。** 押すと新しいタブを作らずその場でページを開き、閉じてもブックマークは残る。開いていないブックマークは `WebPage` を持たない。ブックマークは普段使いのプロファイルだけ `~/Library/Application Support/Browser/bookmarks.json` に保存し、`dev` では保存しない。テストで `TabStore` を作ると保存しないブックマークになる。
 - **バーのドラッグは専用の型で運ぶ。** `BarDragItem` の型 `local.personal.browser.bar-item` は `Support/Info.plist` で宣言している。文字列で運ぶと、ページの入力欄に落としたとき文字として入ってしまう。

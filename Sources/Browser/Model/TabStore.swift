@@ -21,6 +21,8 @@ final class TabStore: TabOpening {
     private(set) var addressFocusRequest = 0
     /// 選択中のページについて、ブックマークの追加・編集画面を開いてほしいときに増やす合図。
     private(set) var bookmarkEditorRequest = 0
+    /// 一覧を下に出しているフォルダ。キーボードからも開け閉めするので、画面ではなくここで持つ。
+    private(set) var openFolder: OpenFolder?
 
     /// アドレスバーの今の中身。外部から状態を尋ねられたときに答えるための写しで、
     /// 画面の更新には使わない。
@@ -156,6 +158,7 @@ final class TabStore: TabOpening {
 
     /// ブックマークかフォルダを消す。開いていたページは普通のタブとして残す。
     func removeBookmark(_ id: UUID) {
+        if openFolder?.id == id { openFolder = nil }
         for removed in bookmarks.remove(id) {
             guard let tab = bookmarkTabs.removeValue(forKey: removed) else { continue }
             tab.bookmarkID = nil
@@ -200,6 +203,58 @@ final class TabStore: TabOpening {
               !url.isSameDestination(as: bookmark.url)
         else { return nil }
         return tab.title
+    }
+
+    // MARK: フォルダの一覧
+
+    /// バーで左から数えて N 番目のフォルダの一覧を開け閉めする。ブックマーク単体は数えない。
+    func toggleFolder(number: Int) {
+        let folders = bookmarks.folders
+        guard folders.indices.contains(number - 1) else { return }
+        toggleFolder(folders[number - 1].id)
+    }
+
+    func toggleFolder(_ id: UUID) {
+        if openFolder?.id == id {
+            openFolder = nil
+            return
+        }
+        guard let folder = bookmarks.folder(id) else { return }
+        // 中のページを見ているなら、その行から選び始める。
+        let current = folder.bookmarks.firstIndex { bookmarkTabs[$0.id]?.id == selectedID }
+        openFolder = OpenFolder(id: id, highlighted: current ?? 0)
+    }
+
+    /// 一覧を閉じる。別のフォルダへ切り替えた直後に古い一覧の閉じる知らせが来ても、新しい方は閉じない。
+    func closeFolder(_ id: UUID? = nil) {
+        guard openFolder != nil, id == nil || openFolder?.id == id else { return }
+        openFolder = nil
+    }
+
+    /// 選択の当たっている行を動かす。端で止める。
+    func moveFolderHighlight(by offset: Int) {
+        guard let open = openFolder, let count = bookmarks.folder(open.id)?.bookmarks.count, count > 0 else { return }
+        openFolder?.highlighted = min(max(open.highlighted + offset, 0), count - 1)
+    }
+
+    func highlightFolderRow(_ index: Int) {
+        openFolder?.highlighted = index
+    }
+
+    /// 一覧の行（省けば選択の当たっている行）のブックマークを開いて、一覧を閉じる。
+    @discardableResult
+    func activateFolderRow(_ index: Int? = nil) -> Tab? {
+        guard let open = openFolder, let rows = bookmarks.folder(open.id)?.bookmarks else { return nil }
+        let row = index ?? open.highlighted
+        guard rows.indices.contains(row) else { return nil }
+        openFolder = nil
+        return activate(bookmark: rows[row].id)
+    }
+
+    struct OpenFolder: Equatable {
+        let id: UUID
+        /// キーボードの選択が当たっている行。0始まり。
+        var highlighted: Int
     }
 
     struct AddressBarState {

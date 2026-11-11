@@ -136,6 +136,12 @@ final class ControlService {
         case "ui":
             return describeUI()
 
+        case "key":
+            try sendKey(try argument(args, 0, "キー"))
+            // 画面の更新とポップオーバーの出し入れを待ってから様子を返す。
+            try? await Task.sleep(for: .milliseconds(300))
+            return describeUI()
+
         case "bookmarks":
             return describeBookmarks()
 
@@ -284,6 +290,13 @@ final class ControlService {
             }
         }
         lines.append("bookmarks bar: " + describeBookmarkBar())
+        if let open = store.openFolder, let folder = store.bookmarks.folder(open.id) {
+            // 選択の当たっている行に > を付ける。番号は数字キーで開くときのもの。
+            let rows = folder.bookmarks.enumerated().map { index, bookmark in
+                "[" + (index == open.highlighted ? ">" : "") + "\(index + 1) \(bookmark.title)]"
+            }
+            lines.append("folder list: \(folder.name) " + (rows.isEmpty ? "(空)" : rows.joined(separator: " ")))
+        }
         lines.append("tabs (left to right):")
         lines.append(contentsOf: store.allTabs.map(describe))
         return lines.joined(separator: "\n")
@@ -306,6 +319,48 @@ final class ControlService {
             }
         }.joined(separator: " ")
     }
+
+    /// ページの外（メニューやバー）へ、利用者が打ったのと同じ道筋でキーを送る。
+    ///
+    /// 事象の待ち行列に積むので、局所モニタ、メニュー、ウインドウの順に本物のキーと同じく渡る。
+    /// 裏にいるアプリにはキーを受けるウインドウがなく、自分から前に出ることもシステムに断られる。
+    private func sendKey(_ spec: String) throws {
+        var parts = spec.lowercased().split(separator: "+").map(String.init)
+        guard let name = parts.popLast() else { throw ControlError("キーがない。") }
+        var flags: NSEvent.ModifierFlags = []
+        for modifier in parts {
+            switch modifier {
+            case "cmd": flags.insert(.command)
+            case "ctrl": flags.insert(.control)
+            case "opt", "alt": flags.insert(.option)
+            case "shift": flags.insert(.shift)
+            default: throw ControlError("知らない修飾キー: \(modifier)（cmd, ctrl, opt, shift）")
+            }
+        }
+        guard let (keyCode, characters) = Self.keys[name] else {
+            throw ControlError("知らないキー: \(name)（\(Self.keys.keys.sorted().joined(separator: ", "))）")
+        }
+        guard NSApp.isActive, let window = NSApp.keyWindow else {
+            throw ControlError("アプリが前面にないのでキーが届かない。前面で起動するには: open -n build/Browser.app --env BROWSER_PROFILE=dev")
+        }
+        guard let event = NSEvent.keyEvent(
+            with: .keyDown, location: .zero, modifierFlags: flags,
+            timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+            context: nil, characters: characters, charactersIgnoringModifiers: characters,
+            isARepeat: false, keyCode: keyCode
+        ) else { throw ControlError("キーの事象を作れない: \(spec)") }
+        NSApp.postEvent(event, atStart: false)
+    }
+
+    /// `key` で送れるキー。値は仮想キーコードと、そのキーが打ち出す文字。
+    private static let keys: [String: (UInt16, String)] = [
+        "1": (18, "1"), "2": (19, "2"), "3": (20, "3"), "4": (21, "4"), "5": (23, "5"),
+        "6": (22, "6"), "7": (26, "7"), "8": (28, "8"), "9": (25, "9"),
+        "up": (126, String(UnicodeScalar(NSUpArrowFunctionKey)!)),
+        "down": (125, String(UnicodeScalar(NSDownArrowFunctionKey)!)),
+        "return": (36, "\r"),
+        "escape": (53, "\u{1b}"),
+    ]
 
     /// ブックマークを番号つきで一覧する。番号はフォルダも含めた上からの通し番号。
     private func describeBookmarks() -> String {
