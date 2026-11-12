@@ -234,6 +234,10 @@ final class ControlService {
         case "bookmarks":
             return describeBookmarks()
 
+        case "downloads":
+            if clear { store.downloads.clearFinished() }
+            return describeDownloads()
+
         case "bookmark-add":
             let name = try takeOption("--name", from: &args)
             let folderName = try takeOption("--folder", from: &args)
@@ -519,6 +523,25 @@ final class ControlService {
             let selectors = blocker.hidden.selectors(on: site)
             lines.append("this site: \(site) (\(selectors.count))")
             lines += selectors.map { "  \($0)" }
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    /// ダウンロードの一覧。始まった順。
+    private func describeDownloads() -> String {
+        let downloads = store.downloads
+        var lines = ["folder: \(downloads.directory.path(percentEncoded: false))"]
+        if downloads.items.isEmpty { lines.append("（ダウンロードなし）") }
+        for item in downloads.items {
+            let state = switch item.state {
+            case .running: "running" + (item.fraction.map { " \(Int($0 * 100))%" } ?? "")
+            case .finished: "finished"
+            case .failed(let message): "failed: \(message)"
+            case .cancelled: "cancelled"
+            }
+            lines.append("[\(state)] \(item.fileName)"
+                + (item.destination.map { " -> \($0.path(percentEncoded: false))" } ?? "")
+                + (item.source.map { " from \($0.absoluteString)" } ?? ""))
         }
         return lines.joined(separator: "\n")
     }

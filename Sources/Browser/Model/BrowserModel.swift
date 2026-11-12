@@ -22,6 +22,8 @@ final class BrowserModel {
     var failure: String?
 
     @ObservationIgnored let contentBlocker: ContentBlocker?
+    /// ダウンロードの一覧。プロファイルを切り替えても続く。
+    let downloads: Downloads
     /// 持ち物の根元。使い捨ての実体では `nil` で、何も保存せず、作った名前はこの実体の中にだけ持つ。
     @ObservationIgnored private let directory: URL?
     /// サイトデータを保存するか。テストでは保存する置き場を試しても、WebKit の置き場は作らない。
@@ -37,6 +39,8 @@ final class BrowserModel {
         self.directory = directory
         self.contentBlocker = contentBlocker
         self.keepsSiteData = keepsSiteData
+        let downloads = Downloads.forInstance(persistent: directory != nil && keepsSiteData, instance: BrowserInstance.name)
+        self.downloads = downloads
         let registry = directory.flatMap { try? ProfileRegistry.load(from: ProfileRegistry.fileURL(in: $0)) } ?? ProfileRegistry()
         let names = [BrowserProfile.defaultName] + registry.profiles.map(\.name)
         let start = registry.lastOpened.flatMap { names.contains($0) ? $0 : nil } ?? BrowserProfile.defaultName
@@ -46,7 +50,7 @@ final class BrowserModel {
         let data = ProfileData(
             name: start, entry: registry.profiles.first { $0.name == start }, directory: directory, keepsSiteData: keepsSiteData)
         opened = [start: data]
-        store = Self.makeStore(with: data, contentBlocker: contentBlocker)
+        store = Self.makeStore(with: data, contentBlocker: contentBlocker, downloads: downloads)
     }
 
     /// テスト用。渡したタブ管理を `default` として持つ、使い捨ての実体のモデル。
@@ -54,6 +58,7 @@ final class BrowserModel {
         directory = nil
         keepsSiteData = false
         contentBlocker = store.contentBlocker
+        downloads = store.downloads
         registered = []
         names = [BrowserProfile.defaultName]
         current = BrowserProfile.defaultName
@@ -142,12 +147,12 @@ final class BrowserModel {
         let data = opened[name] ?? ProfileData(
             name: name, entry: registered.first { $0.name == name }, directory: directory, keepsSiteData: keepsSiteData)
         opened[name] = data
-        return Self.makeStore(with: data, contentBlocker: contentBlocker)
+        return Self.makeStore(with: data, contentBlocker: contentBlocker, downloads: downloads)
     }
 
-    private static func makeStore(with data: ProfileData, contentBlocker: ContentBlocker?) -> TabStore {
+    private static func makeStore(with data: ProfileData, contentBlocker: ContentBlocker?, downloads: Downloads) -> TabStore {
         TabStore(
-            factory: PageFactory(dataStore: data.dataStore, contentBlocker: contentBlocker),
+            factory: PageFactory(dataStore: data.dataStore, contentBlocker: contentBlocker, downloads: downloads),
             bookmarks: data.bookmarks,
             history: data.history,
             session: data.session

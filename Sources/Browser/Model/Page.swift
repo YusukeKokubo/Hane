@@ -6,6 +6,8 @@ import WebKit
 @MainActor
 protocol TabOpening: AnyObject {
     func openTab(with request: URLRequest, inBackground: Bool)
+    /// ページが `window.close()` で自分を閉じた。
+    func closeTab(showing webView: WKWebView)
 }
 
 /// タブが今読み込んでいるページ。`WKWebView` を一つ持ち、画面と操作に要る値を Observable にして見せる。
@@ -40,10 +42,17 @@ final class Page {
     @ObservationIgnored private var observations: [NSKeyValueObservation] = []
 
     /// `opener` は、このページから新しいタブや小窓を開くときに頼む先。弱く持つので循環しない。
-    init(configuration: WKWebViewConfiguration, opener: (any TabOpening)?, log: PageLog, onEvent: @escaping @MainActor (Event) -> Void) {
+    /// `downloads` は、このページから始まったダウンロードを引き受ける先。
+    init(
+        configuration: WKWebViewConfiguration,
+        opener: (any TabOpening)?,
+        downloads: Downloads,
+        log: PageLog,
+        onEvent: @escaping @MainActor (Event) -> Void
+    ) {
         webView = WKWebView(frame: .zero, configuration: configuration)
         self.onEvent = onEvent
-        delegate = Delegate(opener: opener, onEvent: onEvent)
+        delegate = Delegate(opener: opener, downloads: downloads, onEvent: onEvent)
         webView.navigationDelegate = delegate
         webView.uiDelegate = delegate
         webView.allowsBackForwardNavigationGestures = true
@@ -163,23 +172,28 @@ final class Page {
         if canGoForward != webView.canGoForward { canGoForward = webView.canGoForward }
     }
 
-    /// 読み込みの節目と、新しいタブ・小窓の頼みを受ける。`Page` とは分けて、Web ビューから `Page` へ循環させない。
+    /// 読み込みの節目、新しいタブ・小窓の頼み、ダウンロード、利用者に尋ねるものを受ける。
+    /// `Page` とは分けて、Web ビューから `Page` へ循環させない。
     private final class Delegate: NSObject, WKNavigationDelegate, WKUIDelegate {
         weak var opener: (any TabOpening)?
+        let downloads: Downloads
         let onEvent: @MainActor (Event) -> Void
 
-        init(opener: (any TabOpening)?, onEvent: @escaping @MainActor (Event) -> Void) {
+        init(opener: (any TabOpening)?, downloads: Downloads, onEvent: @escaping @MainActor (Event) -> Void) {
             self.opener = opener
+            self.downloads = downloads
             self.onEvent = onEvent
         }
 
-        /// `target="_blank"` のように新しい窓を求めるリンクと、Command キーを押しながらのクリックを新しいタブに振り替える。
+        /// `download` 属性のリンクはダウンロードにする。
+        /// `target="_blank"` のように新しい窓を求めるリンクと、Command キーを押しながらのクリックは新しいタブに振り替える。
         /// `window.open` はここを通らず、下の `createWebViewWith` に来る。
         func webView(
             _ webView: WKWebView,
             decidePolicyFor action: WKNavigationAction,
             preferences: WKWebpagePreferences
         ) async -> (WKNavigationActionPolicy, WKWebpagePreferences) {
+            if action.shouldPerformDownload { return (.download, preferences) }
             let wantsNewWindow = action.targetFrame == nil
             let commandClick = action.navigationType == .linkActivated && action.modifierFlags.contains(.command)
             guard wantsNewWindow || commandClick, let opener, action.request.url != nil else {
@@ -187,6 +201,22 @@ final class Page {
             }
             opener.openTab(with: action.request, inBackground: commandClick)
             return (.cancel, preferences)
+        }
+
+        /// 表示できない型と、添付ファイルとして送られてきたものはダウンロードにする。
+        /// 任せたままだと WebKit は読み込みを打ち切るだけで、何も保存されない。
+        func webView(_ webView: WKWebView, decidePolicyFor response: WKNavigationResponse) async -> WKNavigationResponsePolicy {
+            let disposition = (response.response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Disposition")
+            let isAttachment = disposition?.lowercased().hasPrefix("attachment") ?? false
+            return response.canShowMIMEType && !isAttachment ? .allow : .download
+        }
+
+        func webView(_ webView: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) {
+            downloads.start(download)
+        }
+
+        func webView(_ webView: WKWebView, navigationResponse: WKNavigationResponse, didBecome download: WKDownload) {
+            downloads.start(download)
         }
 
         func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
@@ -220,6 +250,37 @@ final class Page {
             windowFeatures: WKWindowFeatures
         ) -> WKWebView? {
             PopupWindows.create(with: configuration, for: action, features: windowFeatures, from: webView, opener: opener)
+        }
+
+        func webViewDidClose(_ webView: WKWebView) {
+            opener?.closeTab(showing: webView)
+        }
+
+        // MARK: 利用者に尋ねるもの
+
+        func webView(_ webView: WKWebView, runJavaScriptAlertPanelWithMessage message: String, initiatedByFrame frame: WKFrameInfo) async {
+            await PageDialogs.alert(message, from: frame, in: webView)
+        }
+
+        func webView(_ webView: WKWebView, runJavaScriptConfirmPanelWithMessage message: String, initiatedByFrame frame: WKFrameInfo) async -> Bool {
+            await PageDialogs.confirm(message, from: frame, in: webView)
+        }
+
+        func webView(
+            _ webView: WKWebView,
+            runJavaScriptTextInputPanelWithPrompt prompt: String,
+            defaultText: String?,
+            initiatedByFrame frame: WKFrameInfo
+        ) async -> String? {
+            await PageDialogs.prompt(prompt, defaultText: defaultText, from: frame, in: webView)
+        }
+
+        func webView(
+            _ webView: WKWebView,
+            runOpenPanelWith parameters: WKOpenPanelParameters,
+            initiatedByFrame frame: WKFrameInfo
+        ) async -> [URL]? {
+            await PageDialogs.chooseFiles(parameters, in: webView)
         }
 
         /// 表示すべき失敗なら文言を返す。利用者による中断などは `nil`。

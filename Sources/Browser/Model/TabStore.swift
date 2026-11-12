@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import WebKit
 
 /// 開いているタブの一覧と選択状態。ウインドウ1枚につき1つ。
 ///
@@ -71,6 +72,7 @@ final class TabStore: TabOpening {
     }
 
     var contentBlocker: ContentBlocker? { factory.contentBlocker }
+    var downloads: Downloads { factory.downloads }
 
     var selected: Tab? {
         selectedID.flatMap(tab(withID:))
@@ -128,6 +130,13 @@ final class TabStore: TabOpening {
             }
         }
         return !allTabs.isEmpty
+    }
+
+    /// ページが `window.close()` で自分を閉じた。最後の1枚でも窓は閉じず、空のタブを開く
+    /// （ページの都合で窓ごと閉じてアプリを終わらせないため）。
+    func closeTab(showing webView: WKWebView) {
+        guard !isShutDown, let tab = allTabs.first(where: { $0.page?.webView === webView }) else { return }
+        if !close(tab.id) { newTab() }
     }
 
     @discardableResult

@@ -9,12 +9,20 @@ import WebKit
 final class PageFactory {
     /// 広告ブロック。テストでは付けない。
     let contentBlocker: ContentBlocker?
+    /// ページから始まったダウンロードを引き受ける先。アプリ全体で一つ。
+    let downloads: Downloads
     private let configuration: WKWebViewConfiguration
 
     /// `dataStore` はプロファイルのすべてのページで共有するサイトデータ（Cookieやキャッシュ）の保存先。
     /// 置き場はプロファイルが決める（`ProfileData`）。テストでは終了時に消えるもの。
-    init(dataStore: WKWebsiteDataStore = .nonPersistent(), contentBlocker: ContentBlocker? = nil) {
+    /// テストのダウンロードは一時フォルダに置く。
+    init(
+        dataStore: WKWebsiteDataStore = .nonPersistent(),
+        contentBlocker: ContentBlocker? = nil,
+        downloads: Downloads = Downloads(directory: Downloads.temporaryDirectory(for: "test-\(UUID().uuidString)"))
+    ) {
         self.contentBlocker = contentBlocker
+        self.downloads = downloads
         let configuration = SharedConfiguration.copy()
         configuration.websiteDataStore = dataStore
 
@@ -35,6 +43,6 @@ final class PageFactory {
 
     /// `opener` は、このページから新しいタブや小窓を開くときに頼む先。
     func makePage(opener: (any TabOpening)?, log: PageLog, onEvent: @escaping @MainActor (Page.Event) -> Void) -> Page {
-        Page(configuration: configuration, opener: opener, log: log, onEvent: onEvent)
+        Page(configuration: configuration, opener: opener, downloads: downloads, log: log, onEvent: onEvent)
     }
 }

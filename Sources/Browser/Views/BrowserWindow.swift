@@ -113,6 +113,7 @@ private struct NavigationRow: View {
                 Button("再読み込み", systemImage: "arrow.clockwise") { tab.reload() }
                     .disabled(!tab.hasContent)
             }
+            DownloadsButton(downloads: store.downloads)
         }
         .labelStyle(.iconOnly)
         .buttonStyle(.borderless)

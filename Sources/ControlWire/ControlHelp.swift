@@ -30,6 +30,10 @@ public enum ControlHelp {
       back / forward / reload
       wait                   読み込みが終わるのを待つ
 
+    ダウンロード（アプリ全体で一つ。普段使いの実体はダウンロードフォルダ、使い捨ての実体は一時フォルダに保存する）
+      downloads [--clear]    この実体で始まったダウンロードと保存先。--clear で終わったものを一覧から外す
+                             download 属性のリンク、表示できない型、添付ファイルとして届いたものがダウンロードになる
+
     ページを読む
       snapshot [--limit N]   操作できる要素を番号つきで一覧する。見出しも併せて出る
       text [--limit N]       本文のテキスト
@@ -39,6 +43,11 @@ public enum ControlHelp {
 
     ページを操作する（番号は直前の snapshot のもの）
       click <番号>            クリックする
+                             ページが alert / confirm / prompt を出すと窓のシートになり、答えるまでその命令は返らない。
+                             別の browserctl から ui-snapshot と ui-click で答える
+                             （裏のタブのページが出したものは、取り消したものとして答える）
+                             ファイルの選択もシートで出るが、中身は別のプロセスが描くので拾えず、答えられない。
+                             ui に overlay: sheet と出たままになったら quit で閉じる
       fill <番号> <文字列>     入力欄に文字列を入れる。select要素なら選択肢を選ぶ
       press <キー> [番号]      キーを送る（Enter, Escape, Tab, ArrowDown など）。Enter はフォームを送信する
 
