@@ -53,8 +53,8 @@ import WebKit
         let store = makeStore()
         let tab = store.tabs[0]
         tab.load(URLRequest(url: page("elsewhere").url))
-        #expect(tab.saved == nil)
         #expect(tab.title != "a")
+        #expect(tab.savedPage(includingState: false)?.title != "a", "閲覧状態にも前回の題名を残さない")
     }
 
     /// 読み込んでいないページも、読み込みに失敗したページも、次の保存で消えない。

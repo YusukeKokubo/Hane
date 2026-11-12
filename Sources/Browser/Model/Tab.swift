@@ -4,12 +4,29 @@ import os
 
 /// タブ1枚ぶんの状態。行き先・題名・履歴の控えを持ち、ページ（`Page`）は要るあいだだけ持つ。
 ///
-/// ページを持たないタブは二通りある。前回の閲覧から戻しただけで、まだ選ばれていないタブと、
-/// しばらく使われずに眠らせたタブ。どちらも控え（`saved`）から履歴ごと起こせる。
-/// ページを手放すと Web ビューごとページのプロセスも返るので、使っていないタブはメモリを取らない。
+/// 中身は三つの形のどれかで、一つの値（`content`）で持つ。まっさらなタブ、控えだけを持って選ばれるのを待つタブ
+/// （前回の閲覧から戻しただけのタブと、しばらく使われずに眠らせたタブ）、生きているページを持つタブ。
+/// 控えからは履歴ごと起こせる。ページを手放すと Web ビューごとページのプロセスも返るので、使っていないタブはメモリを取らない。
 @MainActor
 @Observable
 final class Tab: Identifiable {
+    enum Content {
+        /// 何も開いていない新しいタブ。
+        case empty
+        /// 控えだけを持ち、選ばれるのを待っている。
+        case asleep(SavedPage)
+        case live(LivePage)
+    }
+
+    struct LivePage {
+        let page: Page
+        /// 最後に読み込みを頼んだアドレス。読み込みに失敗してページのアドレスが空のままでも、
+        /// タブの行き先を見失わないように持っておく（オフラインで起動したときなど）。
+        var requested: URL?
+        /// 控えから起こしたときの控え。ページ自身の題名が届くまで題名に使う。
+        var placeholder: SavedPage?
+    }
+
     nonisolated let id = UUID()
     /// 開いた順の通し番号。外部からタブを指すときの短い名前になる。
     let number: Int
@@ -18,15 +35,9 @@ final class Tab: Identifiable {
     /// ブックマークから開いたページなら、そのブックマーク。普通のタブなら `nil`。
     var bookmarkID: UUID?
 
-    /// 生きているページ。読み込む前のタブと、眠らせたタブでは `nil`。
-    private(set) var page: Page?
+    private(set) var content: Content
     /// 直近の読み込み失敗。次の読み込みが始まると消える。
     private(set) var failure: String?
-    /// ページを持たないあいだの控え。起こすときに履歴ごと戻す。起こしたあとも、ページ自身の題名が届くまで題名に使う。
-    private(set) var saved: SavedPage?
-    /// 最後に読み込みを頼んだアドレス。読み込みに失敗してページのアドレスが空のままでも、
-    /// タブの行き先を見失わないように持っておく（オフラインで起動したときなど）。
-    private var requestedURL: URL?
 
     /// 最後に画面から外れた時刻。しばらく使われていないタブを眠らせるのに使う。
     @ObservationIgnored var lastShown = Date()
@@ -50,28 +61,47 @@ final class Tab: Identifiable {
         self.factory = factory
         self.opener = opener
         self.history = history
-        self.saved = saved
-        requestedURL = saved?.url
+        content = saved.map(Content.asleep) ?? .empty
     }
 
     // MARK: 表示用
 
+    /// 生きているページ。まっさらなタブと、控えだけのタブでは `nil`。
+    var page: Page? {
+        if case .live(let live) = content { live.page } else { nil }
+    }
+
     /// タブの行き先。読み込む前や眠っているタブ、読み込みに失敗したタブでも返す。
-    var url: URL? { page?.url ?? requestedURL }
+    var url: URL? {
+        switch content {
+        case .empty: nil
+        case .asleep(let saved): saved.url
+        case .live(let live): live.page.url ?? live.requested
+        }
+    }
 
     /// ページ自身の題名が届くまで出しておく控えの題名。別のページへ移ったら使わない。
     private var savedTitle: String? {
-        guard let saved, !saved.title.isEmpty,
-              page?.url.map({ $0.isSameDestination(as: saved.url) }) ?? true
-        else { return nil }
-        return saved.title
+        switch content {
+        case .empty:
+            return nil
+        case .asleep(let saved):
+            return saved.title.isEmpty ? nil : saved.title
+        case .live(let live):
+            guard let saved = live.placeholder, !saved.title.isEmpty,
+                  live.page.url.map({ $0.isSameDestination(as: saved.url) }) ?? true
+            else { return nil }
+            return saved.title
+        }
     }
 
     /// ページを持っているか。持っていないタブには Web ビューを作らない。
     var hasContent: Bool { page != nil }
 
     /// 控えだけを持ち、選ばれるのを待っているか（戻しただけのタブと、眠らせたタブ）。
-    var isAsleep: Bool { page == nil && saved != nil }
+    var isAsleep: Bool {
+        if case .asleep = content { true } else { false }
+    }
 
     var title: String {
         if let page, !page.title.isEmpty { return page.title }
@@ -106,18 +136,18 @@ final class Tab: Identifiable {
     }
 
     func load(_ request: URLRequest) {
-        saved = nil
         failure = nil
-        requestedURL = request.url
-        livePage().load(request)
+        let page = self.page ?? makePage()
+        content = .live(LivePage(page: page, requested: request.url))
+        page.load(request)
     }
 
     /// 控えだけのタブなら、ページを作って控えのところから続ける。戻る・進むの履歴も戻す。
     func wake() {
-        guard page == nil, let saved else { return }
+        guard case .asleep(let saved) = content else { return }
         failure = nil
-        requestedURL = saved.url
-        let page = livePage()
+        let page = makePage()
+        content = .live(LivePage(page: page, requested: saved.url, placeholder: saved))
         if let state = saved.state, page.restore(state) { return }
         page.load(URLRequest(url: saved.url))
     }
@@ -125,29 +155,31 @@ final class Tab: Identifiable {
     /// ページを手放して控えだけにする。ページのプロセスが返る。眠らせたら `true`。
     @discardableResult
     func sleep() -> Bool {
-        guard page != nil, let snapshot = savedPage(includingState: true) else { return false }
-        saved = snapshot
-        requestedURL = snapshot.url
+        guard hasContent, let snapshot = savedPage(includingState: true) else { return false }
         closePage()
+        content = .asleep(snapshot)
         return true
     }
 
     /// 閲覧状態として残す内容。行き先のないまっさらなタブは残さない。
     /// 履歴の控えは書き出すときだけ取る（変化を見張るたびに取ると、全タブぶん書き出しの手間がかかる）。
     func savedPage(includingState: Bool) -> SavedPage? {
-        guard let url else { return nil }
-        guard let page else {
-            var copy = saved ?? SavedPage(url: url, title: "")
-            copy.bookmark = bookmarkID
-            if !includingState { copy.state = nil }
-            return copy
+        switch content {
+        case .empty:
+            return nil
+        case .asleep(var saved):
+            saved.bookmark = bookmarkID
+            if !includingState { saved.state = nil }
+            return saved
+        case .live(let live):
+            guard let url else { return nil }
+            return SavedPage(
+                url: url,
+                title: live.page.title.isEmpty ? savedTitle ?? "" : live.page.title,
+                bookmark: bookmarkID,
+                state: includingState ? live.page.interactionState : nil
+            )
         }
-        return SavedPage(
-            url: url,
-            title: page.title.isEmpty ? savedTitle ?? "" : page.title,
-            bookmark: bookmarkID,
-            state: includingState ? page.interactionState : nil
-        )
     }
 
     func goBack() {
@@ -178,23 +210,21 @@ final class Tab: Identifiable {
     /// タブを閉じるときに呼ぶ。ページを手放す。
     func tearDown() {
         closePage()
+        content = .empty
     }
 
     // MARK: 内部
 
-    private func livePage() -> Page {
-        if let page { return page }
-        let page = factory.makePage(opener: opener, log: log) { [weak self] event in
+    private func makePage() -> Page {
+        factory.makePage(opener: opener, log: log) { [weak self] event in
             self?.handle(event)
         }
-        self.page = page
-        return page
     }
 
+    /// ページの見張りと案内役を外す。手放すのは、呼んだ側が `content` を入れ替えたとき。
     private func closePage() {
         endLoadSignpost()
         page?.tearDown()
-        page = nil
     }
 
     private func handle(_ event: Page.Event) {
