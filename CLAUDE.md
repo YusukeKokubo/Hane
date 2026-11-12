@@ -16,7 +16,7 @@
 swift build                 # デバッグビルド
 swift test                  # 単体テスト
 scripts/bundle.sh [--install] [--run]  # リリースビルド → build/Browser.app と build/browserctl（Ad-hoc署名）。--install で ~/Applications に置く（Raycast から起動できる）
-scripts/verify.sh           # テスト → ビルド → 開発用の別実体で通し確認（1分ほど）。コミットの前に通す
+scripts/verify.sh           # テスト → ビルド → 開発用の別実体で通し確認（1分ほど）。一続きの作業の終わりに一度通す
 scripts/bench.sh [--no-build] [--runs N] [URL…]  # 決まった手順で負荷をかけてメモリ・CPU・起床回数を測り、前回と並べる
 scripts/profile.sh record <秒>  # 動いている実体に Time Profiler を付けて記録し、文字で要約する
 scripts/update-filters.sh   # 広告ブロックのフィルタリストを取ってきて Support/Filters を置き換える
@@ -24,7 +24,7 @@ scripts/update-filters.sh   # 広告ブロックのフィルタリストを取�
 
 ## 進め方
 
-確かめは変更の大きさに合わせて軽く済ませる。作っている間は `swift build` と、関係するテストだけ（`swift test --filter <名前>`）を回し、画面に関わる変更なら `browserctl` で一つ二つ触って見る。`verify.sh` はコミットの前に一度通せばよい。
+確かめは変更の大きさに合わせて軽く済ませる。作っている間は `swift build` と、関係するテストだけ（`swift test --filter <名前>`）を回し、画面に関わる変更なら `browserctl` で一つ二つ触って見る。`verify.sh` は一続きの作業の終わりに一度だけ通す。段階ごとにコミットするときも途中では回さず、関係するテストが通っていればコミットしてよい（最後の verify で落ちたら、直す変更を足す）。`verify.sh` は単体テストも全部走らせるので、直前に `swift test` を全部回さない。
 
 - 止まった、時間切れになった、は不具合の症状として扱う。`timeout` を付けて避けて先へ進まず、まずそこを見る（`browserctl` は120秒答えがなければ落ちる。`lsof -U | grep control.sock` でソケットの持ち主を、`sample <pid> 1` で止まっている所を見る）。
 - 速さや重さについては、測ってから案を出す。
