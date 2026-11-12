@@ -136,8 +136,8 @@ final class TabStore: TabOpening {
 
     /// ページが `window.close()` で自分を閉じた。最後の1枚でも窓は閉じず、空のタブを開く
     /// （ページの都合で窓ごと閉じてアプリを終わらせないため）。
-    func closeTab(showing webView: WKWebView) {
-        guard !isShutDown, let tab = allTabs.first(where: { $0.page?.webView === webView }) else { return }
+    func closeTab(_ tab: Tab) {
+        guard !isShutDown, allTabs.contains(where: { $0 === tab }) else { return }
         if !close(tab.id) { newTab() }
     }
 

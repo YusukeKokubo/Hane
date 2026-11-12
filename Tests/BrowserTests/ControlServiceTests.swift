@@ -367,19 +367,20 @@ import WebKit
         let login = FileManager.default.temporaryDirectory.appending(path: "control-login-\(UUID().uuidString).html")
         try "<title>Login</title>".write(to: login, atomically: true, encoding: .utf8)
         try await open(html: "<title>Opener</title>")
-        let before = PopupWindows.windows.count
+        // 小窓の一覧はアプリ全体で一つで、並んで走るほかのテストの小窓も入るので、開いた側で見分ける。
+        var popups: Int { PopupWindows.windows.count { $0.opener === store } }
 
         let opened = await run("eval", "window.login = window.open('\(login.absoluteString)', 'login', 'width=400,height=300'); return String(window.login !== null)")
         #expect(opened.output == "\"true\"")
-        #expect(PopupWindows.windows.count == before + 1)
+        #expect(popups == 1)
         #expect(store.tabs.count == 1)
         #expect(await run("eval", "String(window.login.opener === window)").output == "\"true\"")
 
         _ = await run("eval", "window.login.close(); 1")
-        for _ in 0..<50 where PopupWindows.windows.count > before {
+        for _ in 0..<50 where popups > 0 {
             try await Task.sleep(for: .milliseconds(50))
         }
-        #expect(PopupWindows.windows.count == before)
+        #expect(popups == 0)
     }
 
     private func waitForTabs(_ count: Int) async throws {

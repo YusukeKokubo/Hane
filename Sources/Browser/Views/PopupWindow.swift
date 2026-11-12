@@ -6,25 +6,27 @@ import WebKit
 /// 開いたページへ窓を返さないと `window.opener` がつながらず、小窓で済ませたログインの結果を元のページへ返せない
 /// （Google などのログインの小窓は、窓が返らないと「開けなかった」として止まる）。返す Web ビューは WebKit が渡した設定で
 /// 作らなければならない。タブとは別の窓なので SwiftUI の窓には載せず、AppKit の窓に置く。
+/// 中身はタブと同じ `Page` で持ち、ページが尋ねるものやダウンロードをタブと同じに受ける。
 /// 窓は閉じるまでのあいだだけあり、常に動く処理は持たない。
 @MainActor
-final class PopupWindow: NSObject, WKUIDelegate, NSWindowDelegate {
-    let webView: WKWebView
+final class PopupWindow: NSObject, NSWindowDelegate {
+    let page: Page
     private let window: NSWindow
-    /// 小窓の中から大きさを指定せずに開いたものを、タブで開いてもらう先。
+    /// 小窓の中から開いたものを、タブで開いてもらう先。
     private(set) weak var opener: (any TabOpening)?
-    private var observations: [NSKeyValueObservation] = []
     private let onClose: (PopupWindow) -> Void
+
+    var webView: WKWebView { page.webView }
 
     init(
         configuration: WKWebViewConfiguration,
         features: WKWindowFeatures,
         over parent: NSWindow?,
         opener: (any TabOpening)?,
+        downloads: Downloads,
         onClose: @escaping (PopupWindow) -> Void
     ) {
         let size = NSSize(width: features.width?.doubleValue ?? 500, height: features.height?.doubleValue ?? 600)
-        webView = WKWebView(frame: NSRect(origin: .zero, size: size), configuration: configuration)
         window = NSWindow(
             contentRect: NSRect(origin: .zero, size: size),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
@@ -33,21 +35,18 @@ final class PopupWindow: NSObject, WKUIDelegate, NSWindowDelegate {
         )
         self.opener = opener
         self.onClose = onClose
+        // 案内役は `Page` が持つので、ここからの知らせは弱く受ける（小窓 → ページ → 小窓と循環させない）。
+        weak var popup: PopupWindow?
+        page = Page(configuration: configuration, opener: opener, downloads: downloads, log: PageLog()) { event in
+            popup?.handle(event)
+        }
         super.init()
+        popup = self
 
-        webView.uiDelegate = self
         window.isReleasedWhenClosed = false
-        window.contentView = webView
+        window.contentView = page.webView
         window.delegate = self
-        // どのサイトの小窓かを見せる。ログインの小窓なので、行き先が分かるようにしておく。
-        observations = [
-            webView.observe(\.title, options: [.initial]) { [weak self] _, _ in
-                MainActor.assumeIsolated { self?.updateTitle() }
-            },
-            webView.observe(\.url, options: [.initial]) { [weak self] _, _ in
-                MainActor.assumeIsolated { self?.updateTitle() }
-            },
-        ]
+        updateTitle()
         show(over: parent)
     }
 
@@ -64,36 +63,29 @@ final class PopupWindow: NSObject, WKUIDelegate, NSWindowDelegate {
         }
     }
 
+    private func handle(_ event: Page.Event) {
+        switch event {
+        // どのサイトの小窓かを見せる。ログインの小窓なので、行き先が分かるようにしておく。
+        case .committed, .titleChanged: updateTitle()
+        // ログインが済むと小窓は自分で閉じる。
+        case .closeRequested: close()
+        case .started, .finished, .failed: break
+        }
+    }
+
     private func updateTitle() {
-        window.title = webView.title.flatMap { $0.isEmpty ? nil : $0 } ?? "ポップアップ"
-        window.subtitle = webView.url?.host() ?? ""
+        window.title = page.title.isEmpty ? "ポップアップ" : page.title
+        window.subtitle = page.url?.host() ?? ""
     }
 
     func close() {
         window.close()
     }
 
-    // MARK: WKUIDelegate
-
-    func webView(
-        _ webView: WKWebView,
-        createWebViewWith configuration: WKWebViewConfiguration,
-        for navigationAction: WKNavigationAction,
-        windowFeatures: WKWindowFeatures
-    ) -> WKWebView? {
-        PopupWindows.create(with: configuration, for: navigationAction, features: windowFeatures, from: webView, opener: opener)
-    }
-
-    /// ページが `window.close()` を呼んだ。ログインが済むと小窓は自分で閉じる。
-    func webViewDidClose(_ webView: WKWebView) {
-        window.close()
-    }
-
     // MARK: NSWindowDelegate
 
     func windowWillClose(_ notification: Notification) {
-        observations = []
-        webView.uiDelegate = nil
+        page.tearDown()
         // 閉じた窓は AppKit がしばらく掴んでいることがあり、中に置いたままだと Web ビューごとページが残る
         // （開いた側からは window.closed が false のままに見える）。窓から外して、ここで手放す。
         window.contentView = nil

@@ -263,6 +263,8 @@ final class Tab: Identifiable {
                 failure = message
                 log.append(level: "navigation", message: message)
             }
+        case .closeRequested:
+            opener?.closeTab(self)
         }
     }
 

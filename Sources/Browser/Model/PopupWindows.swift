@@ -1,7 +1,7 @@
 import Foundation
 import WebKit
 
-/// `window.open` で開こうとした窓を受ける。ページの案内役（`Page` の UI delegate）と小窓から呼ばれる。
+/// `window.open` で開こうとした窓を受ける。ページ（`Page`）の案内役から呼ばれる。小窓の中のページからも同じ道で来る。
 ///
 /// 止めるかどうかは WebKit がその手前で決める（`javaScriptCanOpenWindowsAutomatically`）。
 /// 切ってあれば、クリックなどの操作の中から開こうとしたものしかここまで届かない。
@@ -29,11 +29,12 @@ enum PopupWindows {
         for action: WKNavigationAction,
         features: WKWindowFeatures,
         from webView: WKWebView,
-        opener: (any TabOpening)?
+        opener: (any TabOpening)?,
+        downloads: Downloads
     ) -> WKWebView? {
         if features.width != nil || features.height != nil {
             let popup = PopupWindow(
-                configuration: configuration, features: features, over: webView.window, opener: opener
+                configuration: configuration, features: features, over: webView.window, opener: opener, downloads: downloads
             ) { closed in
                 windows.removeAll { $0 === closed }
             }

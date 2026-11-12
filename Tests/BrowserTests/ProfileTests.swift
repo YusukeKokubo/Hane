@@ -214,12 +214,11 @@ import WebKit
         let service = ControlService(model: model)
         let login = try writePage("<title>Login</title>").absoluteString
         _ = await service.respond(to: ControlRequest(args: ["open", try writePage("<title>Opener</title>").absoluteString]))
-        let before = Set(PopupWindows.windows.map(ObjectIdentifier.init))
         let opened = await service.respond(to: ControlRequest(
             args: ["eval", "String(window.open('\(login)', 'login', 'width=400,height=300') !== null)"]))
         #expect(opened.output == "\"true\"")
-        let popup = try #require(PopupWindows.windows.first { !before.contains(ObjectIdentifier($0)) })
-        #expect(popup.opener === model.store)
+        // 小窓の一覧はアプリ全体で一つで、並んで走るほかのテストの小窓も入るので、開いた側で見分ける。
+        let popup = try #require(PopupWindows.windows.first { $0.opener === model.store })
 
         try model.switchTo("仕事")
         #expect(!PopupWindows.windows.contains { $0 === popup })

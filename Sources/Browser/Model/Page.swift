@@ -6,17 +6,20 @@ import WebKit
 @MainActor
 protocol TabOpening: AnyObject {
     func openTab(with request: URLRequest, inBackground: Bool)
-    /// ページが `window.close()` で自分を閉じた。
-    func closeTab(showing webView: WKWebView)
+    /// タブのページが `window.close()` で自分を閉じた。
+    func closeTab(_ tab: Tab)
 }
 
-/// タブが今読み込んでいるページ。`WKWebView` を一つ持ち、画面と操作に要る値を Observable にして見せる。
+/// タブや小窓が今読み込んでいるページ。`WKWebView` を一つ持ち、画面と操作に要る値を Observable にして見せる。
 ///
 /// `WebPage` を使わないのは、足りない所を埋めるのに WebKit の中を差し替える裏技が要ったため
 /// （プロセスプールと環境設定の共有、`window.open` の受け口）。`WKWebView` ならどれも公開の API で済み、
 /// 戻る・進むの履歴を書き出して戻せる（`interactionState`）ので、タブを眠らせても履歴を失わない。
 ///
-/// ページを手放すと Web ビューごとページのプロセスも返る。いつ手放すかは `Tab` が決める。
+/// 読み込みの節目、ダウンロード、ページが利用者に尋ねるものは、タブでも小窓でもここの案内役が受ける
+/// （受けないと WebKit が黙って取り消すので、受け口を一か所にしておく）。
+///
+/// ページを手放すと Web ビューごとページのプロセスも返る。いつ手放すかは持ち主（`Tab` か `PopupWindow`）が決める。
 @MainActor
 @Observable
 final class Page {
@@ -27,6 +30,8 @@ final class Page {
         case titleChanged(String)
         /// 失敗の文言。利用者による中断のように見せなくてよい失敗なら `nil`。
         case failed(String?)
+        /// ページが `window.close()` で自分を閉じた。タブなら閉じ、小窓なら窓を閉じる。
+        case closeRequested
     }
 
     private(set) var url: URL?
@@ -41,6 +46,7 @@ final class Page {
     @ObservationIgnored private let onEvent: @MainActor (Event) -> Void
     @ObservationIgnored private var observations: [NSKeyValueObservation] = []
 
+    /// `configuration` は Web ビューの設定。`window.open` で開く小窓では、WebKit が渡したものをそのまま使う。
     /// `opener` は、このページから新しいタブや小窓を開くときに頼む先。弱く持つので循環しない。
     /// `downloads` は、このページから始まったダウンロードを引き受ける先。
     init(
@@ -249,11 +255,12 @@ final class Page {
             for action: WKNavigationAction,
             windowFeatures: WKWindowFeatures
         ) -> WKWebView? {
-            PopupWindows.create(with: configuration, for: action, features: windowFeatures, from: webView, opener: opener)
+            PopupWindows.create(
+                with: configuration, for: action, features: windowFeatures, from: webView, opener: opener, downloads: downloads)
         }
 
         func webViewDidClose(_ webView: WKWebView) {
-            opener?.closeTab(showing: webView)
+            onEvent(.closeRequested)
         }
 
         // MARK: 利用者に尋ねるもの

@@ -105,4 +105,27 @@ import WebKit
         #expect(store.tabs.first !== first)
         #expect(store.selected?.hasContent == false, "新しい空のタブ")
     }
+
+    /// 小窓の中のページもタブと同じ案内役を持ち、ダウンロードを受ける。
+    @Test func popupsHandleDownloadsLikeTabs() async throws {
+        let opener = try write("opener.html", "<title>Opener</title>")
+        let inside = try write("inside.html", #"<title>Inside</title><a id="d" href="data:text/plain;base64,aGVsbG8=" download="popup.txt">dl</a>"#)
+        let tab = store.open(URLRequest(url: opener))
+        try await arrive(tab, at: opener)
+
+        _ = try await tab.page?.callJavaScript(
+            "window.open('\(inside.absoluteString)', 'p', 'width=400,height=300'); return 1", arguments: [:], contentWorld: .page)
+        // 小窓の一覧はアプリ全体で一つなので、開いた側で見分ける。
+        let popup = try #require(PopupWindows.windows.first { $0.opener === store })
+        defer { popup.close() }
+        for _ in 0..<150 where popup.page.url != inside || popup.page.isLoading {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        try #require(popup.page.url == inside)
+
+        _ = try await popup.page.callJavaScript("document.getElementById('d').click()", arguments: [:], contentWorld: .page)
+        let item = try await finished()
+        #expect(item.destination?.lastPathComponent == "popup.txt")
+        #expect(store.tabs.count == 2, "小窓の中のダウンロードでタブを増やさない")
+    }
 }
