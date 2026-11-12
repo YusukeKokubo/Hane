@@ -1,13 +1,13 @@
 # Browser
 
-個人用の軽量Webブラウザ。macOS 26.7以降専用で、SwiftUIと WebKit for SwiftUI（`WebView` と `WebPage`）だけで組んである。持ち主は一人で、配布はしない。
+個人用の軽量Webブラウザ。macOS 26.7以降専用で、画面は SwiftUI、ページは `WKWebView` で組んである。持ち主は一人で、配布はしない。
 
 ## 守ること
 
 - 外部ライブラリは使わない。Apple標準のフレームワークだけで完結させる。
-- `WKWebView` を `NSViewRepresentable` で包まない。ページは必ず `WebPage`、表示は `WebView` を使う。新APIで足りない機能にAppKitを使うときは、範囲を最小にして理由をコメントに書く。
+- ページは `Page`（`WKWebView` を一つ持つ）を通して扱い、`WKWebView` を直に触るのは `Page`、`PageView`、小窓（`PopupWindow`）、`PageProcess` に限る。WebKit for SwiftUI の `WebPage` は使わない（足りない所を埋めるのに WebKit の中を差し替える裏技が要り、履歴を書き出す口もないため。経緯は `docs/pitfalls.md` の「タブとページ」）。普段の動作を WebKit の非公開の中身や実行時の差し替えに頼らせない（開発用の計測で非公開の値を読むのは `PageProcess` だけ）。
 - 古いmacOS向けの分岐（`#available`）は書かない。
-- メモリとCPUの軽さが最優先。常駐するタイマーや、表示していないタブのための処理を足さない。タブ、`WebPage`、常駐する処理、頻繁に走る処理に触れたときは、変更の前後で `scripts/bench.sh` を走らせて見比べる（測り方は `docs/measuring.md`）。文言や見た目だけの変更では測らなくてよい。
+- メモリとCPUの軽さが最優先。常駐するタイマーや、表示していないタブのための処理を足さない。タブ、`Page`、常駐する処理、頻繁に走る処理に触れたときは、変更の前後で `scripts/bench.sh` を走らせて見比べる（測り方は `docs/measuring.md`）。文言や見た目だけの変更では測らなくてよい。
 - Swift 6の厳格な並行性チェックで、警告ゼロを保つ。
 
 ## コマンド
@@ -52,15 +52,15 @@ build/browserctl quit               # 終わったら止める（pkill は普段
 
 触る場所に応じて読む。
 
-- `docs/pitfalls.md` — はまりどころ。画面とキー操作、タブとページ（`WebPage` の解放、閲覧状態、プロセスプール、`window.open`）、プロファイル、広告ブロック、browserctl と窓まわりの操作、テストの節がある。その場所を触る前に該当する節を読む。
+- `docs/pitfalls.md` — はまりどころ。画面とキー操作、タブとページ（ページの解放と眠らせ方、閲覧状態、プロセスプール、`window.open`）、プロファイル、広告ブロック、browserctl と窓まわりの操作、テストの節がある。その場所を触る前に該当する節を読む。
 - `docs/browserctl.md` — `browserctl` の仕組み（起こし方、キーと入力の届け方、窓まわりの部品の拾い方、普段使いの版の入れ替え）。命令を足すときや、確かめ方が思いどおりに動かないときに読む。
 - `docs/measuring.md` — `bench.sh` の手順と読み方、起床回数、`sample` や Instruments、`profile.sh`。測るときに読む。
 
 ## 構成
 
 - `Sources/Browser` 直下 — `BrowserApp`（入口）、`BrowserCommands`（メニューとキーボードショートカット）。
-- `Sources/Browser/Model` — 状態。`TabStore`（タブの一覧と選択。普通のタブと、ブックマークからその場で開いたページを分けて持つ）、`Tab`（`WebPage` を1つ所有）、`BookmarkStore`（ブックマークとフォルダの並びと保存。フォルダは一段だけ）、`SessionStore`（閲覧状態の保存。再起動したときにタブを戻す）、`HistoryStore`（閲覧履歴と、アドレスバーで補う候補選び）、`PageFactory`（`WebPage` の設定をすべてここで行う）、`BrowserModel`（プロファイルの一覧と、今開いているプロファイルの `TabStore`。窓・メニュー・外部操作はここを通して今の `TabStore` を見る）、`SharedConfiguration`（全タブで一つのプロセスプールと環境設定を使わせる）、`SettingsStore`（設定の窓で変える値の保存と WebKit への反映）、`PopupWindows`（`window.open` を新しいタブか小窓で開く）、`Signposts`（Instruments に出す区間の印）、`NavigationDecider`、`AddressResolver`、`PageLog`、`BrowserSettings`（検索先やUser-Agentなどの固定値。変えたい値はここに集める）。
-- `Sources/Browser/Views` — 画面。`BrowserWindow`（上からタブバー、ナビゲーションの段、ページ）、`AddressBar`、`TabBar`（左にブックマーク、右に普通のタブを一列に並べる）、`BookmarkBar`（ブックマークとフォルダの項目、追加・編集のポップオーバー）、`SettingsView`（設定の窓。⌘,）、`PopupWindow`（大きさを指定して開かれた小窓。ここだけ AppKit の窓に `WKWebView` を直に置く）。
+- `Sources/Browser/Model` — 状態。`TabStore`（タブの一覧と選択。普通のタブと、ブックマークからその場で開いたページを分けて持つ）、`Tab`（行き先・題名・履歴の控えを持ち、ページ `Page` は要るあいだだけ持つ）、`Page`（`WKWebView` を一つ持ち、値を Observable にして見せる）、`BookmarkStore`（ブックマークとフォルダの並びと保存。フォルダは一段だけ）、`SessionStore`（閲覧状態の保存。再起動したときにタブを戻す）、`HistoryStore`（閲覧履歴と、アドレスバーで補う候補選び）、`PageFactory`（ページの設定をすべてここで行う。プロファイルごとに一つ）、`BrowserModel`（プロファイルの一覧と、今開いているプロファイルの `TabStore`。窓・メニュー・外部操作はここを通して今の `TabStore` を見る）、`SharedConfiguration`（設定の元。写して使うと全ページでプロセスプールと環境設定が一つになる）、`SettingsStore`（設定の窓で変える値の保存と WebKit への反映）、`PopupWindows`（`window.open` を新しいタブか小窓で開く）、`Signposts`（Instruments に出す区間の印）、`AddressResolver`、`PageLog`、`BrowserSettings`（検索先やUser-Agentなどの固定値。変えたい値はここに集める）。
+- `Sources/Browser/Views` — 画面。`BrowserWindow`（上からタブバー、ナビゲーションの段、ページ。ページの Web ビューは中の `PageView` が置く）、`AddressBar`、`TabBar`（左にブックマーク、右に普通のタブを一列に並べる）、`BookmarkBar`（ブックマークとフォルダの項目、追加・編集のポップオーバー）、`SettingsView`（設定の窓。⌘,）、`PopupWindow`（大きさを指定して開かれた小窓。AppKit の窓に `WKWebView` を置く）。
 - `Sources/Browser/Model` の広告ブロック — `ContentBlocker`（ルールリストのコンパイルと全ページへの配布）、`FilterList`（Adblock Plus 形式をWebKitのルールに訳す）、`ContentRule`（WebKitのルールのJSON）、`HiddenElementStore`（⌥右クリックで隠した要素の保存）、`ElementPicker`（⌥右クリックで要素を選ぶページ内スクリプト）。フィルタリストの本体は `Support/Filters`。
 - `Sources/Browser/Control` — 外部操作。`ControlServer`（ソケット）、`ControlService`（命令の解釈）、`PageScripts`（ページ内で走らせるJavaScript）、`WindowElements`（窓まわりの部品の一覧とマウス操作）、`ProcessStats`、`PageProcess`（タブとページのプロセスの対応）。
 - `Sources/ControlWire` — アプリと `browserctl` が共有する通信の取り決めと、命令の説明文（`ControlHelp`。これが仕様の正本）、実体とプロファイルの決まり（`Profile`。`BROWSER_INSTANCE` の実体、プロファイルの名前と置き場、登録した一覧）。
@@ -70,7 +70,7 @@ build/browserctl quit               # 終わったら止める（pkill は普段
 
 ## いつも気をつけること
 
-- **APIは定義ファイルで確かめる。** `WebPage` は新しく、記憶と食い違うことがある。`$(xcrun --show-sdk-path)/System/Library/Frameworks/WebKit.framework/Modules/WebKit.swiftmodule/arm64e-apple-macos.swiftinterface` と、同じ場所の `_WebKit_SwiftUI.framework` を grep する。たとえば戻る・進むの専用メソッドはなく、`page.load(backForwardList.backList.last!)` のように履歴の項目を読み込む。
+- **APIは定義ファイルで確かめる。** WebKit は版ごとに API が増えていて、記憶と食い違うことがある。`$(xcrun --show-sdk-path)/System/Library/Frameworks/WebKit.framework/Headers` を grep する。振る舞い（プールが分かれるか、など）は思い込まず、テストで確かめる。
 - **テストはネットワークに出さない。** HTMLは一時ファイルに書いて `file://` で開く。
 
 ## 書き方

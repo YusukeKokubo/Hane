@@ -43,7 +43,7 @@ struct AddressBar: View {
             // タブを切り替えたら、入力途中の文字は捨ててそのタブのURLを出す。
             .onChange(of: tab.id, initial: true) { showCurrentURL() }
             // 書きかけの入力は、ページ側のURL変化で上書きしない。
-            .onChange(of: tab.page.url) { if !isEditing { showCurrentURL() } }
+            .onChange(of: tab.url) { if !isEditing { showCurrentURL() } }
             .onChange(of: store.addressFocusRequest) { isFocused = true }
             .onChange(of: text, initial: true) {
                 followEdit()

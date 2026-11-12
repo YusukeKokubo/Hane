@@ -106,8 +106,8 @@ private struct TabItem: View {
         .barItemBackground(isSelected ? .selected : .idle, isHovered: isHovered)
         .overlay(alignment: .bottom) {
             // 裏のタブでも読み込み中かどうかが分かるようにする。
-            if tab.page.isLoading {
-                LoadingLine(progress: tab.page.estimatedProgress)
+            if tab.isLoading {
+                LoadingLine(progress: tab.estimatedProgress)
             }
         }
         .contentShape(.rect)

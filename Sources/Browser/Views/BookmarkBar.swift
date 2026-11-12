@@ -59,7 +59,7 @@ private struct BookmarkChip: View {
         .frame(height: 26)
         .barItemBackground(state(of: tab), isHovered: isHovered)
         .overlay(alignment: .bottom) {
-            if let tab, tab.page.isLoading { LoadingLine(progress: tab.page.estimatedProgress) }
+            if let tab, tab.isLoading { LoadingLine(progress: tab.estimatedProgress) }
         }
         .contentShape(.rect)
         .onTapGesture { store.activate(bookmark: bookmark.id) }

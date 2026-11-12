@@ -43,7 +43,7 @@ import WebKit
 
         store.selectedID = store.tabs[0].id
         #expect(store.tabs[0].hasContent)
-        #expect(!store.tabs[0].isWaitingToLoad)
+        #expect(!store.tabs[0].isAsleep)
         #expect(store.tabs[0].title == "a", "ページ自身の題名が届くまでは前回の題名を出す")
     }
 
@@ -53,7 +53,7 @@ import WebKit
         let store = makeStore()
         let tab = store.tabs[0]
         tab.load(URLRequest(url: page("elsewhere").url))
-        #expect(tab.restored == nil)
+        #expect(tab.saved == nil)
         #expect(tab.title != "a")
     }
 
@@ -126,5 +126,115 @@ import WebKit
         }
         #expect(saved?.pages.map(\.url) == [page("a").url])
         #expect(saved?.selected == 0)
+    }
+}
+
+/// しばらく使っていないタブを眠らせてページを手放し、選ばれたら履歴ごと起こす。
+@MainActor
+@Suite final class TabSleepTests {
+    private let directory = FileManager.default.temporaryDirectory.appending(path: "BrowserSleepTests-\(UUID().uuidString)")
+
+    deinit {
+        try? FileManager.default.removeItem(at: directory)
+    }
+
+    private func write(_ name: String) throws -> URL {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let url = directory.appending(path: "\(name).html")
+        try "<title>\(name)</title><p>\(name)".write(to: url, atomically: true, encoding: .utf8)
+        return url
+    }
+
+    /// 読み込みが済んで、そのアドレスに着くまで待つ。
+    private func arrive(_ tab: Tab, at url: URL) async throws {
+        for _ in 0..<150 where tab.page?.url != url || tab.isLoading {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        try #require(tab.page?.url == url && !tab.isLoading, "\(String(describing: tab.page?.url))")
+    }
+
+    /// 二つ移ってから一つ戻ったタブ。戻る先と進む先が一つずつある。
+    private func browsedTab(in store: TabStore) async throws -> (tab: Tab, pages: [URL]) {
+        let pages = try ["one", "two", "three"].map(write)
+        let tab = store.open(URLRequest(url: pages[0]))
+        try await arrive(tab, at: pages[0])
+        tab.load(URLRequest(url: pages[1]))
+        try await arrive(tab, at: pages[1])
+        tab.load(URLRequest(url: pages[2]))
+        try await arrive(tab, at: pages[2])
+        tab.goBack()
+        try await arrive(tab, at: pages[1])
+        return (tab, pages)
+    }
+
+    @Test func sleepingReleasesThePageAndWakingRestoresHistory() async throws {
+        let store = TabStore(factory: PageFactory(dataStore: .nonPersistent()))
+        let (tab, pages) = try await browsedTab(in: store)
+        store.selectedID = store.tabs[0].id
+
+        weak var released: Page?
+        do {
+            released = tab.page
+            #expect(tab.sleep())
+        }
+        for _ in 0..<50 where released != nil {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(released == nil, "眠らせたページは手放す")
+        #expect(tab.isAsleep)
+        #expect(tab.url == pages[1])
+        #expect(tab.title == "two", "眠っていても題名は出す")
+
+        store.selectedID = tab.id
+        try await arrive(tab, at: pages[1])
+        #expect(tab.canGoBack && tab.canGoForward)
+        tab.goForward()
+        try await arrive(tab, at: pages[2])
+    }
+
+    /// 再起動しても、戻る・進むの履歴が残る。
+    @Test func sessionKeepsHistoryAcrossLaunches() async throws {
+        let first = TabStore(factory: PageFactory(dataStore: .nonPersistent()))
+        let (_, pages) = try await browsedTab(in: first)
+        let saved = first.sessionSnapshot()
+        #expect(saved.pages.last?.state != nil)
+
+        let session = SessionStore()
+        session.save(saved)
+        let next = TabStore(factory: PageFactory(dataStore: .nonPersistent()), session: session)
+        let tab = try #require(next.selected)
+        #expect(tab.url == pages[1])
+        try await arrive(tab, at: pages[1])
+        #expect(tab.canGoBack && tab.canGoForward)
+        tab.goBack()
+        try await arrive(tab, at: pages[0])
+    }
+
+    /// 控えを読めなくても、アドレスから開き直す。
+    @Test func unreadableStateFallsBackToTheAddress() async throws {
+        let url = try write("plain")
+        let session = SessionStore()
+        session.save(SavedSession(pages: [SavedPage(url: url, title: "plain", state: Data("broken".utf8))], selected: 0))
+        let store = TabStore(factory: PageFactory(dataStore: .nonPersistent()), session: session)
+        try await arrive(try #require(store.selected), at: url)
+    }
+
+    /// 画面から外れて時間の経ったタブだけを、選択が変わったときに眠らせる。
+    @Test func idleTabsFallAsleepWhenTheSelectionChanges() async throws {
+        let store = TabStore(factory: PageFactory(dataStore: .nonPersistent()))
+        let old = store.open(URLRequest(url: try write("old")))
+        let recent = store.open(URLRequest(url: try write("recent")))
+        try await arrive(old, at: directory.appending(path: "old.html"))
+        try await arrive(recent, at: directory.appending(path: "recent.html"))
+        store.selectedID = store.tabs[0].id
+        old.lastShown = Date(timeIntervalSinceNow: -BrowserSettings.tabSleepDelay - 1)
+
+        store.sleepIdleTabs()
+        for _ in 0..<50 where old.hasContent {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(old.isAsleep)
+        #expect(recent.hasContent)
+        #expect(store.sessionSnapshot().pages.map(\.title).contains("old"), "眠っているタブも閲覧状態に残る")
     }
 }

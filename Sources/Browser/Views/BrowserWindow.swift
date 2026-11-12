@@ -64,7 +64,6 @@ struct BrowserWindow: View {
                 NavigationRow(tab: tab, store: store)
             }
             Divider()
-            InternalsWarning(check: InternalsCheck.shared)
             if let tab = store.selected {
                 PageArea(tab: tab)
                     .id(tab.id)
@@ -74,38 +73,6 @@ struct BrowserWindow: View {
         }
         .frame(minWidth: 480, minHeight: 320)
         .ignoresSafeArea(edges: .top)
-    }
-}
-
-/// WebKit が変わって裏技が外れていたら、ページの上に帯で知らせる。外れたままでもページは開くので、
-/// 普段使いの最中に気づけるようにする。閉じればその起動の間は出さない。
-private struct InternalsWarning: View {
-    let check: InternalsCheck
-
-    var body: some View {
-        if check.showsWarning {
-            HStack(alignment: .top, spacing: 8) {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.orange)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("WebKit が変わり、このブラウザが裏で補っている所が思いどおりに動いていないかもしれません。swift test で確かめてください。")
-                        .fontWeight(.medium)
-                    ForEach(check.problems ?? [], id: \.self) { Text($0) }
-                }
-                .font(.callout)
-                .textSelection(.enabled)
-                Spacer(minLength: 0)
-                Button("閉じる", systemImage: "xmark") { check.isDismissed = true }
-                    .labelStyle(.iconOnly)
-                    .buttonStyle(.borderless)
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(.orange.opacity(0.12))
-            .accessibilityElement(children: .contain)
-            .accessibilityIdentifier("internals-warning")
-            Divider()
-        }
     }
 }
 
@@ -140,7 +107,7 @@ private struct NavigationRow: View {
                 .disabled(!tab.canGoForward)
             AddressBar(tab: tab, store: store)
             BookmarkStarButton(tab: tab, store: store)
-            if tab.page.isLoading {
+            if tab.isLoading {
                 Button("読み込みを中止", systemImage: "xmark") { tab.stop() }
             } else {
                 Button("再読み込み", systemImage: "arrow.clockwise") { tab.reload() }
@@ -154,15 +121,15 @@ private struct NavigationRow: View {
     }
 }
 
-/// 選択中のタブのページ。選ばれていないタブの Web ビューは作らない。
+/// 選択中のタブのページ。ページを持たないタブには Web ビューを置かない。
 private struct PageArea: View {
     let tab: Tab
 
     var body: some View {
         ZStack(alignment: .top) {
-            if tab.hasContent {
-                WebView(tab.page)
-                    .webViewBackForwardNavigationGestures(.enabled)
+            if let page = tab.page {
+                PageView(page: page)
+                    .id(ObjectIdentifier(page))
             } else {
                 Color(nsColor: .windowBackgroundColor)
             }
@@ -175,11 +142,26 @@ private struct PageArea: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color(nsColor: .windowBackgroundColor))
             }
-            if tab.page.isLoading {
-                LoadingBar(progress: tab.page.estimatedProgress)
+            if tab.isLoading {
+                LoadingBar(progress: tab.estimatedProgress)
             }
         }
     }
+}
+
+/// ページの Web ビューを画面に置く。
+///
+/// SwiftUI の `WebView` は `WebPage` しか受け取らない。`WebPage` は足りない所を WebKit の中を差し替えて埋める必要があり、
+/// 履歴を書き出す口もないのでやめた（`Page`）。そのため Web ビューはここで AppKit の部品として置く。
+/// Web ビューは `Page` が持っているので、画面から外れても捨てずに、また選ばれたら同じものを置く。
+private struct PageView: NSViewRepresentable {
+    let page: Page
+
+    func makeNSView(context: Context) -> WKWebView {
+        page.webView
+    }
+
+    func updateNSView(_ view: WKWebView, context: Context) {}
 }
 
 /// ページ上端に出す細い進捗バー。

@@ -35,7 +35,7 @@ struct BrowserCommands: Commands {
                 .disabled(store.selected?.hasContent != true)
             Button("読み込みを中止") { store.selected?.stop() }
                 .keyboardShortcut(".")
-                .disabled(store.selected?.page.isLoading != true)
+                .disabled(store.selected?.isLoading != true)
             Divider()
             // ⌃Tab / ⌃⇧Tab でも移れる（LocalShortcuts が拾う）。
             Button("次のタブ") { store.select(offset: 1) }

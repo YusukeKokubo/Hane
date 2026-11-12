@@ -7,11 +7,14 @@ struct SavedPage: Codable, Equatable, Sendable {
     var title: String
     /// ブックマークから開いたページなら、そのブックマーク。
     var bookmark: UUID?
+    /// 戻る・進むの履歴と今の位置の控え（`WKWebView.interactionState`）。中身は WebKit だけが読める。
+    /// 前の版のファイルにはないので省ける。
+    var state: Data?
 }
 
 /// 閲覧状態。再起動したときにタブを戻すために使う。
 ///
-/// 戻る・進むの履歴は含めない。`WebPage` には履歴を書き出して戻す手段がないため。
+/// 戻る・進むの履歴もページごとに含めるので、再起動しても戻れる。
 struct SavedSession: Codable, Equatable, Sendable {
     var version = 1
     /// バーに見える順。

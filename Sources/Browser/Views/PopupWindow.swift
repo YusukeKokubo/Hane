@@ -5,7 +5,7 @@ import WebKit
 ///
 /// 開いたページへ窓を返さないと `window.opener` がつながらず、小窓で済ませたログインの結果を元のページへ返せない
 /// （Google などのログインの小窓は、窓が返らないと「開けなかった」として止まる）。返す Web ビューは WebKit が渡した設定で
-/// 作らなければならず、`WebPage` はそれを受け取る口を持たない。そのためここだけ AppKit の窓に `WKWebView` を直に置く。
+/// 作らなければならない。タブとは別の窓なので SwiftUI の窓には載せず、AppKit の窓に置く。
 /// 窓は閉じるまでのあいだだけあり、常に動く処理は持たない。
 @MainActor
 final class PopupWindow: NSObject, WKUIDelegate, NSWindowDelegate {

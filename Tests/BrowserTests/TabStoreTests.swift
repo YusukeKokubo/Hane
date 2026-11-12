@@ -119,10 +119,10 @@ import WebKit
         #expect(store.openFolder == nil)
     }
 
-    /// 閉じたタブの `WebPage` が、読み込み途中でも解放されること。
+    /// 閉じたタブのページが、読み込み途中でも解放されること。
     @Test func closedTabReleasesItsPage() async throws {
         let store = makeStore()
-        weak var page: WebPage?
+        weak var page: Page?
         weak var tab: Tab?
 
         do {

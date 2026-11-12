@@ -5,7 +5,10 @@ import Observation
 ///
 /// ページはふたつの置き場に分かれる。バーの右側に並ぶ普通のタブ（`tabs`）と、
 /// ブックマークからその場で開いたページ（`bookmarkTabs`）。後者はブックマークに結びつき、
-/// 閉じてもブックマークは残る。開いていないブックマークは `WebPage` を持たない。
+/// 閉じてもブックマークは残る。開いていないブックマークはタブを持たない。
+///
+/// しばらく画面に出していないタブは、選択が変わったときに眠らせてページのプロセスを返す（`sleepIdleTabs`）。
+/// 眠らせるかを決めるのは選択が変わったときだけで、タイマーは使わない。
 @MainActor
 @Observable
 final class TabStore: TabOpening {
@@ -14,10 +17,13 @@ final class TabStore: TabOpening {
     /// ページを開いているブックマーク。ブックマークのIDで引く。
     private(set) var bookmarkTabs: [UUID: Tab] = [:]
     var selectedID: Tab.ID? {
-        // 前回の閲覧から戻しただけのページは、選ばれたここで初めて読み込む。
+        // 前回の閲覧から戻したタブと眠らせたタブは、選ばれたここで起こす。
         didSet {
+            guard selectedID != oldValue else { return }
             Signposts.poster.emitEvent("タブの選択")
-            selected?.loadRestoredPage()
+            if let previous = oldValue.flatMap(tab(withID:)) { previous.lastShown = Date() }
+            selected?.wake()
+            sleepIdleTabs()
         }
     }
 
@@ -67,8 +73,11 @@ final class TabStore: TabOpening {
     var contentBlocker: ContentBlocker? { factory.contentBlocker }
 
     var selected: Tab? {
-        guard let selectedID else { return nil }
-        return tabs.first { $0.id == selectedID } ?? bookmarkTabs.values.first { $0.id == selectedID }
+        selectedID.flatMap(tab(withID:))
+    }
+
+    private func tab(withID id: Tab.ID) -> Tab? {
+        tabs.first { $0.id == id } ?? bookmarkTabs.values.first { $0.id == id }
     }
 
     // MARK: タブの増減
@@ -298,11 +307,11 @@ final class TabStore: TabOpening {
 
     // MARK: 閲覧状態
 
-    /// 今の閲覧状態。まっさらなタブは含めない。
-    func sessionSnapshot() -> SavedSession {
+    /// 今の閲覧状態。まっさらなタブは含めない。履歴の控え（`includingState`）は書き出すときだけ含める。
+    func sessionSnapshot(includingState: Bool = true) -> SavedSession {
         var snapshot = SavedSession()
         for tab in allTabs {
-            guard let page = tab.savedPage else { continue }
+            guard let page = tab.savedPage(includingState: includingState) else { continue }
             if tab.id == selectedID { snapshot.selected = snapshot.pages.count }
             snapshot.pages.append(page)
         }
@@ -359,12 +368,33 @@ final class TabStore: TabOpening {
     /// タイマーで定期的に書くのではなく、変化があったときだけ動く。
     private func watchSession() {
         withObservationTracking {
-            _ = sessionSnapshot()
+            _ = sessionSnapshot(includingState: false)
         } onChange: { [weak self] in
             Task { @MainActor in
                 guard let self, !self.isShutDown else { return }
                 self.saveSession()
                 self.watchSession()
+            }
+        }
+    }
+
+    // MARK: 眠らせる
+
+    /// 画面から外れて `BrowserSettings.tabSleepDelay` より長く経ったタブを眠らせる。選択が変わったときに呼ぶ。
+    ///
+    /// 読み込み中のタブと、音や動画を流している・カメラやマイクを使っているタブは眠らせない。
+    func sleepIdleTabs(now: Date = Date()) {
+        let idle = allTabs.filter {
+            $0.id != selectedID && $0.hasContent && !$0.isLoading
+                && now.timeIntervalSince($0.lastShown) > BrowserSettings.tabSleepDelay
+        }
+        guard !idle.isEmpty else { return }
+        Task {
+            for tab in idle {
+                guard let page = tab.page, !(await page.isBusy()) else { continue }
+                // 確かめている間に選ばれたり、プロファイルを離れたりしていれば眠らせない。
+                guard !isShutDown, tab.id != selectedID, tab.page === page else { continue }
+                tab.sleep()
             }
         }
     }

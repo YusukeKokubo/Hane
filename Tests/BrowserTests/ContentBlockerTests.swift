@@ -75,7 +75,7 @@ import WebKit
     @Test func closedTabReleasesItsPageWithBlocker() async throws {
         let blocker = try makeBlocker()
         let store = TabStore(factory: PageFactory(dataStore: .nonPersistent(), contentBlocker: blocker))
-        weak var page: WebPage?
+        weak var page: Page?
         do {
             let opened = store.newTab()
             opened.load(URLRequest(url: URL(string: "about:blank")!))

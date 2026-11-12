@@ -49,12 +49,30 @@ import WebKit
         let service = ControlService(store: store)
 
         let listing = await service.respond(to: ControlRequest(args: ["tabs"])).output
-        #expect(listing.contains("tab 2: Waiting — \(waiting.absoluteString) [not loaded]"))
-        #expect(!listing.contains("Shown — \(directory.appending(path: "shown.html").absoluteString) [not loaded]"))
+        #expect(listing.contains("tab 2: Waiting — \(waiting.absoluteString) [asleep]"))
+        #expect(!listing.contains("Shown — \(directory.appending(path: "shown.html").absoluteString) [asleep]"))
 
         _ = await service.respond(to: ControlRequest(args: ["--tab", "2", "reload"]))
         #expect(store.tabs[1].hasContent)
         #expect(store.selectedID == store.tabs[0].id, "読み込んでも選択は動かさない")
+    }
+
+    /// 眠らせたタブは一覧で分かり、選べば起きる。画面に出ているタブは眠らせない。
+    @Test func sleepCommand() async throws {
+        try await open(html: "<title>First</title>")
+        _ = await run("new")
+        try await open(html: "<title>Second</title>")
+
+        #expect(await !run("sleep", "2").ok, "選択中のタブは眠らせない")
+        let slept = await run("sleep", "1")
+        #expect(slept.ok, "\(slept.output)")
+        #expect(slept.output.contains("tab 1: First"), "\(slept.output)")
+        #expect(slept.output.contains("[asleep]"))
+        #expect(await !run("sleep", "1").ok, "もう眠っている")
+
+        let selected = await run("select", "1")
+        #expect(!selected.output.contains("[asleep]"), "\(selected.output)")
+        #expect(store.tabs[0].hasContent)
     }
 
     @Test func tabCommands() async {
@@ -284,7 +302,7 @@ import WebKit
     @Test func pageProcessIsFound() async throws {
         try await open(html: "<title>Process</title>")
         let tab = try #require(store.selected)
-        let pid = try #require(PageProcess.identifier(of: tab.page))
+        let pid = try #require(tab.page.flatMap(PageProcess.identifier(of:)))
         #expect(pid != getpid())
 
         let response = await run("stats", "--seconds", "0.1", "--json")
@@ -297,58 +315,24 @@ import WebKit
         #expect(row["tabs"] as? [Int] == [tab.number])
     }
 
-    /// タブごとにプロセスプールが分かれると、「戻る」用のページと予備のプロセスがタブの数だけ溜まる。
-    /// 共有は WebKit の中を差し替えて行っているので、効かなくなったらここで分かる。
+    /// 設定を別々に作るとプロセスプールも分かれ、「戻る」用のページと予備のプロセスがタブの数だけ溜まる。
+    /// 設定を一つ写して使っているので、プールと環境設定は全ページで同じものになる。
     @Test func pagesShareOneProcessPool() async throws {
         try await open(html: "<title>One</title>")
         _ = await run("new")
         try await open(html: "<title>Two</title>")
-        let views = store.allTabs.compactMap { PageProcess.webView(of: $0.page) }
+        let views = store.allTabs.compactMap { $0.page?.webView }
         try #require(views.count == 2)
         let pools = views.map { $0.configuration.value(forKey: "processPool") as AnyObject }
         #expect(pools[0] === pools[1])
         // 設定画面で変えた値を開いているタブにもその場で効かせるため、環境設定も共有している。
         #expect(views.allSatisfy { $0.configuration.preferences === SharedConfiguration.preferences })
-    }
-
-    /// 起動して最初に読み込んだページで、裏技が効いているかを一度だけ確かめ、効いていれば何も出さない。
-    @Test func internalsAreCheckedOnTheFirstPage() async throws {
-        try await open(html: "<title>Check</title>")
-        // 確かめは同じ実行の中で一度きりなので、ほかのテストのページで済んでいることもある。
-        for _ in 0..<50 where InternalsCheck.shared.problems == nil {
-            try await Task.sleep(for: .milliseconds(50))
-        }
-        #expect(InternalsCheck.shared.problems == [])
-        #expect(!InternalsCheck.shared.showsWarning)
-        #expect(!(await run("ui").output.contains("internals:")))
-    }
-
-    /// 確かめが、Web ビューが実際に使っているプール・環境設定・案内役を見ていること。
-    /// 外れた形の Web ビューを自分で作り、それぞれ見つけられるかを見る。
-    @Test func internalsCheckSeesWhatTheWebViewUses() async throws {
-        try await open(html: "<title>Real</title>")
-        let real = try #require(store.selected.flatMap { PageProcess.webView(of: $0.page) })
-        #expect(InternalsCheck.problems(in: real) == [])
-
-        // 差し替えた init を通るので、プールと環境設定は共有のもの。案内役は付かない。
-        let plain = WKWebView(frame: .zero, configuration: WKWebViewConfiguration())
-        #expect(SharedConfiguration.problems(in: plain) == [])
-        #expect(PopupWindows.problem(in: plain)?.contains("案内役が付いていません") == true)
-
-        let ownPool = WKWebViewConfiguration()
-        let poolType = try #require(NSClassFromString("WKProcessPool") as? NSObject.Type)
-        ownPool.setValue(poolType.init(), forKey: "processPool")
-        let pooled = SharedConfiguration.problems(in: WKWebView(frame: .zero, configuration: ownPool))
-        #expect(pooled.count == 1 && pooled[0].contains("プロセスプール"), "\(pooled)")
-
-        let ownPreferences = WKWebViewConfiguration()
-        ownPreferences.preferences = WKPreferences()
-        let preferred = SharedConfiguration.problems(in: WKWebView(frame: .zero, configuration: ownPreferences))
-        #expect(preferred.count == 1 && preferred[0].contains("環境設定"), "\(preferred)")
+        // 別のプロファイルのページとも共有する。
+        let other = PageFactory(dataStore: .nonPersistent()).makePage(opener: nil, log: PageLog()) { _ in }
+        #expect(other.webView.configuration.value(forKey: "processPool") as AnyObject === pools[0])
     }
 
     /// `window.open` は、止めているときは操作の中から呼んだものだけ、許しているときはいつでも新しいタブで開く。
-    /// WebPage の案内役に窓を作る手続きを足して受けているので、WebKit が変わって届かなくなったらここで分かる。
     @Test func popupsFollowTheSetting() async throws {
         let second = FileManager.default.temporaryDirectory.appending(path: "control-popup-\(UUID().uuidString).html")
         try "<title>Popped</title>".write(to: second, atomically: true, encoding: .utf8)
@@ -408,7 +392,7 @@ import WebKit
     /// 読み込む前のタブのために Web ビューを作らせない。
     @Test func pageProcessIsNotCreatedForEmptyTabs() {
         let tab = store.newTab()
-        #expect(PageProcess.identifier(of: tab.page) == nil)
+        #expect(tab.page == nil)
     }
 
     @Test func statsRejectsTooLongMeasurements() async {

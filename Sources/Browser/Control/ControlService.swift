@@ -119,6 +119,13 @@ final class ControlService {
         case "wait":
             return try await settled(try target())
 
+        case "sleep":
+            let number = try args.first.map { try integer($0, "タブ番号") } ?? tabNumber
+            let tab = try tab(numbered: number)
+            guard tab.id != store.selectedID else { throw ControlError("画面に出ているタブは眠らせられない。先に別のタブを選ぶこと。") }
+            guard tab.sleep() else { throw ControlError("このタブはページを持っていない（もう眠っているか、まだ何も開いていない）。") }
+            return store.allTabs.map(describe).joined(separator: "\n")
+
         case "snapshot":
             let tab = try target()
             let listing = try await script(PageScripts.snapshot, ["limit": limit ?? 300], on: tab)
@@ -308,12 +315,14 @@ final class ControlService {
             } ?? 0.5
             let json = takeFlag("--json", from: &args)
             let all = store.allTabs
-            let pages = Dictionary(grouping: all.filter(\.hasContent)) { PageProcess.identifier(of: $0.page) }
+            let pages = Dictionary(grouping: all.filter(\.hasContent)) { $0.page.flatMap(PageProcess.identifier(of:)) }
             let byProcess = pages.reduce(into: [pid_t: [Int]]()) { result, entry in
                 if let pid = entry.key { result[pid] = entry.value.map(\.number) }
             }
             let report = await ProcessStats.measure(for: .milliseconds(Int(seconds * 1000)), tabs: byProcess)
-            let tabs = StatsTabs(total: all.count, withContent: all.count { $0.hasContent }, bookmarkPages: store.bookmarkTabs.count)
+            let tabs = StatsTabs(
+                total: all.count, withContent: all.count { $0.hasContent }, asleep: all.count { $0.isAsleep },
+                bookmarkPages: store.bookmarkTabs.count)
             if json {
                 let encoder = JSONEncoder()
                 encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
@@ -321,7 +330,7 @@ final class ControlService {
                 return String(decoding: data, as: UTF8.self)
             }
             return ProcessStats.table(report)
-                + "\ntabs: \(tabs.total)（うちページあり \(tabs.withContent)、ブックマークのページ \(tabs.bookmarkPages)）"
+                + "\ntabs: \(tabs.total)（うちページあり \(tabs.withContent)、眠っている \(tabs.asleep)、ブックマークのページ \(tabs.bookmarkPages)）"
                 + (isStaleBuild ? "\n" + describeBuild() : "")
 
         case "pid":
@@ -402,20 +411,11 @@ final class ControlService {
     }
 
     private func screenshot(of tab: Tab, to path: String?, fullPage: Bool) async throws -> String {
-        guard tab.hasContent else { throw ControlError("このタブにはまだページがない。") }
+        guard let page = tab.page else { throw ControlError("このタブにはまだページがない。") }
         guard tab.id == store.selectedID else {
             throw ControlError("画面に出ているタブしか撮れない。先に `select \(tab.number)` を行うこと。")
         }
-        var region = WebPage.ExportedContentConfiguration.Region.contents
-        if !fullPage {
-            let reply = try await script(PageScripts.viewport, on: tab)
-            if let data = reply.data(using: .utf8),
-               let box = try? JSONSerialization.jsonObject(with: data) as? [String: Double],
-               let x = box["x"], let y = box["y"], let width = box["width"], let height = box["height"] {
-                region = .rect(CGRect(x: x, y: y, width: width, height: height))
-            }
-        }
-        let data = try await tab.page.exported(as: .image(region: region))
+        let data = try await page.snapshot(fullPage: fullPage)
         let destination = URL(filePath: path ?? NSTemporaryDirectory() + "browser-\(UUID().uuidString.prefix(8)).png")
         try data.write(to: destination)
         return destination.path(percentEncoded: false)
@@ -469,8 +469,8 @@ final class ControlService {
         on tab: Tab,
         world: WKContentWorld? = nil
     ) async throws -> String {
-        guard tab.hasContent else { throw ControlError("このタブにはまだページがない。先に `open <URL>` を行うこと。") }
-        let value = try await tab.page.callJavaScript(body, arguments: arguments, contentWorld: world ?? self.world)
+        guard let page = tab.page else { throw ControlError("このタブにはまだページがない。先に `open <URL>` を行うこと。") }
+        let value = try await page.callJavaScript(body, arguments: arguments, contentWorld: world ?? self.world)
         return value as? String ?? ""
     }
 
@@ -480,13 +480,13 @@ final class ControlService {
         let deadline = clock.now + Self.loadTimeout
         // 操作から読み込み開始までに少し間があるので、先に一拍おく。
         try? await Task.sleep(for: .milliseconds(250))
-        while tab.page.isLoading, clock.now < deadline {
+        while tab.isLoading, clock.now < deadline {
             try? await Task.sleep(for: .milliseconds(100))
         }
         if let failure = tab.failure {
             throw ControlError("読み込みに失敗: \(failure)\n" + describe(tab))
         }
-        return describe(tab) + (tab.page.isLoading ? "\n（まだ読み込み中。`wait` で続きを待てる）" : "")
+        return describe(tab) + (tab.isLoading ? "\n（まだ読み込み中。`wait` で続きを待てる）" : "")
     }
 
     // MARK: 広告ブロック
@@ -539,19 +539,15 @@ final class ControlService {
     /// ウインドウの枠まわり（ページの外側）が今どう見えているか。
     private func describeUI() -> String {
         var lines = ["instance: \(BrowserInstance.label), profile: \(model.current)", describeBuild(), "window frame: " + describeWindowFrame()]
-        // 外れていたときだけ出す。帯を閉じていても出す。
-        if let problems = InternalsCheck.shared.problems, !problems.isEmpty {
-            lines.append("internals: 外れている — " + problems.joined(separator: " / "))
-        }
         if let tab = store.selected {
             let state: (Bool) -> String = { $0 ? "enabled" : "disabled" }
             lines.append("window title: \(tab.title)")
             lines.append("address bar: \"\(store.addressBar.text)\"" + (store.addressBar.isFocused ? " (focused)" : "")
                 + (store.addressBar.completion.map { " completion=\"\($0)\"" } ?? ""))
             lines.append("buttons: back=\(state(tab.canGoBack)) forward=\(state(tab.canGoForward)) "
-                + (tab.page.isLoading ? "stop=enabled" : "reload=\(state(tab.hasContent))"))
+                + (tab.isLoading ? "stop=enabled" : "reload=\(state(tab.hasContent))"))
             lines.append("page: " + (tab.hasContent
-                ? (tab.page.isLoading ? "loading \(Int(tab.page.estimatedProgress * 100))%" : "loaded")
+                ? (tab.isLoading ? "loading \(Int(tab.estimatedProgress * 100))%" : "loaded")
                 : "empty"))
             if let failure = tab.failure {
                 lines.append("failure shown: \(failure)")
@@ -786,7 +782,7 @@ final class ControlService {
     private func describe(_ tab: Tab) -> String {
         let mark = tab.id == store.selectedID ? "*" : " "
         let url = tab.url?.absoluteString ?? "(空)"
-        let loading = tab.page.isLoading ? " [loading]" : tab.isWaitingToLoad ? " [not loaded]" : ""
+        let loading = tab.isLoading ? " [loading]" : tab.isAsleep ? " [asleep]" : ""
         let bookmark = tab.bookmarkID.flatMap(store.bookmarks.bookmark).map { " [bookmark: \($0.title)]" } ?? ""
         return "\(mark) tab \(tab.number): \(tab.title) — \(url)\(loading)\(bookmark)"
     }
@@ -848,5 +844,6 @@ private struct StatsOutput: Encodable {
 private struct StatsTabs: Encodable {
     let total: Int
     let withContent: Int
+    let asleep: Int
     let bookmarkPages: Int
 }

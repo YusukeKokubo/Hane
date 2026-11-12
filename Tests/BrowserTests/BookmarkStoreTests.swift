@@ -108,10 +108,10 @@ import WebKit
 
     /// ページのアドレスが決まるまで待つ。
     private func waitForURL(_ tab: Tab) async throws {
-        for _ in 0..<100 where tab.page.url == nil {
+        for _ in 0..<100 where tab.page?.url == nil {
             try await Task.sleep(for: .milliseconds(20))
         }
-        try #require(tab.page.url != nil)
+        try #require(tab.page?.url != nil)
     }
 
     @Test func activatingOpensPageInPlace() {
@@ -205,7 +205,7 @@ import WebKit
         #expect(store.awayTitle(for: bookmark) == nil)
 
         tab.load(URLRequest(url: file))
-        for _ in 0..<100 where tab.page.url != file {
+        for _ in 0..<100 where tab.page?.url != file {
             try await Task.sleep(for: .milliseconds(20))
         }
         #expect(store.awayTitle(for: bookmark) != nil)
@@ -216,10 +216,10 @@ import WebKit
         #expect(store.awayTitle(for: updated) == nil)
     }
 
-    /// 閉じたブックマークのページの `WebPage` も解放されること。
+    /// 閉じたブックマークのページも解放されること。
     @Test func closedBookmarkPageReleasesItsPage() async throws {
         let bookmark = store.bookmarks.add(title: "A", url: blank)
-        weak var page: WebPage?
+        weak var page: Page?
         weak var tab: Tab?
 
         do {

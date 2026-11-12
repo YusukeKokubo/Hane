@@ -110,7 +110,7 @@ import WebKit
     @Test func switchingReleasesThePagesOfTheProfileLeft() async throws {
         let model = temporaryModel()
         _ = try model.create("仕事")
-        weak var page: WebPage?
+        weak var page: Page?
         weak var tab: Tab?
         weak var store: TabStore?
         do {

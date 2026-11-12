@@ -29,7 +29,7 @@ final class ContentBlocker: NSObject, WKScriptMessageHandler {
     @ObservationIgnored private let filterFiles: [URL]
     @ObservationIgnored private var filterList: WKContentRuleList?
     @ObservationIgnored private var hiddenList: WKContentRuleList?
-    /// ルールを効かせている先。ページが閉じたら勝手に外れるよう、弱く持つ。
+    /// ルールを効かせている先（プロファイルごとのページの設定の受け口）。プロファイルを離れたら勝手に外れるよう、弱く持つ。
     @ObservationIgnored private let controllers = NSHashTable<WKUserContentController>.weakObjects()
     @ObservationIgnored private var preparation: Task<Void, Never>?
     /// 隠した要素のルールの作り直し。前のが終わってから次を始め、古い結果で上書きしないようにする。
@@ -75,7 +75,7 @@ final class ContentBlocker: NSObject, WKScriptMessageHandler {
 
     // MARK: ページへの取り付け
 
-    /// 新しいページの設定に、今あるルールと要素選びのスクリプトを付ける。
+    /// プロファイルのページの設定に、今あるルールと要素選びのスクリプトを付ける。そのプロファイルの全ページに効く。
     ///
     /// 起動直後でまだルールが揃っていなくても待たない。揃った時点で付け足すと、
     /// それ以降の読み込みには効く（引いてくるだけなら数ミリ秒で、最初のページの資源にも間に合う）。

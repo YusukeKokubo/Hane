@@ -148,11 +148,6 @@ enum PageScripts {
     return JSON.stringify({ count: found.length });
     """
 
-    /// いま画面に見えている範囲を、ページ内の座標で返す。
-    static let viewport = """
-    return JSON.stringify({ x: window.scrollX, y: window.scrollY, width: window.innerWidth, height: window.innerHeight });
-    """
-
     /// 本文のテキスト。引数: `limit`（文字数の上限）。
     static let text = """
     const body = document.body ? document.body.innerText : '';
