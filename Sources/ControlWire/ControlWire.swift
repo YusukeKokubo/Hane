@@ -37,11 +37,19 @@ public enum ControlSocket {
         BrowserProfile.directory(for: profile).appending(path: "control.sock").path(percentEncoded: false)
     }
 
-    /// 要求を1つ送って応答を待つ。相手が起動していなければ `nil`。ソケットを読み書きして待つので、メインスレッドでは呼ばない。
+    /// 応答を待つ上限。いちばん長い命令（`stats --seconds 60`、広告ブロックのコンパイル待ち）より余裕を見ている。
+    ///
+    /// 上限がないと、応答しない相手（引き継がれたソケットを握ったままの別の実体など）を黙って待ち続け、
+    /// 止まったことに気づけない。
+    public static let replyTimeout: Int = 120
+
+    /// 要求を1つ送って応答を待つ。相手が起動していないか、上限まで待っても答えなければ `nil`。
+    /// ソケットを読み書きして待つので、メインスレッドでは呼ばない。
     public static func send(_ args: [String], to path: String) -> ControlResponse? {
         guard let fd = connect(to: path) else { return nil }
         defer { close(fd) }
         ignoreBrokenPipe(fd)
+        limitWaiting(fd)
         guard let request = try? JSONEncoder().encode(ControlRequest(args: args)) else { return nil }
         writeMessage(request, to: fd)
         guard let reply = readMessage(from: fd) else { return nil }
@@ -91,6 +99,12 @@ public enum ControlSocket {
     public static func ignoreBrokenPipe(_ fd: Int32) {
         var on: Int32 = 1
         setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
+    }
+
+    /// 読み込みの待ちを `replyTimeout` 秒で打ち切る。打ち切ると `readMessage` は `nil` を返し、`errno` は `EAGAIN` になる。
+    public static func limitWaiting(_ fd: Int32) {
+        var limit = timeval(tv_sec: replyTimeout, tv_usec: 0)
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &limit, socklen_t(MemoryLayout<timeval>.size))
     }
 
     /// 改行（または切断）までを1通として読む。

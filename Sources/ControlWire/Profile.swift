@@ -125,7 +125,9 @@ public func spawnDetached(_ executable: String, environment: [String: String] = 
     var attributes: posix_spawnattr_t?
     posix_spawnattr_init(&attributes)
     defer { posix_spawnattr_destroy(&attributes) }
-    posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_SETSID))
+    // 呼んだ側の記述子は渡さない。操作用ソケットを引き継ぐと、呼んだ側が終わったあとも子がソケットを握ったままになり、
+    // そこへ繋いだ browserctl が来ない応答を待ち続けた。
+    posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_SETSID | POSIX_SPAWN_CLOEXEC_DEFAULT))
     // 起こしたアプリを、呼んだ側ではなく自分自身の責任にする。そうしないと端末から起こした実体どうしで
     // WebKit の補助プロセスの持ち主が同じ端末になり、stats が別の実体のプロセスまで数えてしまう。
     // 関数は公開されていないので実行時に探し、なければそのまま起こす。

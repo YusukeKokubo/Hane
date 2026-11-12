@@ -71,15 +71,19 @@ if arguments == ["quit"] {
 
 let fd = connectLaunchingIfNeeded()
 ControlSocket.ignoreBrokenPipe(fd)
+ControlSocket.limitWaiting(fd)
 
 guard let request = try? JSONEncoder().encode(ControlRequest(args: arguments)) else {
     fail("要求を組み立てられなかった。")
 }
 ControlSocket.writeMessage(request, to: fd)
 
-guard let reply = ControlSocket.readMessage(from: fd),
-      let response = try? JSONDecoder().decode(ControlResponse.self, from: reply)
-else {
+let reply = ControlSocket.readMessage(from: fd)
+if reply == nil, errno == EAGAIN {
+    fail("Browser が \(ControlSocket.replyTimeout) 秒待っても答えなかった。止まっているか、別の実体がソケットを握っている。"
+        + "`lsof -U | grep control.sock` で持ち主を、`sample <pid> 1` で止まっている所を見ること。")
+}
+guard let reply, let response = try? JSONDecoder().decode(ControlResponse.self, from: reply) else {
     fail("Browser から応答がなかった。")
 }
 close(fd)

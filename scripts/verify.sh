@@ -19,18 +19,32 @@ CTL="$ROOT/build/browserctl"
 FIXTURES="file://$ROOT/Tests/Fixtures"
 
 echo "== テスト"
-swift test 2>&1 | grep -E '✘|error:|Test run with' || true
-swift test >/dev/null 2>&1 || { echo "単体テストが失敗"; exit 1; }
+TEST_LOG="$(mktemp)"
+if ! swift test >"$TEST_LOG" 2>&1; then
+    grep -E '✘|error:|Test run with' "$TEST_LOG" || tail -20 "$TEST_LOG"
+    echo "単体テストが失敗"
+    exit 1
+fi
+grep -E 'Test run with' "$TEST_LOG" || true
+rm -f "$TEST_LOG"
 
 echo "== ビルド"
 scripts/bundle.sh | tail -1
 
 echo "== 通し確認（プロファイル: ${BROWSER_PROFILE}）"
-"$CTL" quit >/dev/null 2>&1 && sleep 1 || true
+# 別のプロファイルを確かめるときに起こす子の実体。途中で落ちたり切ったりすると残り、次の回を詰まらせるので、
+# 始めにも終わりにも親と一緒に止める。
+CHILD="${BROWSER_PROFILE}-child"
+stop_all() {
+    BROWSER_PROFILE="$CHILD" "$CTL" quit >/dev/null 2>&1 || true
+    "$CTL" quit >/dev/null 2>&1 || true
+}
+stop_all
+sleep 1
 # browserctl に起こさせる。自分で直に起こすと、端末から起こした別の実体と補助プロセスの持ち主が
 # 同じになり、stats がそちらのプロセスまで数えてしまう。
 "$CTL" ui >/dev/null
-trap '"$CTL" quit >/dev/null 2>&1 || true' EXIT
+trap stop_all EXIT
 sleep 2
 
 failures=0
@@ -208,7 +222,6 @@ expect "窓の中身を撮る" 'appearance:' window-screenshot "${TMPDIR:-/tmp}/
 expect "窓の枠を覚える" "remembered as \"main-${BROWSER_PROFILE}\"" ui
 
 # 別のプロファイルは別の実体になる。使い捨ての実体からは、起こす実体も使い捨てで裏に起こす。
-CHILD="${BROWSER_PROFILE}-child"
 expect "使い捨ての実体は登録した一覧を見せない" "* ${BROWSER_PROFILE}" profiles
 expect "プロファイルを作る" "  ${CHILD}" profile-new "$CHILD"
 expect "別のプロファイルの実体を起こす" "launched: ${CHILD}" profile-open "$CHILD"

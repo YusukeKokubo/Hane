@@ -223,6 +223,10 @@ import Testing
         #expect(response.output.contains("page: empty"))
 
         try await open(html: "<title>One</title>")
+        // 題名は読み込みの完了より遅れて届くことがあり、待たないとたまに落ちた。
+        for _ in 0..<50 where store.selected?.title != "One" {
+            try await Task.sleep(for: .milliseconds(20))
+        }
         response = await run("ui")
         #expect(response.output.contains("window title: One"))
         #expect(response.output.contains("reload=enabled"))
