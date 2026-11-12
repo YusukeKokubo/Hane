@@ -96,6 +96,8 @@ import Testing
 
         response = await run("window-size", "800", "600")
         #expect(response.output.contains("窓が出ていない"))
+        #expect(await run("window-frame", "0,0,800,600").output.contains("窓が出ていない"))
+        #expect(await !run("window-frame").ok)
         #expect(await run("appearance", "sepia").output.contains("dark、light、system"))
     }
 

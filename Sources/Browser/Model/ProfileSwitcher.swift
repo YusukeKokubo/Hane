@@ -112,40 +112,67 @@ final class ProfileSwitcher {
         }
         let path = ControlSocket.path(for: name)
         let forward = isPersistent
+        let frame = WindowFrameMemory.handOver()
         if forward {
             // 前に出るのは相手の側なので、こちらから譲っておかないと、システムに断られて後ろに留まる。
             // 同じバンドルIDの実体どうしなので、名指しせずに譲れる。
             NSApp.yieldActivation(toApplicationWithBundleIdentifier: ControlSocket.bundleIdentifier)
         }
-        if let pid = await Self.pid(at: path, activating: forward) {
+        if let pid = await Self.pid(at: path, activating: false) {
+            if !frame.isEmpty { _ = await Self.send(["window-frame", frame], to: path) }
+            if forward {
+                _ = await Self.send(["activate"], to: path)
+                await hideOnceLeft()
+            }
             return .activated(pid: pid)
         }
 
+        let environment = [BrowserProfile.environmentKey: name, WindowFrameMemory.handOverKey: frame]
         if forward {
             // 同じアプリをもう一つ立ち上げるのは Launch Services を通す方法しかないので、ここだけ AppKit を使う。
             // 通さずに直に起こすと、Dock に並ばず前にも出ない。
             let configuration = NSWorkspace.OpenConfiguration()
             configuration.createsNewApplicationInstance = true
-            configuration.environment = [BrowserProfile.environmentKey: name]
+            configuration.environment = environment
             _ = try await NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: configuration)
         } else {
             guard let executable = Bundle.main.executablePath,
-                  spawnDetached(executable, environment: [BrowserProfile.environmentKey: name, BrowserProfile.ephemeralKey: "1"])
+                  spawnDetached(executable, environment: environment.merging([BrowserProfile.ephemeralKey: "1"]) { $1 })
             else { throw ProfileError("「\(name)」の実体を起こせなかった") }
         }
         for _ in 0..<100 {
-            if let pid = await Self.pid(at: path, activating: false) { return .launched(pid: pid) }
+            if let pid = await Self.pid(at: path, activating: false) {
+                if forward { await hideOnceLeft() }
+                return .launched(pid: pid)
+            }
             try await Task.sleep(for: .milliseconds(100))
         }
         throw ProfileError("「\(name)」の実体を起こしたが、応答がない")
     }
 
+    /// 切り替え先が前に出たのを見届けてから、この実体を隠す。重ねた窓の下から元の窓が覗かないようにするため。
+    ///
+    /// 前に出る前に隠すと、システムが別のアプリを前に出してしまう。前に出られなかったときは隠さず、元の窓を残す。
+    /// 使い捨ての実体は相手を前に出さないので隠さない（持ち主の作業を遮らず、確かめる命令も届くように）。
+    private func hideOnceLeft() async {
+        for _ in 0..<30 {
+            if !NSApp.isActive {
+                NSApp.hide(nil)
+                return
+            }
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+    }
+
     /// 起動済みの実体に問い合わせ、そのプロセス番号を返す。`activating` なら前に出させる。起動していなければ `nil`。
     nonisolated static func pid(at path: String, activating: Bool) async -> Int32? {
-        await Task.detached {
-            guard let response = ControlSocket.send([activating ? "activate" : "pid"], to: path), response.ok else { return nil }
-            return Int32(response.output.split(separator: " ").last ?? "")
-        }.value
+        guard let response = await send([activating ? "activate" : "pid"], to: path), response.ok else { return nil }
+        return Int32(response.output.split(separator: " ").last ?? "")
+    }
+
+    /// 別の実体へ命令を送る。ソケットの読み書きで止まるので、メインスレッドの外で待つ。
+    nonisolated static func send(_ args: [String], to path: String) async -> ControlResponse? {
+        await Task.detached { ControlSocket.send(args, to: path) }.value
     }
 
     /// 同じプロファイルの実体がもう動いていれば、そちらを前に出して、この実体は起動をやめる。

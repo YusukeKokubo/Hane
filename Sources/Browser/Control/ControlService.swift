@@ -178,6 +178,14 @@ final class ControlService {
             menu.choose(item)
             return await afterUIAction("chose \"\(item.title)\" from \(menu.label)")
 
+        case "window-frame":
+            let frame = try argument(args, 0, "枠（x,y,幅,高さ）")
+            guard Self.mainWindow() != nil else { throw ControlError("窓が出ていない。") }
+            guard WindowFrameMemory.take(frame) else {
+                throw ControlError("その枠には合わせられない（全画面か、どの画面にもかからない枠か、書き方が違う）: \(frame)")
+            }
+            return "window frame: " + describeWindowFrame()
+
         case "window-size":
             guard let window = Self.mainWindow() else { throw ControlError("窓が出ていない。") }
             let width = try integer(try argument(args, 0, "幅"), "幅")
@@ -327,6 +335,8 @@ final class ControlService {
 
         case "activate":
             // 最小化していれば戻す。前に出られるかはシステムが決めるので、呼ぶ側が先に譲っておくこと。
+            // プロファイルを切り替えて隠した実体へ戻ってくるときのため、隠れていれば出す。
+            NSApp.unhide(nil)
             if let window = NSApp.windows.first(where: \.canBecomeMain) {
                 window.deminiaturize(nil)
                 window.makeKeyAndOrderFront(nil)
