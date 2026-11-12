@@ -118,6 +118,13 @@ struct BrowserCommands: Commands {
     }
 
     private func closeTab() {
+        // ⌘W はこの項目が標準の「閉じる」より先に受けるので、設定の窓が手前にあればタブではなくその窓を閉じる。
+        // シートやポップオーバー（親のある窓）が手前のときは、これまでどおりタブを閉じる。
+        if let front = NSApp.orderedWindows.first(where: \.isVisible),
+           front.identifier?.rawValue != BrowserApp.windowID, front.parent == nil, front.sheetParent == nil {
+            front.performClose(nil)
+            return
+        }
         if !store.closeSelected() {
             dismissWindow(id: BrowserApp.windowID)
         }

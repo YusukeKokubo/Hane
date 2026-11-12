@@ -8,10 +8,13 @@ struct BrowserApp: App {
 
     @State private var store: TabStore
     @State private var profiles: ProfileSwitcher
+    @State private var settings: SettingsStore
     private let control: ControlService
 
     init() {
         ProfileSwitcher.handOffIfAlreadyRunning()
+        // ページを作る前に、共有の環境設定へ値を入れておく。
+        let settings = SettingsStore.forCurrentProfile()
         let blocker = ContentBlocker.forCurrentProfile()
         Task { await blocker.prepare() }
         let store = TabStore(
@@ -23,7 +26,8 @@ struct BrowserApp: App {
         let profiles = ProfileSwitcher.forCurrentProfile()
         _store = State(initialValue: store)
         _profiles = State(initialValue: profiles)
-        control = ControlService(store: store, profiles: profiles)
+        _settings = State(initialValue: settings)
+        control = ControlService(store: store, profiles: profiles, settings: settings)
         control.start()
         LocalShortcuts.install(store: store, profiles: profiles)
         WindowFrameMemory.install()
@@ -58,6 +62,10 @@ struct BrowserApp: App {
         .restorationBehavior(.disabled)
         .commands {
             BrowserCommands(store: store, profiles: profiles)
+        }
+
+        Settings {
+            SettingsView(settings: settings)
         }
     }
 }

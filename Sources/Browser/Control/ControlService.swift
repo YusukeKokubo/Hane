@@ -10,6 +10,7 @@ import WebKit
 final class ControlService {
     private let store: TabStore
     private let profiles: ProfileSwitcher
+    private let settings: SettingsStore
     /// 要素の控えを置く実行環境。ページ自身のスクリプトからは見えない。
     private let world = WKContentWorld.world(name: "browserctl")
     /// `ui-snapshot` で振った番号と、窓まわりの部品の対応。
@@ -19,9 +20,14 @@ final class ControlService {
 
     private static let loadTimeout: Duration = .seconds(30)
 
-    init(store: TabStore, profiles: ProfileSwitcher = ProfileSwitcher(registryURL: nil)) {
+    init(
+        store: TabStore,
+        profiles: ProfileSwitcher = ProfileSwitcher(registryURL: nil),
+        settings: SettingsStore = SettingsStore()
+    ) {
         self.store = store
         self.profiles = profiles
+        self.settings = settings
     }
 
     func start() {
@@ -243,6 +249,18 @@ final class ControlService {
         case "bookmark-remove":
             store.removeBookmark(try bookmarkID(try argument(args, 0, "ブックマークの番号")))
             return describeBookmarks()
+
+        case "settings":
+            if let name = args.first {
+                let value = try argument(args, 1, "値")
+                switch (name, value) {
+                case ("popups", "block"): settings.blocksPopups = true
+                case ("popups", "allow"): settings.blocksPopups = false
+                case ("popups", _): throw ControlError("popups の値は block か allow。")
+                default: throw ControlError("そういう設定はない: \(name)。設定は popups だけ。")
+                }
+            }
+            return "popups: \(settings.blocksPopups ? "block" : "allow")"
 
         case "adblock":
             let blocker = try contentBlocker()
@@ -622,7 +640,8 @@ final class ControlService {
             }
         }
         guard let (keyCode, characters) = Self.keys[name] else {
-            throw ControlError("知らないキー: \(name)（\(Self.keys.keys.sorted().joined(separator: ", "))）")
+            let named = Self.keys.keys.filter { Self.letterKeys[$0] == nil }.sorted()
+            throw ControlError("知らないキー: \(name)（a〜z, \(named.joined(separator: ", "))）")
         }
         guard let window = NSApp.keyWindow ?? Self.backgroundKeyTarget() else {
             throw ControlError("ウインドウがない。")
@@ -690,7 +709,18 @@ final class ControlService {
         "escape": (53, "\u{1b}"),
         "delete": (51, "\u{7f}"),
         "tab": (48, "\t"),
-    ]
+        ",": (43, ","),
+    ].merging(letterKeys) { $1 }
+
+    /// 英字キー。仮想キーコードは並びが文字の順ではない（US 配列の位置で決まっている）。
+    private static let letterKeys: [String: (UInt16, String)] = {
+        let codes: [Character: UInt16] = [
+            "a": 0, "s": 1, "d": 2, "f": 3, "h": 4, "g": 5, "z": 6, "x": 7, "c": 8, "v": 9, "b": 11, "q": 12,
+            "w": 13, "e": 14, "r": 15, "y": 16, "t": 17, "o": 31, "u": 32, "i": 34, "p": 35, "l": 37, "j": 38,
+            "k": 40, "n": 45, "m": 46,
+        ]
+        return Dictionary(uniqueKeysWithValues: codes.map { (String($0.key), ($0.value, String($0.key))) })
+    }()
 
     /// ブックマークを番号つきで一覧する。番号はフォルダも含めた上からの通し番号。
     private func describeBookmarks() -> String {

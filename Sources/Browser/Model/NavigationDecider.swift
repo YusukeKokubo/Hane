@@ -10,8 +10,8 @@ protocol TabOpening: AnyObject {
 
 /// ナビゲーションごとの可否判断。
 ///
-/// `target="_blank"` や `window.open` のように新しいウインドウを求めるリンクと、
-/// Commandキーを押しながらのクリックを、新しいタブに振り替える。
+/// `target="_blank"` のように新しいウインドウを求めるリンクと、
+/// Commandキーを押しながらのクリックを、新しいタブに振り替える（`window.open` は `PopupWindows` が受ける）。
 /// タブ管理側は弱参照で持つので、ページとの間に循環参照はできない。
 @MainActor
 struct NavigationDecider: WebPage.NavigationDeciding {

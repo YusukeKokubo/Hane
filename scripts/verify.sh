@@ -71,6 +71,28 @@ expect "JavaScriptの実行" '"Second"' eval document.title
 sleep 1
 expect "新しいウインドウ宛てのリンクは新規タブで開く" '* tab 2: Second' tabs
 expect "タブを閉じる" 'closed tab 2' close 2
+# ポップアップ。止めているときは操作の中から開いたものだけ、許すと操作なしのものも新しいタブで開く。
+expect "ポップアップは既定で止める" 'popups: block' settings
+"$CTL" open "$FIXTURES/popup.html" >/dev/null
+sleep 1
+expect "操作なしのポップアップは開かない" '* tab 1: Popup' tabs
+"$CTL" snapshot >/dev/null
+"$CTL" click 1 >/dev/null
+sleep 1
+expect "クリックから開くポップアップは新しいタブで開く" 'second.html#click' tabs
+"$CTL" close >/dev/null
+expect "ポップアップを許す" 'popups: allow' settings popups allow
+"$CTL" select 1 >/dev/null
+"$CTL" reload >/dev/null
+sleep 1
+expect "許すと操作なしのポップアップも開く" 'second.html#auto' tabs
+"$CTL" close >/dev/null
+"$CTL" settings popups block >/dev/null
+expect "⌘,で設定の窓を開く" 'overlay: window' key cmd+,
+expect "設定の窓の中身も一覧に出る" 'checkbox' ui-snapshot
+# ⌘W はタブを閉じる項目が先に受ける。設定の窓が手前なら、タブではなくその窓を閉じる。
+expect "⌘Wで手前の設定の窓だけ閉じる" '* tab 1: Popup' key cmd+w
+expect "設定の窓が閉じている" 'tabs (left to right):' ui
 "$CTL" open "$FIXTURES/smoke.html" >/dev/null
 expect "今のタブをブックマークにする" '2 Smoke' bookmark-add --folder 試験
 expect "フォルダの中のページを選んでいる表示" '[*試験 › Smoke ▾]' ui

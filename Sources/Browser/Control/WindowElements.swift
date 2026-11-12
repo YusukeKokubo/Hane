@@ -79,17 +79,24 @@ final class WindowElements {
         var lines: [String] = []
         for (window, kind) in windows {
             lines.append("\(kind):")
+            // 別に開いた窓の部品は、その窓の左上から測る。
+            let origin = window === main || window.parent != nil || window.sheetParent != nil ? main : window
             if let content = window.contentView {
-                collect(content, in: window, relativeTo: main, depth: 0, insideItem: false, into: &lines)
+                collect(content, in: window, relativeTo: origin, depth: 0, insideItem: false, into: &lines)
             }
         }
         lines.append("（座標は窓の左上から。window-screenshot の画像と同じ向き）")
         return lines.joined(separator: "\n")
     }
 
-    /// 窓と、その上に出ているシートやポップオーバー。キーを受けるのは後ろにあるものほど手前。
+    /// 窓と、その上に出ているシートやポップオーバー、本体の窓より手前にある別の窓（設定の窓など）。
+    /// キーを受けるのは後ろにあるものほど手前。
     static func windows() -> [(window: NSWindow, kind: String)] {
-        guard let main = NSApp.windows.first(where: { $0.isVisible && $0.canBecomeMain }) else { return [] }
+        // 設定の窓も本体の窓になれるので、本体の窓は識別子で選ぶ。
+        let visible = NSApp.windows.filter(\.isVisible)
+        guard let main = visible.first(where: { $0.identifier?.rawValue == BrowserApp.windowID })
+            ?? visible.first(where: \.canBecomeMain)
+        else { return [] }
         var result: [(NSWindow, String)] = [(main, "window")]
         // フォルダの一覧から開く編集欄のように、ポップオーバーの上に重なるものは孫の窓になる。
         func appendChildren(of window: NSWindow) {
@@ -101,6 +108,15 @@ final class WindowElements {
         appendChildren(of: main)
         if let sheet = main.attachedSheet, sheet.isVisible {
             result.append((sheet, "sheet"))
+        }
+        // 手前から並ぶので、奥のものから足して、いちばん手前を最後にする。
+        let front = NSApp.orderedWindows.prefix { $0 !== main }.reversed().filter { window in
+            window.isVisible && window.parent == nil && window.sheetParent == nil
+                && !result.contains { $0.0 === window }
+        }
+        for window in front {
+            result.append((window, "window \"\(window.title)\""))
+            appendChildren(of: window)
         }
         return result
     }

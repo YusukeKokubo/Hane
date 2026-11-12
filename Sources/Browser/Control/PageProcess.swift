@@ -2,7 +2,7 @@ import Foundation
 import WebKit
 
 /// ページを描いているプロセス（WebContent）の番号を引く。どのタブがメモリや CPU を使っているかを
-/// 測るための開発用で、ページの動作には使わない。
+/// 測るための開発用。中の Web ビューを引く `webView(of:)` は、`PopupWindows` が窓を開こうとしたページを探すのにも使う。
 ///
 /// `WebPage` はプロセス番号を公開していないので、中に持っている Web ビュー（`WKWebView` の仲間）を
 /// 実行時に探し、その非公開の `_webProcessIdentifier` を読む。WebKit の中身が変われば `nil` を返すだけで、

@@ -302,6 +302,45 @@ import Testing
         try #require(views.count == 2)
         let pools = views.map { $0.configuration.value(forKey: "processPool") as AnyObject }
         #expect(pools[0] === pools[1])
+        // 設定画面で変えた値を開いているタブにもその場で効かせるため、環境設定も共有している。
+        #expect(views.allSatisfy { $0.configuration.preferences === SharedConfiguration.preferences })
+    }
+
+    /// `window.open` は、止めているときは操作の中から呼んだものだけ、許しているときはいつでも新しいタブで開く。
+    /// WebPage の案内役に窓を作る手続きを足して受けているので、WebKit が変わって届かなくなったらここで分かる。
+    @Test func popupsFollowTheSetting() async throws {
+        let second = FileManager.default.temporaryDirectory.appending(path: "control-popup-\(UUID().uuidString).html")
+        try "<title>Popped</title>".write(to: second, atomically: true, encoding: .utf8)
+        let target = second.absoluteString
+        // 環境設定はほかのテストのページとも共有なので、許したままにしない。
+        defer { SharedConfiguration.preferences.javaScriptCanOpenWindowsAutomatically = false }
+        let popup = "<title>Opener</title><script>setTimeout(() => window.open('\(target)#auto'), 50)</script>"
+
+        #expect(await run("settings").output == "popups: block")
+        try await open(html: popup)
+        try await Task.sleep(for: .milliseconds(500))
+        #expect(store.tabs.count == 1)
+
+        // eval はクリックと同じく利用者の操作の中として扱われる。
+        _ = await run("eval", "window.open('\(target)#click'); 1")
+        try await waitForTabs(2)
+        #expect(store.selected?.url?.fragment == "click")
+
+        #expect(await run("settings", "popups", "allow").output == "popups: allow")
+        _ = await run("select", "1")
+        _ = await run("reload")
+        try await waitForTabs(3)
+        #expect(store.selected?.url?.fragment == "auto")
+
+        #expect(await !run("settings", "popups", "maybe").ok)
+        #expect(await !run("settings", "cookies", "block").ok)
+    }
+
+    private func waitForTabs(_ count: Int) async throws {
+        for _ in 0..<50 where store.tabs.count < count {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        try #require(store.tabs.count == count)
     }
 
     /// 読み込む前のタブのために Web ビューを作らせない。

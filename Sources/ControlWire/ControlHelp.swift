@@ -49,6 +49,13 @@ public enum ControlHelp {
       activate               窓を前に出す。ほかの実体から切り替えるときに使う
       pid                    この実体のプロセス番号
 
+    設定（メニューの「設定…」（⌘,）と同じもの。保存するプロファイルでは保存される）
+      settings               今の設定
+      settings popups <block|allow>
+                             ポップアップウインドウを止めるか。block では、クリックなどの操作の中から
+                             window.open したものだけ新しいタブで開く。allow では操作がなくても開く
+                             開いているタブにもその場で効く
+
     広告ブロック（同梱のフィルタリストと、⌥右クリックで選んで隠した要素）
       adblock                フィルタリストの状態と、今のサイトで隠している要素。起動直後は準備を待ってから返る
       hide <CSSセレクタ>       今のページで合う要素を隠し、このサイトで次から隠すよう覚える
@@ -64,9 +71,10 @@ public enum ControlHelp {
                              アプリが自分で描くので、画面収録の権限が要らず、窓が裏にいても撮れる。
                              窓の枠と信号機ボタンは写らない
       key <キー>              ページの外（メニューやバー）へキーを送り、ui の結果を返す
-                             キーは 1〜9, up, down, left, right, return, escape, delete, tab。
+                             キーは 1〜9, a〜z, up, down, left, right, return, escape, delete, tab, ","。
                              cmd+ ctrl+ opt+ shift+ を前に付けられる
-                             例: key cmd+1（バーの左から1番目。フォルダなら一覧を開く）、key ctrl+tab（次のタブ）
+                             例: key cmd+1（バーの左から1番目。フォルダなら一覧を開く）、key ctrl+tab（次のタブ）、
+                             key cmd+,（設定の窓を開く）、key cmd+w（タブか、手前の設定の窓を閉じる）
                              アプリが裏にいても届き、前には出ない
       type [--replace] <文字列>
                              フォーカスのある入力欄（アドレスバーなど）へ1文字ずつ打ち込み、ui の結果を返す
@@ -75,6 +83,8 @@ public enum ControlHelp {
                              例: new → type git → key return（補ったページへ移る）
       ui-snapshot            窓まわりの部品（タブ、ブックマーク、ボタン、入力欄）を番号つきで一覧する。
                              ポップオーバーやシート（アラート）が出ていれば、その中身も続けて出る。
+                             設定の窓のように別に開いた窓も、本体の窓より手前にあれば続けて出る（位置はその窓の左上から。
+                             中身は window-screenshot には写らない）。
                              位置は窓の左上から測るので、window-screenshot の画像と突き合わせられる
       ui-click <番号>         部品の真ん中をクリックし、ui の結果を返す（番号は直前の ui-snapshot のもの）
                              アプリが裏にいても届き、前には出ない

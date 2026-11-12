@@ -50,6 +50,7 @@ final class Tab: Identifiable {
         restored = saved
         requestedURL = saved?.url
         page = factory.makePage(navigationDecider: NavigationDecider(opener: opener), log: log)
+        PopupWindows.register(page, opener: opener)
         monitor = Task { [weak self, page] in
             await Self.watchNavigations(of: page) { update in
                 self?.handle(update)
