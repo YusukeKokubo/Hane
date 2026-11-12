@@ -88,7 +88,7 @@ private struct InternalsWarning: View {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .foregroundStyle(.orange)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("WebKit が変わり、このブラウザが裏で補っている所が効いていません。swift test で確かめてください。")
+                    Text("WebKit が変わり、このブラウザが裏で補っている所が思いどおりに動いていないかもしれません。swift test で確かめてください。")
                         .fontWeight(.medium)
                     ForEach(check.problems ?? [], id: \.self) { Text($0) }
                 }
