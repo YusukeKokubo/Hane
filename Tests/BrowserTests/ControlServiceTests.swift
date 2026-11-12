@@ -11,6 +11,8 @@ import WebKit
     private let service: ControlService
 
     init() {
+        // テストの実行環境ではアプリの本体（`NSApp`）が誰かが窓を作るまでできず、窓まわりの命令が先に走ると落ちる。
+        _ = NSApplication.shared
         store = TabStore(factory: PageFactory(dataStore: .nonPersistent()))
         service = ControlService(store: store)
     }
