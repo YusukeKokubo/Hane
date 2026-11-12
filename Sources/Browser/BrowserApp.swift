@@ -43,7 +43,6 @@ struct BrowserApp: App {
             BrowserWindow(model: model)
         }
         .windowStyle(.hiddenTitleBar)
-        .windowBackgroundDragBehavior(.enabled)
         .defaultSize(width: 1200, height: 800)
         // タブは閲覧状態（SessionStore）で戻すので、macOS の再開には任せない。任せると
         // ウインドウの状態が変わるたびに窓全体の画像を取って保存し、その写しで本体が25MBほど膨らんだまま戻らない。

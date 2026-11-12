@@ -60,6 +60,8 @@ struct BrowserWindow: View {
             }
             .padding(.leading, Self.windowControlsWidth)
             .padding(.trailing, Self.dragAreaWidth)
+            // 項目のない所だけが窓を掴む場所になる。項目は手前にあるので、ドラッグは項目が受ける。
+            .background { WindowDragArea() }
             if let tab = store.selected {
                 NavigationRow(tab: tab, store: store)
             }
@@ -73,6 +75,7 @@ struct BrowserWindow: View {
         }
         .frame(minWidth: 480, minHeight: 320)
         .ignoresSafeArea(edges: .top)
+        .background { StillWindow() }
     }
 }
 
