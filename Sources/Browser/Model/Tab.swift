@@ -243,8 +243,8 @@ final class Tab: Identifiable {
         case .finished:
             endLoadSignpost()
             // 前のページと同じ題名なら変化の知らせが来ないので、読み終えたときにも入れる（空なら何もしない）。
-            if let view = page?.webView, let url = view.url {
-                history.setTitle(view.title ?? "", for: url)
+            if let page, let url = page.url {
+                history.setTitle(page.title, for: url)
             }
         case .titleChanged(let title):
             if awaitingTitle {

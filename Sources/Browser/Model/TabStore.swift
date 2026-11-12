@@ -1,6 +1,5 @@
 import Foundation
 import Observation
-import WebKit
 
 /// 開いているタブの一覧と選択状態。今開いているプロファイルにつき一つで、窓は一つきり（`BrowserModel` が持つ）。
 ///
