@@ -46,12 +46,6 @@ final class HistoryStore {
         }
     }
 
-    /// 保存するプロファイルならその置き場に保存し、使い捨てのプロファイルでは何も残さない。
-    static func forCurrentProfile() -> HistoryStore {
-        guard let directory = BrowserProfile.dataDirectory else { return HistoryStore() }
-        return HistoryStore(fileURL: directory.appending(path: "history.json"))
-    }
-
     // MARK: 記録する
 
     /// 訪問を1回数える。補う意味のないアドレス（about: など）は記録しない。

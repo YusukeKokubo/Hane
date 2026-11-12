@@ -19,17 +19,28 @@ enum PopupWindows {
     /// WebKit は案内役が手続きを持つかを、案内役を受け取ったときに一度だけ確かめるため。
     static func install() { _ = installed }
 
-    /// ページと、そのページから開く窓を受けるタブ管理を結びつける。
-    static func register(_ page: WebPage, opener: any TabOpening) {
-        entries.removeAll { $0.page == nil }
-        entries.append(Entry(page: page, opener: opener))
+    /// ページの受け口（ページごとに一つ）と、そのページから開く窓を受けるタブ管理を結びつける。
+    ///
+    /// WebKit が窓を開いてほしいと言ってくるときは Web ビューしか渡さないので、その設定の受け口から引く。
+    /// 受け口は公開の設定で、`WebPage` が中で作る Web ビューにもそのまま渡る（`popupsFollowTheSetting` のテストで見ている）。
+    static func register(_ controller: WKUserContentController, opener: any TabOpening) {
+        entries.removeAll { $0.controller == nil }
+        entries.append(Entry(controller: controller, opener: opener))
     }
 
     /// 開いている小窓。閉じると外れる。
     private(set) static var windows: [PopupWindow] = []
 
+    /// そのタブ管理のページが開いた小窓を閉じる。プロファイルを切り替えるとき、前のプロファイルのサイトデータを使う窓を残さないため。
+    static func close(openedBy opener: any TabOpening) {
+        // 閉じると `windows` から外れるので、写しを回す。
+        for window in Array(windows) where window.opener === opener {
+            window.close()
+        }
+    }
+
     private struct Entry {
-        weak var page: WebPage?
+        weak var controller: WKUserContentController?
         weak var opener: (any TabOpening)?
     }
 
@@ -59,7 +70,8 @@ enum PopupWindows {
     }
 
     private static func opener(of webView: WKWebView) -> (any TabOpening)? {
-        entries.first { $0.page.flatMap(PageProcess.webView(of:)) === webView }?.opener
+        let controller = webView.configuration.userContentController
+        return entries.first { $0.controller === controller }?.opener
     }
 
     private static let installed: Bool = {

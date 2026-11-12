@@ -1,60 +1,93 @@
 import Foundation
 
-/// 環境変数 `BROWSER_PROFILE` で選ぶ、アプリの実体の区別。
+/// 環境変数 `BROWSER_INSTANCE` で選ぶ、アプリの実体（プロセス）の区別。
 ///
-/// 一つの実体は一つのプロファイルだけを受け持つ。Cookie などのサイトデータ、ブックマーク、閲覧履歴、
-/// 閲覧状態はプロファイルごとに分かれ、操作用ソケットも別になる。
-///
-/// 指定がなければ普段使いの `default`。保存するのは `default` と、一覧（`ProfileRegistry`）に登録した名前だけで、
-/// それ以外の名前（開発用の `dev` など）はCookieなども残さない使い捨てになる。
-public enum BrowserProfile {
-    public static let environmentKey = "BROWSER_PROFILE"
-    /// `1` なら、一覧に登録した名前でも使い捨てにする。使い捨ての実体から別のプロファイルを起こすときに引き継ぎ、
-    /// 開発用の実体から普段使いのデータに触れないようにする。
-    public static let ephemeralKey = "BROWSER_EPHEMERAL"
+/// 実体を分けるのは、開発や計測で持ち主の普段使いに触れないためだけ。プロファイルは一つの実体の中で切り替える（`BrowserProfile`）。
+/// 指定がなければ普段使いの実体で、持ち物を保存する。名前を付けた実体（dev、bench など）は何も保存しない使い捨てで、
+/// 操作用ソケットも別になる。
+public enum BrowserInstance {
+    public static let environmentKey = "BROWSER_INSTANCE"
     public static let defaultName = "default"
+    /// 以前、実体とプロファイルを兼ねて使っていた変数。付いたまま呼ばれると、黙って普段使いの実体を相手にしてしまうので断る。
+    public static let retiredKeys = ["BROWSER_PROFILE", "BROWSER_EPHEMERAL"]
 
-    public static let name: String = {
-        guard let value = ProcessInfo.processInfo.environment[environmentKey],
-              value == defaultName || problem(withName: value) == nil
-        else { return defaultName }
+    /// 使い捨ての実体の名前。普段使いなら `nil`。
+    public static let name: String? = {
+        guard let value = ProcessInfo.processInfo.environment[environmentKey], !value.isEmpty, value != defaultName
+        else { return nil }
         return value
     }()
 
-    public static var isDefault: Bool { name == defaultName }
+    public static var isDefault: Bool { name == nil }
+    public static var label: String { name ?? defaultName }
 
-    /// 一覧に登録してあるこのプロファイル。起動した時点の一覧から引く。普段使いと使い捨てでは `nil`。
-    public static let entry: ProfileRegistry.Entry? = {
-        guard !isDefault, ProcessInfo.processInfo.environment[ephemeralKey] != "1" else { return nil }
-        return (try? ProfileRegistry.load())?.entry(named: name)
-    }()
-
-    /// サイトデータやブックマークを保存するか。
-    public static var isPersistent: Bool { isDefault || entry != nil }
-
-    /// このプロファイルの持ち物（ブックマーク、閲覧履歴、閲覧状態など）を置く場所。使い捨てなら `nil`。
-    public static var dataDirectory: URL? { isPersistent ? directory(for: name) : nil }
-
-    /// プロファイルの置き場。`default` はプロファイルを分ける前からの場所のままにして、持ち物を移さずに済ませる。
-    public static func directory(for name: String) -> URL {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appending(path: "Browser", directoryHint: .isDirectory)
-        return name == defaultName ? base : base.appending(path: "profiles/\(name)", directoryHint: .isDirectory)
-    }
-
-    /// 名前として使えないなら、その理由。名前はそのままパスと環境変数に入るので、
-    /// 区切り文字や制御文字を除き、操作用ソケットのパスが上限（104バイト）に収まる長さに限る。
-    public static func problem(withName name: String) -> String? {
-        if name.isEmpty { return "名前が空" }
-        if name == defaultName { return "「\(defaultName)」は普段使いのプロファイルの名前" }
-        if name != name.trimmingCharacters(in: .whitespacesAndNewlines) { return "前後に空白がある" }
-        if name.hasPrefix(".") { return "「.」で始まる名前は使えない" }
-        if name.unicodeScalars.contains(where: { $0 == "/" || $0 == ":" || CharacterSet.controlCharacters.contains($0) }) {
-            return "「/」「:」や改行は使えない"
+    /// この実体を動かしてはいけない理由。名前が使えないとき、普段使いへ落とすと持ち主のデータに触れてしまうので止める。
+    public static var startupProblem: String? {
+        let environment = ProcessInfo.processInfo.environment
+        if let retired = retiredKeys.first(where: { environment[$0] != nil }) {
+            return "\(retired) は使えなくなった。開発用の実体は \(environmentKey)=<名前> で分ける"
+                + "（BROWSER_PROFILE=dev なら \(environmentKey)=dev）。プロファイルは実体の中で profile-open で切り替える。"
         }
-        if ControlSocket.path(for: name).utf8.count >= 104 { return "名前が長すぎる" }
+        if let name, let problem = problem(withName: name) { return "\(environmentKey) の名前が使えない: \(problem)" }
         return nil
     }
+
+    /// 持ち物の置き場。普段使いの実体だけが保存する。
+    public static var dataDirectory: URL? { isDefault ? baseDirectory : nil }
+
+    /// アプリの持ち物の根元。普段使いのプロファイル（`default`）の持ち物もここに直に置く。
+    public static var baseDirectory: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appending(path: "Browser", directoryHint: .isDirectory)
+    }
+
+    /// 操作用ソケットの置き場。普段使いは分ける前からの場所のまま。
+    public static func socketPath(for name: String?) -> String {
+        let directory = name.map { baseDirectory.appending(path: "instances/\($0)", directoryHint: .isDirectory) } ?? baseDirectory
+        return directory.appending(path: "control.sock").path(percentEncoded: false)
+    }
+
+    /// 名前として使えないなら、その理由。名前はそのままパスに入るので、区切り文字や制御文字を除き、
+    /// 操作用ソケットのパスが上限（104バイト）に収まる長さに限る。
+    public static func problem(withName name: String) -> String? {
+        if let problem = pathProblem(name) { return problem }
+        if socketPath(for: name).utf8.count >= 104 { return "名前が長すぎる" }
+        return nil
+    }
+}
+
+/// 一つの実体の中で切り替えるプロファイル。Cookie などのサイトデータ、ブックマーク、閲覧履歴、閲覧状態を分けて持つ。
+///
+/// 普段使いの実体では `default` と、一覧（`ProfileRegistry`）に登録した名前。使い捨ての実体では `default` と、
+/// その実体の中で作った名前で、どれも保存しない。
+public enum BrowserProfile {
+    public static let defaultName = "default"
+    /// メニューや窓の題名に出すので、長すぎない名前に限る。
+    public static let maxNameLength = 20
+
+    /// プロファイルの置き場。`default` はプロファイルを分ける前からの場所（根元の直下）のままにして、持ち物を移さずに済ませる。
+    public static func directory(for name: String, in base: URL = BrowserInstance.baseDirectory) -> URL {
+        name == defaultName ? base : base.appending(path: "profiles/\(name)", directoryHint: .isDirectory)
+    }
+
+    /// 名前として使えないなら、その理由。名前はそのままパスに入る。
+    public static func problem(withName name: String) -> String? {
+        if name == defaultName { return "「\(defaultName)」は普段使いのプロファイルの名前" }
+        if let problem = pathProblem(name) { return problem }
+        if name.count > maxNameLength { return "名前が長すぎる（\(maxNameLength)文字まで）" }
+        return nil
+    }
+}
+
+/// パスの一部になる名前の決まり。
+private func pathProblem(_ name: String) -> String? {
+    if name.isEmpty { return "名前が空" }
+    if name != name.trimmingCharacters(in: .whitespacesAndNewlines) { return "前後に空白がある" }
+    if name.hasPrefix(".") { return "「.」で始まる名前は使えない" }
+    if name.unicodeScalars.contains(where: { $0 == "/" || $0 == ":" || CharacterSet.controlCharacters.contains($0) }) {
+        return "「/」「:」や改行は使えない"
+    }
+    return nil
 }
 
 public struct ProfileError: LocalizedError, CustomStringConvertible {
@@ -78,11 +111,16 @@ public struct ProfileRegistry: Codable, Equatable, Sendable {
     }
 
     public var profiles: [Entry] = []
+    /// 最後に開いていたプロファイル。次の起動でそれを開く。ないときや一覧にないときは `default`。
+    /// 後から足した項目なので、前の版のファイルにはない（Optional なので、なくても読める）。
+    public var lastOpened: String?
 
     public init() {}
 
-    public static var fileURL: URL {
-        BrowserProfile.directory(for: BrowserProfile.defaultName).appending(path: "profiles.json")
+    public static var fileURL: URL { fileURL(in: BrowserInstance.baseDirectory) }
+
+    public static func fileURL(in base: URL) -> URL {
+        base.appending(path: "profiles.json")
     }
 
     /// ファイルがなければ空の一覧。読めないときは投げる（空として上書きすると、サイトデータとの対応を失うため）。

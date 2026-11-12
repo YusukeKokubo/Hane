@@ -1,20 +1,18 @@
 #!/bin/sh
 # 変更を確かめる一発スクリプト。ビルド、単体テスト、実機での通し確認を順に行う。
 #
-# 通し確認は開発用プロファイル（BROWSER_PROFILE=dev）の別実体で行うので、
+# 通し確認は開発用の使い捨ての実体（BROWSER_INSTANCE=dev）で行うので、
 # 普段使いのブラウザのタブやCookieには触れない。ネットワークにも出ない。
 # 使い方: scripts/verify.sh
-#   別の作業と並べて走らせるときは BROWSER_PROFILE=<名前> で実体を分けられる（default は使えない）。
+#   別の作業と並べて走らせるときは BROWSER_INSTANCE=<名前> で実体を分けられる（default は使えない）。
 set -eu
 
 cd "$(dirname "$0")/.."
 ROOT="$(pwd)"
-case "${BROWSER_PROFILE:-}" in
-    ""|default) export BROWSER_PROFILE=dev ;;
-    *) export BROWSER_PROFILE ;;
+case "${BROWSER_INSTANCE:-}" in
+    ""|default) export BROWSER_INSTANCE=dev ;;
+    *) export BROWSER_INSTANCE ;;
 esac
-# 登録したプロファイルの名前を渡されても、持ち主のそのプロファイルには触らない。
-export BROWSER_EPHEMERAL=1
 CTL="$ROOT/build/browserctl"
 FIXTURES="file://$ROOT/Tests/Fixtures"
 
@@ -31,12 +29,9 @@ rm -f "$TEST_LOG"
 echo "== ビルド"
 scripts/bundle.sh | tail -1
 
-echo "== 通し確認（プロファイル: ${BROWSER_PROFILE}）"
-# 別のプロファイルを確かめるときに起こす子の実体。途中で落ちたり切ったりすると残り、次の回を詰まらせるので、
-# 始めにも終わりにも親と一緒に止める。
-CHILD="${BROWSER_PROFILE}-child"
+echo "== 通し確認（実体: ${BROWSER_INSTANCE}）"
+# 途中で落ちたり切ったりすると実体が残り、次の回を詰まらせるので、始めにも終わりにも止める。
 stop_all() {
-    BROWSER_PROFILE="$CHILD" "$CTL" quit >/dev/null 2>&1 || true
     "$CTL" quit >/dev/null 2>&1 || true
 }
 stop_all
@@ -49,11 +44,9 @@ sleep 2
 
 failures=0
 # expect <説明> <含まれるはずの文字列> <命令…>
-# TARGET にプロファイルの名前を入れておくと、その実体へ送る。
-TARGET=""
 expect() {
     label="$1"; wanted="$2"; shift 2
-    output="$(BROWSER_PROFILE="${TARGET:-$BROWSER_PROFILE}" "$CTL" "$@" 2>&1)" || true
+    output="$("$CTL" "$@" 2>&1)" || true
     if printf '%s' "$output" | grep -qF -- "$wanted"; then
         echo "  ok   $label"
     else
@@ -62,6 +55,21 @@ expect() {
         echo "       期待: $wanted"
         printf '%s\n' "$output" | sed 's/^/       > /'
         failures=$((failures + 1))
+    fi
+}
+
+# reject <説明> <含まれてはいけない文字列> <命令…>
+reject() {
+    label="$1"; unwanted="$2"; shift 2
+    output="$("$CTL" "$@" 2>&1)" || true
+    if printf '%s' "$output" | grep -qF -- "$unwanted"; then
+        echo "  FAIL $label"
+        echo "       命令: browserctl $*"
+        echo "       含まれてはいけない: $unwanted"
+        printf '%s\n' "$output" | sed 's/^/       > /'
+        failures=$((failures + 1))
+    else
+        echo "  ok   $label"
     fi
 }
 
@@ -217,31 +225,26 @@ expect "読み込み失敗の報告" '読み込みに失敗' open "$FIXTURES/mis
 expect "失敗が記録に残る" '[navigation]' logs
 expect "資源の計測" 'Browser (app)' stats
 expect "ページのプロセスにタブの番号が付く" '"tabs" : [' stats --json
-# 窓の枠はプロファイルごとの名前で覚える。普段使いの窓の位置を動かさないため。
+# 窓の枠は実体ごとの名前で覚える。普段使いの窓の位置を動かさないため。
 expect "窓の中身を撮る" 'appearance:' window-screenshot "${TMPDIR:-/tmp}/browser-verify-window.png"
-expect "窓の枠を覚える" "remembered as \"main-${BROWSER_PROFILE}\"" ui
+expect "窓の枠を覚える" "remembered as \"main-${BROWSER_INSTANCE}\"" ui
 
-# 別のプロファイルは別の実体になる。使い捨ての実体からは、起こす実体も使い捨てで裏に起こす。
-expect "使い捨ての実体は登録した一覧を見せない" "* ${BROWSER_PROFILE}" profiles
-expect "プロファイルを作る" "  ${CHILD}" profile-new "$CHILD"
-expect "別のプロファイルの実体を起こす" "launched: ${CHILD}" profile-open "$CHILD"
-expect "起こした実体は応答する" "already running: ${CHILD}" profile-open "$CHILD"
-TARGET="$CHILD"
-expect "起こした実体のプロファイル" "profile: ${CHILD}" ui
-expect "起こした実体も使い捨て" "${CHILD} (使い捨て)" profiles
-expect "別の実体のタブは混ざらない" 'tabs (left to right):' ui
-expect "起こした実体を止める" 'quitting pid' quit
-TARGET=""
-sleep 1
-"$CTL" key ctrl+2 >/dev/null
-for _ in 1 2 3 4 5 6 7 8 9 10; do
-    "$CTL" profiles | grep -qF "${CHILD} — running" && break
-    sleep 1
-done
-expect "⌃2で2番目のプロファイルへ移る" "${CHILD} — running" profiles
-TARGET="$CHILD"
-expect "キーで起こした実体を止める" 'quitting pid' quit
-TARGET=""
+# プロファイルは一つの窓の中で切り替える。使い捨ての実体では、一覧はこの実体の中だけにあり、何も保存しない。
+expect "使い捨ての実体のプロファイル" '* 標準 (default)' profiles
+expect "プロファイルを作る" '  仕事' profile-new 仕事
+"$CTL" open "$FIXTURES/smoke.html" >/dev/null
+"$CTL" eval "localStorage.setItem('verify', 'default'); 1" >/dev/null
+expect "プロファイルを切り替える" 'switched: 仕事' profile-open 仕事
+expect "切り替えた先のプロファイル" 'profile: 仕事' ui
+reject "切り替えた先には前のタブがない" 'Smoke' tabs
+expect "ブックマークもプロファイルごと" 'bookmarks bar: (なし)' ui
+"$CTL" open "$FIXTURES/smoke.html" >/dev/null
+expect "サイトデータもプロファイルごと" '"null"' eval "String(localStorage.getItem('verify'))"
+"$CTL" key ctrl+1 >/dev/null
+expect "⌃1で1番目のプロファイルへ戻る" 'profile: default' ui
+expect "戻ると前のタブが戻る" 'Smoke' wait
+expect "戻ると前のサイトデータを使う" '"default"' eval "localStorage.getItem('verify')"
+expect "戻ると前のブックマークが戻る" 'bookmarks bar: [' ui
 
 echo "== 資源"
 "$CTL" stats

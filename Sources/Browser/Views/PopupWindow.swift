@@ -12,7 +12,7 @@ final class PopupWindow: NSObject, WKUIDelegate, NSWindowDelegate {
     let webView: WKWebView
     private let window: NSWindow
     /// 小窓の中から大きさを指定せずに開いたものを、タブで開いてもらう先。
-    private weak var opener: (any TabOpening)?
+    private(set) weak var opener: (any TabOpening)?
     private var observations: [NSKeyValueObservation] = []
     private let onClose: (PopupWindow) -> Void
 

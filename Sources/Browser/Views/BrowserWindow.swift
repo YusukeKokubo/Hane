@@ -7,8 +7,7 @@ import WebKit
 /// タブバーは開いているページの一覧、その下の段は選んだページへの操作なので、
 /// 一覧を上に置いて「選んだものの中身」が下へ続くように並べる。
 struct BrowserWindow: View {
-    let store: TabStore
-    @Bindable var profiles: ProfileSwitcher
+    @Bindable var model: BrowserModel
 
     @Environment(\.dismissWindow) private var dismissWindow
     @State private var newProfileName = ""
@@ -19,11 +18,39 @@ struct BrowserWindow: View {
     private static let dragAreaWidth: CGFloat = 40
 
     var body: some View {
+        // プロファイルを切り替えるとタブ管理ごと入れ替わるので、中身も作り直し、アドレスバーの書きかけなどを持ち越さない。
+        content(model.store)
+            .id(ObjectIdentifier(model.store))
+            .navigationTitle((model.store.selected?.title ?? "Browser") + (windowLabel.map { " — \($0)" } ?? ""))
+            .alert("新しいプロファイル", isPresented: $model.isCreating) {
+                TextField("名前（例: 仕事）", text: $newProfileName)
+                Button("作成して開く") {
+                    model.createAndOpen(newProfileName)
+                    newProfileName = ""
+                }
+                Button("キャンセル", role: .cancel) { newProfileName = "" }
+            } message: {
+                Text("Cookie、ブックマーク、閲覧履歴、開いているタブをほかのプロファイルと分けて持ちます。今開いているタブは閉じ、このウインドウで開きます。")
+            }
+            .alert("プロファイル", isPresented: Binding(get: { model.failure != nil }, set: { if !$0 { model.failure = nil } })) {
+                Button("OK") {}
+            } message: {
+                Text(model.failure ?? "")
+            }
+    }
+
+    /// どの実体の、どのプロファイルの窓か。普段使いの実体の標準のプロファイルでは出さない。
+    private var windowLabel: String? {
+        let parts = [BrowserInstance.name, model.current == BrowserProfile.defaultName ? nil : model.current].compactMap(\.self)
+        return parts.isEmpty ? nil : parts.joined(separator: " / ")
+    }
+
+    private func content(_ store: TabStore) -> some View {
         VStack(spacing: 0) {
             // タイトルバーを兼ねる。
             HStack(spacing: 0) {
-                if !BrowserProfile.isDefault {
-                    ProfileLabel(name: BrowserProfile.name)
+                if let windowLabel {
+                    ProfileLabel(name: windowLabel)
                 }
                 TabBar(store: store) { id in
                     if !store.close(id) {
@@ -46,26 +73,10 @@ struct BrowserWindow: View {
         }
         .frame(minWidth: 480, minHeight: 320)
         .ignoresSafeArea(edges: .top)
-        .navigationTitle((store.selected?.title ?? "Browser") + (BrowserProfile.isDefault ? "" : " — \(BrowserProfile.name)"))
-        .alert("新しいプロファイル", isPresented: $profiles.isCreating) {
-            TextField("名前（例: 仕事）", text: $newProfileName)
-            Button("作成して開く") {
-                profiles.createAndOpen(newProfileName)
-                newProfileName = ""
-            }
-            Button("キャンセル", role: .cancel) { newProfileName = "" }
-        } message: {
-            Text("Cookie、ブックマーク、閲覧履歴、開いているタブをほかのプロファイルと分けて持ちます。別の窓で開きます。")
-        }
-        .alert("プロファイル", isPresented: Binding(get: { profiles.failure != nil }, set: { if !$0 { profiles.failure = nil } })) {
-            Button("OK") {}
-        } message: {
-            Text(profiles.failure ?? "")
-        }
     }
 }
 
-/// どのプロファイルの窓かを、タブバーの左端に出す。普段使いでは出さない。
+/// どの実体・プロファイルの窓かを、タブバーの左端に出す。普段使いの標準のプロファイルでは出さない。
 private struct ProfileLabel: View {
     let name: String
 

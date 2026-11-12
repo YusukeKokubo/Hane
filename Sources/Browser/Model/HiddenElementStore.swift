@@ -12,7 +12,8 @@ struct HiddenElement: Codable, Equatable, Sendable {
 
 /// 隠した要素の一覧と保存。
 ///
-/// 普段使いのプロファイルだけ `~/Library/Application Support/Browser/hidden-elements.json` に保存する。
+/// アプリ全体で一つ（どのプロファイルで見ても、同じサイトの同じ広告は隠す）。
+/// 普段使いの実体だけ `~/Library/Application Support/Browser/hidden-elements.json` に保存する。
 @MainActor
 @Observable
 final class HiddenElementStore {
@@ -35,8 +36,8 @@ final class HiddenElementStore {
         }
     }
 
-    static func forCurrentProfile() -> HiddenElementStore {
-        guard let directory = BrowserProfile.dataDirectory else { return HiddenElementStore() }
+    static func forInstance() -> HiddenElementStore {
+        guard let directory = BrowserInstance.dataDirectory else { return HiddenElementStore() }
         return HiddenElementStore(fileURL: directory.appending(path: "hidden-elements.json"))
     }
 

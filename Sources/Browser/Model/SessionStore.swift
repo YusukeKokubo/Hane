@@ -22,7 +22,8 @@ struct SavedSession: Codable, Equatable, Sendable {
 
 /// 閲覧状態の保存先。
 ///
-/// 保存先を渡さなければ何も読み書きしない（開発用プロファイルとテスト）。
+/// 保存先を渡さなければファイルには書かず、最後に保存した中身をメモリに持って `load()` で返す
+/// （使い捨ての実体でプロファイルを行き来したときにタブを戻すため。テストでもこちら）。
 @MainActor
 final class SessionStore {
     private let fileURL: URL?
@@ -32,16 +33,11 @@ final class SessionStore {
         self.fileURL = fileURL
     }
 
-    /// 保存するプロファイルならその置き場に保存し、使い捨てのプロファイルでは何も残さない。
-    static func forCurrentProfile() -> SessionStore {
-        guard let directory = BrowserProfile.dataDirectory else { return SessionStore() }
-        return SessionStore(fileURL: directory.appending(path: "session.json"))
-    }
-
     var isPersistent: Bool { fileURL != nil }
 
     func load() -> SavedSession? {
-        guard let fileURL, let data = try? Data(contentsOf: fileURL) else { return nil }
+        guard let fileURL else { return lastSaved }
+        guard let data = try? Data(contentsOf: fileURL) else { return nil }
         do {
             let session = try JSONDecoder().decode(SavedSession.self, from: data)
             lastSaved = session
@@ -57,7 +53,11 @@ final class SessionStore {
 
     /// 前回書いた中身と同じなら書かない。題名や読み込み状態の細かな変化のたびに書き直さないため。
     func save(_ session: SavedSession) {
-        guard let fileURL, session != lastSaved else { return }
+        guard session != lastSaved else { return }
+        guard let fileURL else {
+            lastSaved = session
+            return
+        }
         do {
             try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
             try Signposts.interval("閲覧状態の書き出し") {

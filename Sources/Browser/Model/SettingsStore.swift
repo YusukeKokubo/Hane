@@ -20,7 +20,7 @@ struct UserSettings: Codable, Equatable, Sendable {
 /// 設定の保存と、WebKit への反映。
 ///
 /// 値は全タブで共有する環境設定（`SharedConfiguration.preferences`）へ入れるので、開いているタブにもその場で効く。
-/// 保存するプロファイルだけ `settings.json` に書き、`dev` とテストでは保存しない。
+/// プロファイルによらずアプリ全体で一つ。普段使いの実体だけ `settings.json` に書き、使い捨ての実体とテストでは保存しない。
 @MainActor
 @Observable
 final class SettingsStore {
@@ -55,8 +55,8 @@ final class SettingsStore {
         if values != UserSettings() { apply() }
     }
 
-    static func forCurrentProfile() -> SettingsStore {
-        SettingsStore(fileURL: BrowserProfile.dataDirectory?.appending(path: "settings.json"))
+    static func forInstance() -> SettingsStore {
+        SettingsStore(fileURL: BrowserInstance.dataDirectory?.appending(path: "settings.json"))
     }
 
     private func apply() {

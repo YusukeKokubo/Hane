@@ -36,7 +36,7 @@ scripts/update-filters.sh   # 広告ブロックのフィルタリストを取�
 画面キャプチャ（`screencapture`）はこの環境では権限がなく撮れない。UIの確認は `browserctl` で行い、見た目は `browserctl window-screenshot <保存先>` で窓の中身を撮って Read で見る（窓が裏にいても撮れる）。命令の一覧は `build/browserctl help`。
 
 ```sh
-export BROWSER_PROFILE=dev          # 必ず付ける。付けないと持ち主の普段使いのブラウザを操作してしまう
+export BROWSER_INSTANCE=dev         # 必ず付ける。付けないと持ち主の普段使いのブラウザを操作してしまう
 build/browserctl open "file://$PWD/Tests/Fixtures/smoke.html"
 build/browserctl ui                 # アドレスバー、ボタン、タブの並び、窓の枠。二行目に pid と作った時刻
 build/browserctl snapshot           # ページ内の操作できる要素（番号つき）
@@ -46,7 +46,7 @@ build/browserctl logs               # console出力、例外、読み込み失�
 build/browserctl quit               # 終わったら止める（pkill は普段使いの実体も殺すので使わない）
 ```
 
-`dev` の実体は使い捨てで、起動していなければ `browserctl` が隣の `build/Browser.app` を裏に起こす（登録したプロファイルの名前を付けると、持ち主のそのプロファイルを操作してしまう）。持ち主に普段使いで試してもらう前は `scripts/bundle.sh --install` し、⌘Q で終えて起動し直してもらう。
+`dev` の実体は使い捨てで、起動していなければ `browserctl` が隣の `build/Browser.app` を裏に起こす。プロファイルは実体の中で `profile-open` で切り替える（実体を分けるのは開発用の隔離だけ）。持ち主に普段使いで試してもらう前は `scripts/bundle.sh --install` し、⌘Q で終えて起動し直してもらう。
 
 ## 詳しい文書
 
@@ -59,11 +59,11 @@ build/browserctl quit               # 終わったら止める（pkill は普段
 ## 構成
 
 - `Sources/Browser` 直下 — `BrowserApp`（入口）、`BrowserCommands`（メニューとキーボードショートカット）。
-- `Sources/Browser/Model` — 状態。`TabStore`（タブの一覧と選択。普通のタブと、ブックマークからその場で開いたページを分けて持つ）、`Tab`（`WebPage` を1つ所有）、`BookmarkStore`（ブックマークとフォルダの並びと保存。フォルダは一段だけ）、`SessionStore`（閲覧状態の保存。再起動したときにタブを戻す）、`HistoryStore`（閲覧履歴と、アドレスバーで補う候補選び）、`PageFactory`（`WebPage` の設定をすべてここで行う）、`ProfileSwitcher`（プロファイルの一覧と、別のプロファイルの実体へ移る処理）、`SharedConfiguration`（全タブで一つのプロセスプールと環境設定を使わせる）、`SettingsStore`（設定の窓で変える値の保存と WebKit への反映）、`PopupWindows`（`window.open` を新しいタブか小窓で開く）、`Signposts`（Instruments に出す区間の印）、`NavigationDecider`、`AddressResolver`、`PageLog`、`BrowserSettings`（検索先やUser-Agentなどの固定値。変えたい値はここに集める）。
+- `Sources/Browser/Model` — 状態。`TabStore`（タブの一覧と選択。普通のタブと、ブックマークからその場で開いたページを分けて持つ）、`Tab`（`WebPage` を1つ所有）、`BookmarkStore`（ブックマークとフォルダの並びと保存。フォルダは一段だけ）、`SessionStore`（閲覧状態の保存。再起動したときにタブを戻す）、`HistoryStore`（閲覧履歴と、アドレスバーで補う候補選び）、`PageFactory`（`WebPage` の設定をすべてここで行う）、`BrowserModel`（プロファイルの一覧と、今開いているプロファイルの `TabStore`。窓・メニュー・外部操作はここを通して今の `TabStore` を見る）、`SharedConfiguration`（全タブで一つのプロセスプールと環境設定を使わせる）、`SettingsStore`（設定の窓で変える値の保存と WebKit への反映）、`PopupWindows`（`window.open` を新しいタブか小窓で開く）、`Signposts`（Instruments に出す区間の印）、`NavigationDecider`、`AddressResolver`、`PageLog`、`BrowserSettings`（検索先やUser-Agentなどの固定値。変えたい値はここに集める）。
 - `Sources/Browser/Views` — 画面。`BrowserWindow`（上からタブバー、ナビゲーションの段、ページ）、`AddressBar`、`TabBar`（左にブックマーク、右に普通のタブを一列に並べる）、`BookmarkBar`（ブックマークとフォルダの項目、追加・編集のポップオーバー）、`SettingsView`（設定の窓。⌘,）、`PopupWindow`（大きさを指定して開かれた小窓。ここだけ AppKit の窓に `WKWebView` を直に置く）。
 - `Sources/Browser/Model` の広告ブロック — `ContentBlocker`（ルールリストのコンパイルと全ページへの配布）、`FilterList`（Adblock Plus 形式をWebKitのルールに訳す）、`ContentRule`（WebKitのルールのJSON）、`HiddenElementStore`（⌥右クリックで隠した要素の保存）、`ElementPicker`（⌥右クリックで要素を選ぶページ内スクリプト）。フィルタリストの本体は `Support/Filters`。
 - `Sources/Browser/Control` — 外部操作。`ControlServer`（ソケット）、`ControlService`（命令の解釈）、`PageScripts`（ページ内で走らせるJavaScript）、`WindowElements`（窓まわりの部品の一覧とマウス操作）、`ProcessStats`、`PageProcess`（タブとページのプロセスの対応）。
-- `Sources/ControlWire` — アプリと `browserctl` が共有する通信の取り決めと、命令の説明文（`ControlHelp`。これが仕様の正本）、プロファイルの決まり（`Profile`。名前、置き場、登録した一覧）。
+- `Sources/ControlWire` — アプリと `browserctl` が共有する通信の取り決めと、命令の説明文（`ControlHelp`。これが仕様の正本）、実体とプロファイルの決まり（`Profile`。`BROWSER_INSTANCE` の実体、プロファイルの名前と置き場、登録した一覧）。
 - `Sources/browserctl` — コマンド本体。引数をそのまま送るだけで、命令の意味は知らない。
 
 新しい操作命令を足すときは `ControlService` に `case` を足し、`ControlHelp` の文面と `ControlServiceTests`、必要なら `scripts/verify.sh` を一緒に直す。`browserctl` 側の変更は要らない。

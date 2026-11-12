@@ -8,8 +8,7 @@ import WebKit
 /// 命令の一覧と書式は `ControlHelp` の文面が正本。
 @MainActor
 final class ControlService {
-    private let store: TabStore
-    private let profiles: ProfileSwitcher
+    private let model: BrowserModel
     private let settings: SettingsStore
     /// 要素の控えを置く実行環境。ページ自身のスクリプトからは見えない。
     private let world = WKContentWorld.world(name: "browserctl")
@@ -20,15 +19,18 @@ final class ControlService {
 
     private static let loadTimeout: Duration = .seconds(30)
 
-    init(
-        store: TabStore,
-        profiles: ProfileSwitcher = ProfileSwitcher(registryURL: nil),
-        settings: SettingsStore = SettingsStore()
-    ) {
-        self.store = store
-        self.profiles = profiles
+    init(model: BrowserModel, settings: SettingsStore = SettingsStore()) {
+        self.model = model
         self.settings = settings
     }
+
+    /// テスト用。渡したタブ管理を持つ使い捨ての実体として振る舞う。
+    convenience init(store: TabStore) {
+        self.init(model: BrowserModel(store: store))
+    }
+
+    /// 今のプロファイルのタブ管理。プロファイルを切り替えると入れ替わるので、掴んでおかずに毎回読む。
+    private var store: TabStore { model.store }
 
     func start() {
         do {
@@ -178,14 +180,6 @@ final class ControlService {
             menu.choose(item)
             return await afterUIAction("chose \"\(item.title)\" from \(menu.label)")
 
-        case "window-frame":
-            let frame = try argument(args, 0, "枠（x,y,幅,高さ）")
-            guard Self.mainWindow() != nil else { throw ControlError("窓が出ていない。") }
-            guard WindowFrameMemory.take(frame) else {
-                throw ControlError("その枠には合わせられない（全画面か、どの画面にもかからない枠か、書き方が違う）: \(frame)")
-            }
-            return "window frame: " + describeWindowFrame()
-
         case "window-size":
             guard let window = Self.mainWindow() else { throw ControlError("窓が出ていない。") }
             let width = try integer(try argument(args, 0, "幅"), "幅")
@@ -334,8 +328,7 @@ final class ControlService {
             return "pid \(getpid())"
 
         case "activate":
-            // 最小化していれば戻す。前に出られるかはシステムが決めるので、呼ぶ側が先に譲っておくこと。
-            // プロファイルを切り替えて隠した実体へ戻ってくるときのため、隠れていれば出す。
+            // 同じ実体を二重に起動しようとしたときに、後から起きた方が頼んでくる。最小化や隠れていれば戻す。
             NSApp.unhide(nil)
             if let window = NSApp.windows.first(where: \.canBecomeMain) {
                 window.deminiaturize(nil)
@@ -345,21 +338,16 @@ final class ControlService {
             return "activated pid \(getpid())"
 
         case "profiles":
-            profiles.reload()
-            return await describeProfiles()
+            return describeProfiles()
 
         case "profile-new":
-            let name = try profiles.create(try argument(args, 0, "プロファイルの名前"))
-            return "created \(name)\n" + (await describeProfiles())
+            let name = try model.create(try argument(args, 0, "プロファイルの名前"))
+            return "created \(name)\n" + describeProfiles()
 
         case "profile-open":
             let name = try argument(args, 0, "プロファイルの名前")
-            profiles.reload()
-            switch try await profiles.switchTo(name) {
-            case .alreadyHere: return "already here: \(name)"
-            case .activated(let pid): return "already running: \(name) (pid \(pid))"
-            case .launched(let pid): return "launched: \(name) (pid \(pid))"
-            }
+            guard try model.switchTo(name) else { return "already here: \(name)" }
+            return "switched: \(name)\n" + store.allTabs.map(describe).joined(separator: "\n")
 
         case "quit":
             // 応答を返し終えてから終了する。
@@ -535,24 +523,22 @@ final class ControlService {
         return lines.joined(separator: "\n")
     }
 
-    /// プロファイルの一覧。この実体のものに * を付け、起動しているものには pid を添える。
-    private func describeProfiles() async -> String {
-        var lines = ["this instance: \(profiles.current) (" + (BrowserProfile.isPersistent ? "保存する" : "使い捨て") + ")"]
-        for name in profiles.names {
-            let pid = name == profiles.current ? getpid() : await ProfileSwitcher.pid(at: ControlSocket.path(for: name), activating: false)
-            lines.append((name == profiles.current ? "* " : "  ") + ProfileSwitcher.title(for: name)
-                + (name == BrowserProfile.defaultName ? " (default)" : "")
-                + (pid.map { " — running, pid \($0)" } ?? ""))
+    /// プロファイルの一覧。今開いているものに * を付ける。
+    private func describeProfiles() -> String {
+        var lines = ["instance: \(BrowserInstance.label) (" + (model.isPersistent ? "保存する" : "使い捨て") + ")"]
+        for name in model.names {
+            lines.append((name == model.current ? "* " : "  ") + BrowserModel.title(for: name)
+                + (name == BrowserProfile.defaultName ? " (default)" : ""))
         }
-        if !profiles.isPersistent {
-            lines.append("（使い捨ての実体なので、登録した一覧は見せない。作ったものはこの実体の中だけで、起こす実体も使い捨て）")
+        if !model.isPersistent {
+            lines.append("（使い捨ての実体なので、登録した一覧は見せない。作ったものはこの実体の中だけで、何も保存しない）")
         }
         return lines.joined(separator: "\n")
     }
 
     /// ウインドウの枠まわり（ページの外側）が今どう見えているか。
     private func describeUI() -> String {
-        var lines = ["profile: \(BrowserProfile.name)", describeBuild(), "window frame: " + describeWindowFrame()]
+        var lines = ["instance: \(BrowserInstance.label), profile: \(model.current)", describeBuild(), "window frame: " + describeWindowFrame()]
         if let tab = store.selected {
             let state: (Bool) -> String = { $0 ? "enabled" : "disabled" }
             lines.append("window title: \(tab.title)")
@@ -663,7 +649,7 @@ final class ControlService {
             isARepeat: false, keyCode: keyCode
         ) else { throw ControlError("キーの事象を作れない: \(spec)") }
 
-        if LocalShortcuts.handle(event, store: store, profiles: profiles) { return }
+        if LocalShortcuts.handle(event, model: model) { return }
         // メニューより先に窓の部品へ渡す。アラートや編集欄の既定のボタン（Return）とキャンセル（Esc）はここで拾われる。
         if window.performKeyEquivalent(with: event) { return }
         if NSApp.mainMenu?.performKeyEquivalent(with: event) == true { return }

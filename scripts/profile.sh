@@ -4,7 +4,7 @@
 #
 # 使い方:
 #   scripts/profile.sh record <秒> [--tab N | --process gpu|networking]
-#       BROWSER_PROFILE（既定 dev）の実体のアプリ本体を記録し、build/profile/<日時>.trace に置いて要約を出す。
+#       BROWSER_INSTANCE（既定 dev）の実体のアプリ本体を記録し、build/profile/<日時>.trace に置いて要約を出す。
 #       --tab N でそのタブを描いているページのプロセス（WebContent）を、--process で補助プロセスを記録する。
 #       ページのスクリプトや描画が重いときはアプリ本体には出ないので、--tab で見る。
 #       記録の間に browserctl で操作するなら、これを裏で走らせて、2秒ほど待ってから操作する。
@@ -16,9 +16,9 @@
 set -eu
 
 cd "$(dirname "$0")/.."
-case "${BROWSER_PROFILE:-}" in
-    ""|default) export BROWSER_PROFILE=dev ;;
-    *) export BROWSER_PROFILE ;;
+case "${BROWSER_INSTANCE:-}" in
+    ""|default) export BROWSER_INSTANCE=dev ;;
+    *) export BROWSER_INSTANCE ;;
 esac
 
 usage() {
@@ -201,7 +201,7 @@ if not found:
 print(found[0]["pid"])' "$which")"
         mkdir -p build/profile
         trace="build/profile/$(date +%Y%m%d-%H%M%S).trace"
-        echo "== 記録（プロファイル: ${BROWSER_PROFILE}、${which}、pid ${pid}、${seconds} 秒）"
+        echo "== 記録（実体: ${BROWSER_INSTANCE}、${which}、pid ${pid}、${seconds} 秒）"
         xctrace record --template 'Time Profiler' --attach "$pid" --time-limit "${seconds}s" \
             --output "$trace" >/dev/null 2>&1
         echo "記録: $trace"

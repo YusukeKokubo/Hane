@@ -38,6 +38,8 @@ final class TabStore: TabOpening {
     @ObservationIgnored private let factory: PageFactory
     @ObservationIgnored private let session: SessionStore
     @ObservationIgnored private var lastTabNumber = 0
+    /// プロファイルを離れて閉じたか。閉じたあとに遅れて届く新しいタブの頼みや閲覧状態の書き出しを断る。
+    @ObservationIgnored private(set) var isShutDown = false
 
     init(
         factory: PageFactory = PageFactory(),
@@ -81,6 +83,8 @@ final class TabStore: TabOpening {
     }
 
     func openTab(with request: URLRequest, inBackground: Bool) {
+        // ページの判断は非同期なので、プロファイルを離れたあとに届くことがある。開くと閉じたはずのページが残る。
+        guard !isShutDown else { return }
         open(request, inBackground: inBackground)
     }
 
@@ -306,7 +310,25 @@ final class TabStore: TabOpening {
     }
 
     func saveSession() {
+        guard !isShutDown else { return }
         session.save(sessionSnapshot())
+    }
+
+    /// プロファイルを離れるときに呼ぶ。閲覧状態を書き出してから、すべてのページを閉じる。
+    ///
+    /// 閉じたあとは閲覧状態を書かない。同じプロファイルへすぐ戻ったとき、新しいタブ管理が書いた閲覧状態を
+    /// 古い方が遅れて上書きしないため。
+    func shutDown() {
+        guard !isShutDown else { return }
+        saveSession()
+        isShutDown = true
+        for tab in allTabs {
+            tab.tearDown()
+        }
+        tabs = []
+        bookmarkTabs = [:]
+        openFolder = nil
+        selectedID = nil
     }
 
     /// 前回の閲覧状態からタブを並べ直す。戻せるページがひとつもなければ `false`。
@@ -340,7 +362,7 @@ final class TabStore: TabOpening {
             _ = sessionSnapshot()
         } onChange: { [weak self] in
             Task { @MainActor in
-                guard let self else { return }
+                guard let self, !self.isShutDown else { return }
                 self.saveSession()
                 self.watchSession()
             }

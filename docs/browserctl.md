@@ -4,7 +4,7 @@
 
 ## 起こし方と実体
 
-`BROWSER_PROFILE=dev` の実体は、操作用ソケットが別で、Cookieなどを保存しない使い捨てになる（登録したプロファイルの名前を付けると、持ち主のそのプロファイルを操作してしまう。`verify.sh` と `bench.sh` は `BROWSER_EPHEMERAL=1` で使い捨てに固定している）。起動していなければ `browserctl` が隣の `build/Browser.app` の実行ファイルを直に、別のセッションで起こすので、前に出て持ち主の作業を遮ることはない（`open -g` で裏に起こすと SwiftUI が窓を作らない）。前に出したいときは `BROWSER_LAUNCH=front`。直に起こすときは、アプリを端末ではなく自分自身の責任プロセスにしている。端末から起こした実体どうしで WebKit の補助プロセスの持ち主が同じになると、`stats` が別の実体のプロセスまで数えてしまうため（`verify.sh` もこのため `browserctl` に起こさせる）。`bench.sh` は前の結果と比べられるよう前面で測る。`ui` の二行目に pid と起動した時刻、実行ファイルを作った時刻が出て、起動のあとに作り直していれば古い版が動いていると書く。ページだけを撮るなら `browserctl screenshot <保存先>`。`window-screenshot` を `cacheDisplay` で作ると、バーの背景が明るい外観の白で塗られて実物と違ってしまうので、層を直に描いている。撮った画像を `sips -c` で切り抜くと真ん中が切り出されるので、縮めて見るなら `sips -Z 1200`。
+`BROWSER_INSTANCE=dev` の実体は、操作用ソケットが別で（`~/Library/Application Support/Browser/instances/dev/control.sock`）、Cookieなどを保存しない使い捨てになる。前の書き方の `BROWSER_PROFILE` や `BROWSER_EPHEMERAL` が付いていると、`browserctl` もアプリも止まる（黙って普段使いの実体を相手にしないため）。起動していなければ `browserctl` が隣の `build/Browser.app` の実行ファイルを直に、別のセッションで起こすので、前に出て持ち主の作業を遮ることはない（`open -g` で裏に起こすと SwiftUI が窓を作らない）。前に出したいときは `BROWSER_LAUNCH=front`。直に起こすときは、アプリを端末ではなく自分自身の責任プロセスにしている。端末から起こした実体どうしで WebKit の補助プロセスの持ち主が同じになると、`stats` が別の実体のプロセスまで数えてしまうため（`verify.sh` もこのため `browserctl` に起こさせる）。`bench.sh` は前の結果と比べられるよう前面で測る。`ui` の二行目に pid と起動した時刻、実行ファイルを作った時刻が出て、起動のあとに作り直していれば古い版が動いていると書く。ページだけを撮るなら `browserctl screenshot <保存先>`。`window-screenshot` を `cacheDisplay` で作ると、バーの背景が明るい外観の白で塗られて実物と違ってしまうので、層を直に描いている。撮った画像を `sips -c` で切り抜くと真ん中が切り出されるので、縮めて見るなら `sips -Z 1200`。
 
 ## 入力とキー
 

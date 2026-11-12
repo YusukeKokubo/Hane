@@ -28,14 +28,9 @@ public struct ControlSocketError: Error, CustomStringConvertible {
 public enum ControlSocket {
     public static let bundleIdentifier = "local.personal.browser"
 
-    /// この実体のプロファイルの待ち受け場所。
-    public static var path: String { path(for: BrowserProfile.name) }
-
-    /// 待ち受け場所。利用者のライブラリ配下なので、他のユーザーからは届かない。
-    /// プロファイルごとに別の場所になるので、開発用の実体と普段使いの実体は混ざらない。
-    public static func path(for profile: String) -> String {
-        BrowserProfile.directory(for: profile).appending(path: "control.sock").path(percentEncoded: false)
-    }
+    /// この実体の待ち受け場所。利用者のライブラリ配下なので、他のユーザーからは届かない。
+    /// 実体ごとに別の場所になるので、開発用の実体と普段使いの実体は混ざらない。
+    public static var path: String { BrowserInstance.socketPath(for: BrowserInstance.name) }
 
     /// 応答を待つ上限。いちばん長い命令（`stats --seconds 60`、広告ブロックのコンパイル待ち）より余裕を見ている。
     ///

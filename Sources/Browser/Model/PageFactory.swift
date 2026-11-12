@@ -9,18 +9,11 @@ import WebKit
 /// 設定がタブごとにばらつくことはない。
 @MainActor
 struct PageFactory {
-    /// 全タブで共有するサイトデータ（Cookieやキャッシュ）の保存先。
-    var dataStore: WKWebsiteDataStore = Self.currentProfileDataStore()
+    /// プロファイルのすべてのタブで共有するサイトデータ（Cookieやキャッシュ）の保存先。
+    /// 置き場はプロファイルが決める（`ProfileData`）。テストでは終了時に消えるもの。
+    var dataStore: WKWebsiteDataStore = .nonPersistent()
     /// 広告ブロック。テストでは付けない。
     var contentBlocker: ContentBlocker?
-
-    /// 普段使いは WebKit の既定の置き場、登録したプロファイルはその識別子の置き場を使う。
-    /// 使い捨てのプロファイルでは、終了時に消えるものにする。
-    static func currentProfileDataStore() -> WKWebsiteDataStore {
-        if BrowserProfile.isDefault { return .default() }
-        if let entry = BrowserProfile.entry { return WKWebsiteDataStore(forIdentifier: entry.dataStore) }
-        return .nonPersistent()
-    }
 
     func makeConfiguration(log: PageLog) -> WebPage.Configuration {
         var configuration = WebPage.Configuration()
@@ -43,11 +36,15 @@ struct PageFactory {
         return configuration
     }
 
-    func makePage(navigationDecider: some WebPage.NavigationDeciding, log: PageLog) -> WebPage {
+    /// `opener` は、このページから新しいタブや小窓を開くときに頼む先。
+    func makePage(opener: any TabOpening, log: PageLog) -> WebPage {
         SharedConfiguration.install()
         PopupWindows.install()
-        let page = WebPage(configuration: makeConfiguration(log: log), navigationDecider: navigationDecider)
+        let configuration = makeConfiguration(log: log)
+        let page = WebPage(configuration: configuration, navigationDecider: NavigationDecider(opener: opener))
         page.isInspectable = true
+        // ページごとに別の受け口を作っているので、それを鍵に、window.open がどのタブ管理から来たかを引く。
+        PopupWindows.register(configuration.userContentController, opener: opener)
         return page
     }
 }

@@ -16,18 +16,16 @@
 #   要約には真ん中の値と、括弧の中に最小〜最大が出る。
 #   URL を省くと Tests/Fixtures のページを使う（ネットワークに出ない）。URL を渡したときは、
 #   タブを足す段階で一つ目を開いてから二つ目へ移る。
-#   実体は BROWSER_PROFILE（既定 bench）で分けるので、普段使いにも verify.sh の dev にも触れない。
+#   実体は BROWSER_INSTANCE（既定 bench）で分けるので、普段使いにも verify.sh の dev にも触れない。
 #   結果は build/bench/<日時>/ に段階ごとの JSON と要約を残し、前回の要約と並べて出す。
 set -eu
 
 cd "$(dirname "$0")/.."
 ROOT="$(pwd)"
-case "${BROWSER_PROFILE:-}" in
-    ""|default) export BROWSER_PROFILE=bench ;;
-    *) export BROWSER_PROFILE ;;
+case "${BROWSER_INSTANCE:-}" in
+    ""|default) export BROWSER_INSTANCE=bench ;;
+    *) export BROWSER_INSTANCE ;;
 esac
-# 登録したプロファイルの名前を渡されても、持ち主のそのプロファイルには触らない。
-export BROWSER_EPHEMERAL=1
 SECONDS_PER_PHASE="${BENCH_SECONDS:-10}"
 SETTLE="${BENCH_SETTLE:-15}"
 NAVIGATE_SECONDS="${BENCH_NAVIGATE:-6}"
@@ -81,7 +79,7 @@ measure() {
     "$CTL" stats --seconds "$SECONDS_PER_PHASE" --json > "$OUT/run$1/$2.json"
 }
 
-echo "== 計測（プロファイル: ${BROWSER_PROFILE}、${RUNS} 回、${SETTLE} 秒待って ${SECONDS_PER_PHASE} 秒ずつ）"
+echo "== 計測（実体: ${BROWSER_INSTANCE}、${RUNS} 回、${SETTLE} 秒待って ${SECONDS_PER_PHASE} 秒ずつ）"
 run=1
 while [ "$run" -le "$RUNS" ]; do
     mkdir -p "$OUT/run$run"

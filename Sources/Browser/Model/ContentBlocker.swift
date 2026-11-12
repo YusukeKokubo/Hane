@@ -45,24 +45,21 @@ final class ContentBlocker: NSObject, WKScriptMessageHandler {
         super.init()
     }
 
-    /// 普段使いのプロファイルは WebKit の既定の置き場を使う。それ以外は置き場を分け、
+    /// アプリ全体で一つ。普段使いの実体は WebKit の既定の置き場を使う。使い捨ての実体は名前ごとに置き場を分け、
     /// 開発用の実体が普段使いのコンパイル結果を古いものとして消さないようにする。
-    /// 隠した要素のルールもここに置くので、プロファイルどうしでも分ける。登録したプロファイルは名前でなく
-    /// サイトデータの識別子で分け、同じ名前の使い捨ての実体（開発用の実体から起こしたもの）と混ざらないようにする。
-    static func forCurrentProfile() -> ContentBlocker {
+    static func forInstance() -> ContentBlocker {
         let directory = Bundle.main.resourceURL?.appending(path: "Filters")
         let files = (directory.flatMap { try? FileManager.default.contentsOfDirectory(at: $0, includingPropertiesForKeys: nil) } ?? [])
             .filter { $0.pathExtension == "txt" }
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
         let store: WKContentRuleListStore
-        if BrowserProfile.isDefault {
-            store = .default()
-        } else {
+        if let instance = BrowserInstance.name {
             let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-            let folder = BrowserProfile.entry?.dataStore.uuidString ?? BrowserProfile.name
-            store = WKContentRuleListStore(url: caches.appending(path: "Browser/profiles/\(folder)/ContentRuleLists")) ?? .default()
+            store = WKContentRuleListStore(url: caches.appending(path: "Browser/instances/\(instance)/ContentRuleLists")) ?? .default()
+        } else {
+            store = .default()
         }
-        return ContentBlocker(store: store, filterFiles: files, hidden: .forCurrentProfile())
+        return ContentBlocker(store: store, filterFiles: files, hidden: .forInstance())
     }
 
     /// フィルタリストの状態を一行で。

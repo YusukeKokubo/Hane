@@ -3,8 +3,10 @@ import SwiftUI
 
 /// メニューとキーボードショートカット。
 struct BrowserCommands: Commands {
-    let store: TabStore
-    let profiles: ProfileSwitcher
+    let model: BrowserModel
+
+    /// 切り替えるとタブ管理が入れ替わるので、使うたびに今のものを読む。
+    private var store: TabStore { model.store }
 
     @Environment(\.dismissWindow) private var dismissWindow
 
@@ -74,13 +76,13 @@ struct BrowserCommands: Commands {
             }
         }
 
-        // 選ぶと、そのプロファイルの窓へ移る（起動していなければ起こす）。この窓の中身は入れ替えない。
+        // 選ぶと、今のタブを閉じて、そのプロファイルのタブをこの窓に戻す。
         // ⌃1〜9 はどのキーで移るかを見せるため。項目は後から増えるので、キーそのものは LocalShortcuts が拾う。
         CommandMenu("プロファイル") {
-            ForEach(Array(profiles.names.enumerated()), id: \.element) { index, name in
-                let toggle = Toggle(ProfileSwitcher.title(for: name), isOn: Binding(
-                    get: { name == profiles.current },
-                    set: { _ in profiles.open(name) }
+            ForEach(Array(model.names.enumerated()), id: \.element) { index, name in
+                let toggle = Toggle(BrowserModel.title(for: name), isOn: Binding(
+                    get: { name == model.current },
+                    set: { _ in model.open(name) }
                 ))
                 if index < 9 {
                     toggle.keyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: .control)
@@ -89,7 +91,7 @@ struct BrowserCommands: Commands {
                 }
             }
             Divider()
-            Button("新しいプロファイル…") { profiles.isCreating = true }
+            Button("新しいプロファイル…") { model.isCreating = true }
         }
 
         if let blocker = store.contentBlocker {
@@ -140,9 +142,9 @@ struct BrowserCommands: Commands {
 /// 拾ったキーはページへ届かなくなるので、ページがよく使う組み合わせ（⌥⌘数字は Google ドキュメントや Notion の見出し）は取らない。
 @MainActor
 enum LocalShortcuts {
-    static func install(store: TabStore, profiles: ProfileSwitcher) {
+    static func install(model: BrowserModel) {
         NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            let handled = MainActor.assumeIsolated { handle(event, store: store, profiles: profiles) }
+            let handled = MainActor.assumeIsolated { handle(event, model: model) }
             // 当てはまらなければ、ページなど本来の受け手へそのまま流す。
             return handled ? nil : event
         }
@@ -150,19 +152,19 @@ enum LocalShortcuts {
 
     private static let tabKeyCode: UInt16 = 48
 
-    static func handle(_ event: NSEvent, store: TabStore, profiles: ProfileSwitcher) -> Bool {
+    static func handle(_ event: NSEvent, model: BrowserModel) -> Bool {
         let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         if event.keyCode == tabKeyCode, modifiers == .control || modifiers == [.control, .shift] {
-            store.select(offset: modifiers.contains(.shift) ? -1 : 1)
+            model.store.select(offset: modifiers.contains(.shift) ? -1 : 1)
             return true
         }
         guard modifiers == .control,
               let number = event.charactersIgnoringModifiers.flatMap({ Int($0) }),
-              (1...9).contains(number), number <= profiles.names.count
+              (1...9).contains(number), number <= model.names.count
         else { return false }
         // 押しっぱなしの繰り返しで何度も起こさない。
         if !event.isARepeat {
-            profiles.open(profiles.names[number - 1])
+            model.open(model.names[number - 1])
         }
         return true
     }

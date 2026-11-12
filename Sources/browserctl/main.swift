@@ -16,31 +16,36 @@ func siblingApp() -> String? {
     return FileManager.default.fileExists(atPath: path) ? path : nil
 }
 
+func runOpen(_ arguments: [String]) -> Bool {
+    let launcher = Process()
+    launcher.executableURL = URL(filePath: "/usr/bin/open")
+    launcher.arguments = arguments
+    launcher.standardError = FileHandle.nullDevice
+    guard (try? launcher.run()) != nil else { return false }
+    launcher.waitUntilExit()
+    return launcher.terminationStatus == 0
+}
+
 /// アプリに接続する。起動していなければ起動して、待ち受けが始まるまで待つ。
 func connectLaunchingIfNeeded() -> Int32 {
     if let fd = ControlSocket.connect(to: ControlSocket.path) { return fd }
 
-    // 使い捨てのプロファイル（dev など）は、隣に作り直したアプリを起こす。バンドルIDで頼むと
+    // 使い捨ての実体（dev など）は、隣に作り直したアプリを起こす。バンドルIDで頼むと
     // Launch Services は ~/Applications に入れてある版を選ぶので、古い版を確かめたり測ったりしてしまう。
-    // 保存するプロファイルは持ち主の普段使いなので、入れてある版を起こす。別のプロファイルの実体が
-    // 動いていると、-n を付けなければそちらを前に出すだけで終わる。
+    // 普段使いの実体は入れてある版を起こす。-n を付けないと、使い捨ての実体が動いているときにそちらを前に出すだけで終わる。
     // BROWSER_LAUNCH=front なら前に出して起こす。bench.sh が、前面での計測を前の結果と比べられるよう使う。
+    // open は環境変数を引き継がないので、実体の名前は --env で渡す。
     let front = ProcessInfo.processInfo.environment["BROWSER_LAUNCH"] == "front"
     let launched: Bool
-    if !BrowserProfile.isPersistent, !front, let app = siblingApp() {
-        launched = spawnDetached(app + "/Contents/MacOS/Browser")
+    if let instance = BrowserInstance.name {
+        if !front, let app = siblingApp() {
+            launched = spawnDetached(app + "/Contents/MacOS/Browser")
+        } else {
+            let target = siblingApp().map { ["-n", $0] } ?? ["-n", "-b", ControlSocket.bundleIdentifier]
+            launched = runOpen(target + ["--env", "\(BrowserInstance.environmentKey)=\(instance)"])
+        }
     } else {
-        let launcher = Process()
-        launcher.executableURL = URL(filePath: "/usr/bin/open")
-        let target = !BrowserProfile.isPersistent
-            ? siblingApp().map { ["-n", $0] } ?? ["-n", "-b", ControlSocket.bundleIdentifier]
-            : ["-n", "-b", ControlSocket.bundleIdentifier]
-        launcher.arguments = target + ["--env", "\(BrowserProfile.environmentKey)=\(BrowserProfile.name)"]
-            + (BrowserProfile.isPersistent ? [] : ["--env", "\(BrowserProfile.ephemeralKey)=1"])
-        launcher.standardError = FileHandle.nullDevice
-        try? launcher.run()
-        launcher.waitUntilExit()
-        launched = launcher.terminationStatus == 0
+        launched = runOpen(["-n", "-b", ControlSocket.bundleIdentifier])
     }
     guard launched else {
         fail("Browser が起動しておらず、自動起動もできなかった。build/Browser.app を一度開いておくこと。")
@@ -53,6 +58,11 @@ func connectLaunchingIfNeeded() -> Int32 {
 }
 
 let arguments = Array(CommandLine.arguments.dropFirst())
+
+// 前の書き方のまま呼ばれたら、黙って普段使いの実体を操作せずに止める。
+if let problem = BrowserInstance.startupProblem {
+    fail(problem)
+}
 
 // 使い方を見るだけなら、アプリを起動しない。
 if arguments.isEmpty || ["help", "--help", "-h"].contains(arguments[0]) {
