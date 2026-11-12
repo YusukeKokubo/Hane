@@ -539,6 +539,10 @@ final class ControlService {
     /// ウインドウの枠まわり（ページの外側）が今どう見えているか。
     private func describeUI() -> String {
         var lines = ["instance: \(BrowserInstance.label), profile: \(model.current)", describeBuild(), "window frame: " + describeWindowFrame()]
+        // 外れていたときだけ出す。帯を閉じていても出す。
+        if let problems = InternalsCheck.shared.problems, !problems.isEmpty {
+            lines.append("internals: 外れている — " + problems.joined(separator: " / "))
+        }
         if let tab = store.selected {
             let state: (Bool) -> String = { $0 ? "enabled" : "disabled" }
             lines.append("window title: \(tab.title)")

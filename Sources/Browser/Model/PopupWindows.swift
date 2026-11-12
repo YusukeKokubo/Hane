@@ -17,7 +17,29 @@ import WebKit
 enum PopupWindows {
     /// 一度だけ足す。ページの Web ビューができる前（`PageFactory` がページを作るとき）に呼ぶ。
     /// WebKit は案内役が手続きを持つかを、案内役を受け取ったときに一度だけ確かめるため。
-    static func install() { _ = installed }
+    static func install() { _ = handler }
+
+    /// この Web ビューで `window.open` を受けられるかを確かめ、受けられなければ利用者向けの文で返す。
+    /// 足した手続きは外れても黙って null が返るだけなので、`InternalsCheck` が最初のページでこれを呼んで知らせる。
+    static func problem(in webView: WKWebView) -> String? {
+        guard let adapter = NSClassFromString(adapterName) else {
+            return "window.open を受けられません（案内役の型 \(adapterName) が見つかりません）。ログインの小窓などが開きません"
+        }
+        // 足せなかったのは WebKit 自身が手続きを持ったからで、窓は WebKit が開いているかもしれない。
+        // 壊れたとは言い切れないので、振る舞いを確かめるよう促すだけにする。
+        guard let handler else {
+            return "WebKit が window.open の窓を自分で開くようになりました。このブラウザの小窓とタブで受ける作りは使われていないので、ログインの小窓などの振る舞いを確かめてください"
+        }
+        let reason: String? = {
+            guard let delegate = webView.uiDelegate else { return "Web ビューに案内役が付いていません" }
+            guard delegate.isKind(of: adapter) else { return "案内役の型が \(type(of: delegate)) に変わりました" }
+            guard class_getMethodImplementation(object_getClass(delegate), selector) == handler else {
+                return "足した手続きが使われていません"
+            }
+            return nil
+        }()
+        return reason.map { "window.open を受けられません（\($0)）。ログインの小窓などが開きません" }
+    }
 
     /// ページの受け口（ページごとに一つ）と、そのページから開く窓を受けるタブ管理を結びつける。
     ///
@@ -74,17 +96,26 @@ enum PopupWindows {
         return entries.first { $0.controller === controller }?.opener
     }
 
-    private static let installed: Bool = {
-        // WebPage が Web ビューに付ける案内役の型。名前が変わったら何もしない（窓は開かないまま）。
-        guard let adapter = NSClassFromString("WebKit.WKUIDelegateAdapter") else { return false }
-        let selector = #selector(WKUIDelegate.webView(_:createWebViewWith:for:windowFeatures:))
+    /// WebPage が Web ビューに付ける案内役の型。
+    private static let adapterName = "WebKit.WKUIDelegateAdapter"
+    private static let selector = #selector(WKUIDelegate.webView(_:createWebViewWith:for:windowFeatures:))
+
+    /// 案内役の型に足した手続き。足せなかったときは `nil`（窓は開かないまま）。
+    private static let handler: IMP? = {
+        // 名前が変わったら何もしない。
+        guard let adapter = NSClassFromString(adapterName) else { return nil }
         let create: @convention(block) (AnyObject, WKWebView, WKWebViewConfiguration, WKNavigationAction, WKWindowFeatures)
             -> WKWebView? = { _, webView, configuration, action, features in
                 MainActor.assumeIsolated {
                     Self.create(with: configuration, for: action, features: features, from: webView, opener: opener(of: webView))
                 }
             }
+        let implementation = imp_implementationWithBlock(create)
         // 返り値と引数4つがオブジェクトの手続き。WebKit 自身が持つようになっていれば足さない（false が返る）。
-        return class_addMethod(adapter, selector, imp_implementationWithBlock(create), "@@:@@@@")
+        guard class_addMethod(adapter, selector, implementation, "@@:@@@@") else {
+            imp_removeBlock(implementation)
+            return nil
+        }
+        return implementation
     }()
 }

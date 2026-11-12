@@ -37,7 +37,8 @@ struct PageFactory {
     }
 
     /// `opener` は、このページから新しいタブや小窓を開くときに頼む先。
-    func makePage(opener: any TabOpening, log: PageLog) -> WebPage {
+    /// ページの受け口も返す。`WebPage` は作った後に設定を見せないので、読み込むときに使う側が持っておく。
+    func makePage(opener: any TabOpening, log: PageLog) -> (page: WebPage, content: WKUserContentController) {
         SharedConfiguration.install()
         PopupWindows.install()
         let configuration = makeConfiguration(log: log)
@@ -45,6 +46,6 @@ struct PageFactory {
         page.isInspectable = true
         // ページごとに別の受け口を作っているので、それを鍵に、window.open がどのタブ管理から来たかを引く。
         PopupWindows.register(configuration.userContentController, opener: opener)
-        return page
+        return (page, configuration.userContentController)
     }
 }

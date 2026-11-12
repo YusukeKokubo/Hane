@@ -1,6 +1,7 @@
 import ControlWire
 import Foundation
 import Testing
+import WebKit
 @testable import Browser
 
 /// 操作用の命令を、ソケットを介さずに直接呼んで確かめる。
@@ -308,6 +309,42 @@ import Testing
         #expect(pools[0] === pools[1])
         // 設定画面で変えた値を開いているタブにもその場で効かせるため、環境設定も共有している。
         #expect(views.allSatisfy { $0.configuration.preferences === SharedConfiguration.preferences })
+    }
+
+    /// 起動して最初に読み込んだページで、裏技が効いているかを一度だけ確かめ、効いていれば何も出さない。
+    @Test func internalsAreCheckedOnTheFirstPage() async throws {
+        try await open(html: "<title>Check</title>")
+        // 確かめは同じ実行の中で一度きりなので、ほかのテストのページで済んでいることもある。
+        for _ in 0..<50 where InternalsCheck.shared.problems == nil {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        #expect(InternalsCheck.shared.problems == [])
+        #expect(!InternalsCheck.shared.showsWarning)
+        #expect(!(await run("ui").output.contains("internals:")))
+    }
+
+    /// 確かめが、Web ビューが実際に使っているプール・環境設定・案内役を見ていること。
+    /// 外れた形の Web ビューを自分で作り、それぞれ見つけられるかを見る。
+    @Test func internalsCheckSeesWhatTheWebViewUses() async throws {
+        try await open(html: "<title>Real</title>")
+        let real = try #require(store.selected.flatMap { PageProcess.webView(of: $0.page) })
+        #expect(InternalsCheck.problems(in: real) == [])
+
+        // 差し替えた init を通るので、プールと環境設定は共有のもの。案内役は付かない。
+        let plain = WKWebView(frame: .zero, configuration: WKWebViewConfiguration())
+        #expect(SharedConfiguration.problems(in: plain) == [])
+        #expect(PopupWindows.problem(in: plain)?.contains("案内役が付いていません") == true)
+
+        let ownPool = WKWebViewConfiguration()
+        let poolType = try #require(NSClassFromString("WKProcessPool") as? NSObject.Type)
+        ownPool.setValue(poolType.init(), forKey: "processPool")
+        let pooled = SharedConfiguration.problems(in: WKWebView(frame: .zero, configuration: ownPool))
+        #expect(pooled.count == 1 && pooled[0].contains("プロセスプール"), "\(pooled)")
+
+        let ownPreferences = WKWebViewConfiguration()
+        ownPreferences.preferences = WKPreferences()
+        let preferred = SharedConfiguration.problems(in: WKWebView(frame: .zero, configuration: ownPreferences))
+        #expect(preferred.count == 1 && preferred[0].contains("環境設定"), "\(preferred)")
     }
 
     /// `window.open` は、止めているときは操作の中から呼んだものだけ、許しているときはいつでも新しいタブで開く。

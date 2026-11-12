@@ -64,6 +64,7 @@ struct BrowserWindow: View {
                 NavigationRow(tab: tab, store: store)
             }
             Divider()
+            InternalsWarning(check: InternalsCheck.shared)
             if let tab = store.selected {
                 PageArea(tab: tab)
                     .id(tab.id)
@@ -73,6 +74,38 @@ struct BrowserWindow: View {
         }
         .frame(minWidth: 480, minHeight: 320)
         .ignoresSafeArea(edges: .top)
+    }
+}
+
+/// WebKit が変わって裏技が外れていたら、ページの上に帯で知らせる。外れたままでもページは開くので、
+/// 普段使いの最中に気づけるようにする。閉じればその起動の間は出さない。
+private struct InternalsWarning: View {
+    let check: InternalsCheck
+
+    var body: some View {
+        if check.showsWarning {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("WebKit が変わり、このブラウザが裏で補っている所が効いていません。swift test で確かめてください。")
+                        .fontWeight(.medium)
+                    ForEach(check.problems ?? [], id: \.self) { Text($0) }
+                }
+                .font(.callout)
+                .textSelection(.enabled)
+                Spacer(minLength: 0)
+                Button("閉じる", systemImage: "xmark") { check.isDismissed = true }
+                    .labelStyle(.iconOnly)
+                    .buttonStyle(.borderless)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(.orange.opacity(0.12))
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("internals-warning")
+            Divider()
+        }
     }
 }
 

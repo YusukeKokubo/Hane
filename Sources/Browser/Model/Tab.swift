@@ -32,6 +32,8 @@ final class Tab: Identifiable {
     private var requestedURL: URL?
 
     @ObservationIgnored private let history: HistoryStore
+    /// ページの設定の受け口。最初の読み込みで裏技が効いているかを確かめるのに使う（`InternalsCheck`）。
+    @ObservationIgnored private let content: WKUserContentController
     /// 次に確定する読み込みが、アドレスバーで確定して始めたものか。履歴で「打って訪れた」と数える。
     @ObservationIgnored private var typedNavigationPending = false
     @ObservationIgnored private var monitor: Task<Void, Never>?
@@ -49,7 +51,7 @@ final class Tab: Identifiable {
         self.history = history
         restored = saved
         requestedURL = saved?.url
-        page = factory.makePage(opener: opener, log: log)
+        (page, content) = factory.makePage(opener: opener, log: log)
         monitor = Task { [weak self, page] in
             await Self.watchNavigations(of: page) { update in
                 self?.handle(update)
@@ -119,6 +121,7 @@ final class Tab: Identifiable {
         hasContent = true
         failure = nil
         requestedURL = request.url
+        InternalsCheck.shared.probe(content)
         page.load(request)
     }
 
