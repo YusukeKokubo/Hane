@@ -73,7 +73,7 @@ import WebKit
         store.activateBarItem(number: 2)
         #expect(store.openFolder == nil, "もう一度押すと閉じる")
         store.activateBarItem(number: 1)
-        #expect(store.selected?.bookmarkID == loose.id)
+        #expect(store.selected.flatMap(store.bookmarkID(of:)) == loose.id)
         store.activateBarItem(number: 4)
         #expect(store.selectedID == second.id)
         store.activateBarItem(number: 8)
@@ -109,7 +109,7 @@ import WebKit
 
         store.toggleFolder(second.id)
         let opened = store.activateFolderRow()
-        #expect(opened?.bookmarkID == a.id)
+        #expect(opened.flatMap(store.bookmarkID(of:)) == a.id)
         #expect(store.openFolder == nil)
 
         store.activate(bookmark: b.id)

@@ -32,8 +32,6 @@ final class Tab: Identifiable {
     let number: Int
     /// このタブのコンソール出力と読み込み失敗の記録。眠ってページを手放しても残る。
     let log = PageLog()
-    /// ブックマークから開いたページなら、そのブックマーク。普通のタブなら `nil`。
-    var bookmarkID: UUID?
 
     private(set) var content: Content
     /// 直近の読み込み失敗。次の読み込みが始まると消える。
@@ -161,14 +159,14 @@ final class Tab: Identifiable {
         return true
     }
 
-    /// 閲覧状態として残す内容。行き先のないまっさらなタブは残さない。
+    /// 閲覧状態として残す内容。行き先のないまっさらなタブは残さない。ブックマークとの結びつきはタブ管理が入れる。
     /// 履歴の控えは書き出すときだけ取る（変化を見張るたびに取ると、全タブぶん書き出しの手間がかかる）。
     func savedPage(includingState: Bool) -> SavedPage? {
         switch content {
         case .empty:
             return nil
         case .asleep(var saved):
-            saved.bookmark = bookmarkID
+            saved.bookmark = nil
             if !includingState { saved.state = nil }
             return saved
         case .live(let live):
@@ -176,7 +174,6 @@ final class Tab: Identifiable {
             return SavedPage(
                 url: url,
                 title: live.page.title.isEmpty ? savedTitle ?? "" : live.page.title,
-                bookmark: bookmarkID,
                 state: includingState ? live.page.interactionState : nil
             )
         }

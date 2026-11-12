@@ -82,7 +82,7 @@ import WebKit
         #expect(store.awayTitle(for: pinned) == "away", "ブックマークから離れた先にいたことも戻す")
         // ブックマークが見つからないページは普通のタブとして残す。
         #expect(store.tabs.map(\.title) == ["orphan", "tab"])
-        #expect(store.tabs[0].bookmarkID == nil)
+        #expect(store.bookmarkID(of: store.tabs[0]) == nil)
     }
 
     /// 戻せるページがなければ、今までどおり空のタブで始める。

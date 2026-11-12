@@ -2,7 +2,7 @@ import Foundation
 import Observation
 import WebKit
 
-/// 開いているタブの一覧と選択状態。ウインドウ1枚につき1つ。
+/// 開いているタブの一覧と選択状態。今開いているプロファイルにつき一つで、窓は一つきり（`BrowserModel` が持つ）。
 ///
 /// ページはふたつの置き場に分かれる。バーの右側に並ぶ普通のタブ（`tabs`）と、
 /// ブックマークからその場で開いたページ（`bookmarkTabs`）。後者はブックマークに結びつき、
@@ -15,7 +15,7 @@ import WebKit
 final class TabStore: TabOpening {
     /// 普通のタブ。バーの右側に並ぶ。
     private(set) var tabs: [Tab] = []
-    /// ページを開いているブックマーク。ブックマークのIDで引く。
+    /// ページを開いているブックマーク。ブックマークのIDで引く。ブックマークとタブの結びつきはここだけで持つ。
     private(set) var bookmarkTabs: [UUID: Tab] = [:]
     var selectedID: Tab.ID? {
         // 前回の閲覧から戻したタブと眠らせたタブは、選ばれたここで起こす。
@@ -43,7 +43,8 @@ final class TabStore: TabOpening {
     @ObservationIgnored var addressBar = AddressBarState()
 
     @ObservationIgnored private let factory: PageFactory
-    @ObservationIgnored private let session: SessionStore
+    /// 閲覧状態の書き出し。保存しないとき（テストなど）は `nil`。
+    @ObservationIgnored private var recorder: SessionRecorder?
     @ObservationIgnored private var lastTabNumber = 0
     /// プロファイルを離れて閉じたか。閉じたあとに遅れて届く新しいタブの頼みや閲覧状態の書き出しを断る。
     @ObservationIgnored private(set) var isShutDown = false
@@ -57,12 +58,11 @@ final class TabStore: TabOpening {
         self.factory = factory
         self.bookmarks = bookmarks
         self.history = history
-        self.session = session
         if !restore(session.load()) {
             newTab()
         }
-        if session.isPersistent {
-            watchSession()
+        recorder = SessionRecorder(session: session) { [weak self] includingState in
+            self?.sessionSnapshot(includingState: includingState)
         }
     }
 
@@ -194,7 +194,6 @@ final class TabStore: TabOpening {
         }
         guard let bookmark = bookmarks.bookmark(id) else { return nil }
         let tab = makeTab()
-        tab.bookmarkID = id
         tab.load(URLRequest(url: bookmark.url))
         bookmarkTabs[id] = tab
         selectedID = tab.id
@@ -207,7 +206,6 @@ final class TabStore: TabOpening {
         guard let index = tabs.firstIndex(where: { $0.id == tabID }), let url = tabs[index].url else { return nil }
         let tab = tabs.remove(at: index)
         let bookmark = bookmarks.add(title: title ?? tab.title, url: url, folder: folder, before: anchor)
-        tab.bookmarkID = bookmark.id
         bookmarkTabs[bookmark.id] = tab
         return bookmark
     }
@@ -217,7 +215,6 @@ final class TabStore: TabOpening {
         if openFolder?.id == id { openFolder = nil }
         for removed in bookmarks.remove(id) {
             guard let tab = bookmarkTabs.removeValue(forKey: removed) else { continue }
-            tab.bookmarkID = nil
             tabs.append(tab)
         }
     }
@@ -247,9 +244,14 @@ final class TabStore: TabOpening {
         bookmarks.setURL(id, to: url)
     }
 
+    /// ブックマークから開いたページなら、そのブックマークのID。普通のタブなら `nil`。
+    func bookmarkID(of tab: Tab) -> UUID? {
+        bookmarkTabs.first { $0.value === tab }?.key
+    }
+
     /// そのページに対応するブックマーク。ブックマークから開いたページか、同じアドレスのもの。
     func bookmark(for tab: Tab) -> Bookmark? {
-        tab.bookmarkID.flatMap(bookmarks.bookmark) ?? bookmarks.bookmark(matching: tab.url)
+        bookmarkID(of: tab).flatMap(bookmarks.bookmark) ?? bookmarks.bookmark(matching: tab.url)
     }
 
     /// ブックマークから開いたページがブックマークのアドレスから離れていれば、そのページ名を返す。
@@ -320,7 +322,8 @@ final class TabStore: TabOpening {
     func sessionSnapshot(includingState: Bool = true) -> SavedSession {
         var snapshot = SavedSession()
         for tab in allTabs {
-            guard let page = tab.savedPage(includingState: includingState) else { continue }
+            guard var page = tab.savedPage(includingState: includingState) else { continue }
+            page.bookmark = bookmarkID(of: tab)
             if tab.id == selectedID { snapshot.selected = snapshot.pages.count }
             snapshot.pages.append(page)
         }
@@ -329,7 +332,7 @@ final class TabStore: TabOpening {
 
     func saveSession() {
         guard !isShutDown else { return }
-        session.save(sessionSnapshot())
+        recorder?.saveNow()
     }
 
     /// プロファイルを離れるときに呼ぶ。閲覧状態を書き出してから、すべてのページを閉じる。
@@ -340,6 +343,7 @@ final class TabStore: TabOpening {
         guard !isShutDown else { return }
         saveSession()
         isShutDown = true
+        recorder = nil
         for tab in allTabs {
             tab.tearDown()
         }
@@ -358,7 +362,6 @@ final class TabStore: TabOpening {
         for (index, page) in saved.pages.enumerated() {
             let tab = makeTab(restoring: page)
             if let id = page.bookmark, bookmarks.bookmark(id) != nil, bookmarkTabs[id] == nil {
-                tab.bookmarkID = id
                 bookmarkTabs[id] = tab
             } else {
                 // ブックマークが見つからないページは、ブックマークを消したときと同じく普通のタブとして残す。
@@ -369,22 +372,6 @@ final class TabStore: TabOpening {
         guard let fallback = selectedTab ?? tabs.last ?? allTabs.first else { return false }
         selectedID = fallback.id
         return true
-    }
-
-    /// 閲覧状態が変わるたびに書き出す。
-    ///
-    /// 変化を一度拾うと同じ処理の回の終わりまでまとめて待ち、書き出してから見張り直す。
-    /// タイマーで定期的に書くのではなく、変化があったときだけ動く。
-    private func watchSession() {
-        withObservationTracking {
-            _ = sessionSnapshot(includingState: false)
-        } onChange: { [weak self] in
-            Task { @MainActor in
-                guard let self, !self.isShutDown else { return }
-                self.saveSession()
-                self.watchSession()
-            }
-        }
     }
 
     // MARK: 眠らせる

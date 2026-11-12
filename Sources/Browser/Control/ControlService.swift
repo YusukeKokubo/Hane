@@ -88,7 +88,7 @@ final class ControlService {
             let number = try args.first.map { try integer($0, "タブ番号") } ?? tabNumber
             let tab = try tab(numbered: number)
             // ブックマークのページは閉じてもウインドウが残るので、最後の1枚でも閉じてよい。
-            guard store.allTabs.count > 1 || tab.bookmarkID != nil else {
+            guard store.allTabs.count > 1 || store.bookmarkID(of: tab) != nil else {
                 throw ControlError("最後の1枚は閉じられない（ウインドウが閉じてアプリが終了するため）。")
             }
             store.close(tab.id)
@@ -244,7 +244,7 @@ final class ControlService {
             let folderID = folderName.map { store.bookmarks.folder(named: $0)?.id ?? store.bookmarks.addFolder(named: $0).id }
             if args.isEmpty {
                 let tab = try target()
-                guard tab.bookmarkID == nil else { throw ControlError("このタブはすでにブックマークのページ。") }
+                guard store.bookmarkID(of: tab) == nil else { throw ControlError("このタブはすでにブックマークのページ。") }
                 guard store.pin(tab.id, title: name, folder: folderID) != nil else {
                     throw ControlError("このタブにはまだページがない。")
                 }
@@ -806,7 +806,7 @@ final class ControlService {
         let mark = tab.id == store.selectedID ? "*" : " "
         let url = tab.url?.absoluteString ?? "(空)"
         let loading = tab.isLoading ? " [loading]" : tab.isAsleep ? " [asleep]" : ""
-        let bookmark = tab.bookmarkID.flatMap(store.bookmarks.bookmark).map { " [bookmark: \($0.title)]" } ?? ""
+        let bookmark = store.bookmarkID(of: tab).flatMap(store.bookmarks.bookmark).map { " [bookmark: \($0.title)]" } ?? ""
         return "\(mark) tab \(tab.number): \(tab.title) — \(url)\(loading)\(bookmark)"
     }
 

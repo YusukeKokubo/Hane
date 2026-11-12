@@ -1,5 +1,6 @@
 import ControlWire
 import Foundation
+import Observation
 
 /// 前回開いていたページの控え。
 struct SavedPage: Codable, Equatable, Sendable {
@@ -71,6 +72,42 @@ final class SessionStore {
             lastSaved = session
         } catch {
             NSLog("閲覧状態を保存できませんでした: \(error)")
+        }
+    }
+}
+
+/// 閲覧状態の変化を拾って書き出す。タブ管理一つにつき一つ。
+///
+/// 変化を一度拾うと同じ処理の回の終わりまでまとめて待ち、書き出してから見張り直す。
+/// タイマーで定期的に書くのではなく、変化があったときだけ動く。見張るのは並び・アドレス・題名・選択だけで、
+/// 履歴の控え（`interactionState`）は書き出すときにだけ取る（見張るたびに全タブぶん取ると重い）。
+/// 手放すと見張りも止まる。
+@MainActor
+final class SessionRecorder {
+    private let session: SessionStore
+    private let snapshot: (_ includingState: Bool) -> SavedSession?
+
+    /// 保存先のない閲覧状態（テストと使い捨ての実体）は見張らず、`saveNow()` のときだけメモリに残す。
+    init(session: SessionStore, snapshot: @escaping (_ includingState: Bool) -> SavedSession?) {
+        self.session = session
+        self.snapshot = snapshot
+        if session.isPersistent { watch() }
+    }
+
+    func saveNow() {
+        guard let current = snapshot(true) else { return }
+        session.save(current)
+    }
+
+    private func watch() {
+        withObservationTracking {
+            _ = snapshot(false)
+        } onChange: { [weak self] in
+            Task { @MainActor in
+                guard let self else { return }
+                self.saveNow()
+                self.watch()
+            }
         }
     }
 }

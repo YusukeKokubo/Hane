@@ -159,7 +159,7 @@ import WebKit
         let bookmark = try #require(store.pin(tab.id, title: "空", folder: folder.id))
         #expect(store.tabs.isEmpty)
         #expect(store.bookmarkTabs[bookmark.id]?.id == tab.id, "ページはそのまま引き継ぐ")
-        #expect(tab.bookmarkID == bookmark.id)
+        #expect(store.bookmarkID(of: tab) == bookmark.id)
         #expect(store.bookmarks.folderID(containing: bookmark.id) == folder.id)
         #expect(store.selectedID == tab.id)
     }
@@ -172,7 +172,7 @@ import WebKit
         store.removeBookmark(folder.id)
         #expect(store.bookmarkTabs.isEmpty)
         #expect(store.tabs.last?.id == tab.id)
-        #expect(tab.bookmarkID == nil)
+        #expect(store.bookmarkID(of: tab) == nil)
         #expect(store.selectedID == tab.id)
     }
 
@@ -184,7 +184,7 @@ import WebKit
         try await waitForURL(tab)
 
         store.drop(.tab(tab.id), into: nil, before: first.id)
-        let pinned = try #require(tab.bookmarkID)
+        let pinned = try #require(store.bookmarkID(of: tab))
         #expect(store.bookmarks.items.map(\.id) == [pinned, first.id, folder.id])
 
         store.drop(.bookmark(first.id), into: folder.id, before: nil)
