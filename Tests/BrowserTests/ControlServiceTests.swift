@@ -336,6 +336,27 @@ import Testing
         #expect(await !run("settings", "cookies", "block").ok)
     }
 
+    /// 大きさを指定した window.open（ログインの小窓など）は別の窓で開いてページへ返し、opener でつながる。
+    /// 小窓が window.close() を呼ぶと窓も閉じる。
+    @Test func sizedPopupsOpenInTheirOwnWindow() async throws {
+        let login = FileManager.default.temporaryDirectory.appending(path: "control-login-\(UUID().uuidString).html")
+        try "<title>Login</title>".write(to: login, atomically: true, encoding: .utf8)
+        try await open(html: "<title>Opener</title>")
+        let before = PopupWindows.windows.count
+
+        let opened = await run("eval", "window.login = window.open('\(login.absoluteString)', 'login', 'width=400,height=300'); return String(window.login !== null)")
+        #expect(opened.output == "\"true\"")
+        #expect(PopupWindows.windows.count == before + 1)
+        #expect(store.tabs.count == 1)
+        #expect(await run("eval", "String(window.login.opener === window)").output == "\"true\"")
+
+        _ = await run("eval", "window.login.close(); 1")
+        for _ in 0..<50 where PopupWindows.windows.count > before {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        #expect(PopupWindows.windows.count == before)
+    }
+
     private func waitForTabs(_ count: Int) async throws {
         for _ in 0..<50 where store.tabs.count < count {
             try await Task.sleep(for: .milliseconds(50))

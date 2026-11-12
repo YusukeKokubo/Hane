@@ -88,6 +88,16 @@ sleep 1
 expect "許すと操作なしのポップアップも開く" 'second.html#auto' tabs
 "$CTL" close >/dev/null
 "$CTL" settings popups block >/dev/null
+# 大きさを指定したもの（ログインの小窓など）は別の窓で開き、開いた側へ窓を返す。
+"$CTL" select 1 >/dev/null
+"$CTL" snapshot >/dev/null
+"$CTL" click 2 >/dev/null
+sleep 1
+expect "大きさを指定したポップアップは別の窓で開く" 'overlay: window "Second"' ui
+expect "開いた側は小窓とつながる" '"true"' eval 'String(window.login.opener === window)'
+expect "大きさを指定したポップアップはタブを増やさない" '* tab 1: Popup' tabs
+expect "⌘Wで手前の小窓を閉じる" '* tab 1: Popup' key cmd+w
+expect "小窓を閉じたことが開いた側に伝わる" '"true"' eval 'String(window.login.closed)'
 expect "⌘,で設定の窓を開く" 'overlay: window' key cmd+,
 expect "設定の窓の中身も一覧に出る" 'checkbox' ui-snapshot
 # ⌘W はタブを閉じる項目が先に受ける。設定の窓が手前なら、タブではなくその窓を閉じる。

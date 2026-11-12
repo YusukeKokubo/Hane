@@ -9,7 +9,7 @@ struct SettingsView: View {
             Section {
                 Toggle("ポップアップウインドウをブロック", isOn: $settings.blocksPopups)
             } footer: {
-                Text("ブロックしていても、クリックなどの操作で開こうとしたものは新しいタブで開きます。")
+                Text("ブロックしていても、クリックなどの操作で開こうとしたものは開きます。大きさを指定したもの（ログインの小窓など）は別の窓で、ほかは新しいタブで開きます。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

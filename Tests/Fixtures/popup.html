@@ -2,6 +2,7 @@
 <meta charset="utf-8">
 <title>Popup</title>
 <button onclick="window.open('second.html#click')">Open</button>
+<button onclick="window.login = window.open('second.html#sized', 'login', 'width=420,height=320')">Login</button>
 <script>
   // 操作なしに開こうとするポップアップ。止めていれば開かない。
   setTimeout(() => window.open('second.html#auto'), 100);

@@ -53,8 +53,10 @@ public enum ControlHelp {
       settings               今の設定
       settings popups <block|allow>
                              ポップアップウインドウを止めるか。block では、クリックなどの操作の中から
-                             window.open したものだけ新しいタブで開く。allow では操作がなくても開く
+                             window.open したものだけ開く。allow では操作がなくても開く
                              開いているタブにもその場で効く
+                             大きさを指定したもの（ログインの小窓など）は別の小窓で開き、ui に overlay: window と出る。
+                             ほかは新しいタブで開く
 
     広告ブロック（同梱のフィルタリストと、⌥右クリックで選んで隠した要素）
       adblock                フィルタリストの状態と、今のサイトで隠している要素。起動直後は準備を待ってから返る
