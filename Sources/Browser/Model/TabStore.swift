@@ -29,6 +29,7 @@ final class TabStore: TabOpening {
 
     let bookmarks: BookmarkStore
     let history: HistoryStore
+    let favicons: FaviconStore
 
     /// アドレスバーにフォーカスを移してほしいときに増やす合図。
     private(set) var addressFocusRequest = 0
@@ -52,11 +53,13 @@ final class TabStore: TabOpening {
         factory: PageFactory = PageFactory(),
         bookmarks: BookmarkStore = BookmarkStore(),
         history: HistoryStore = HistoryStore(),
+        favicons: FaviconStore = FaviconStore(),
         session: SessionStore = SessionStore()
     ) {
         self.factory = factory
         self.bookmarks = bookmarks
         self.history = history
+        self.favicons = favicons
         if !restore(session.load()) {
             newTab()
         }
@@ -411,7 +414,7 @@ final class TabStore: TabOpening {
 
     private func makeTab(restoring saved: SavedPage? = nil) -> Tab {
         lastTabNumber += 1
-        return Tab(number: lastTabNumber, factory: factory, opener: self, history: history, restoring: saved)
+        return Tab(number: lastTabNumber, factory: factory, opener: self, history: history, favicons: favicons, restoring: saved)
     }
 
     private func insertTab(after anchor: Tab.ID?) -> Tab {

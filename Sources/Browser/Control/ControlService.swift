@@ -806,8 +806,9 @@ final class ControlService {
         let mark = tab.id == store.selectedID ? "*" : " "
         let url = tab.url?.absoluteString ?? "(空)"
         let loading = tab.isLoading ? " [loading]" : tab.isAsleep ? " [asleep]" : ""
+        let icon = tab.favicon != nil ? " [icon]" : ""
         let bookmark = store.bookmarkID(of: tab).flatMap(store.bookmarks.bookmark).map { " [bookmark: \($0.title)]" } ?? ""
-        return "\(mark) tab \(tab.number): \(tab.title) — \(url)\(loading)\(bookmark)"
+        return "\(mark) tab \(tab.number): \(tab.title) — \(url)\(loading)\(icon)\(bookmark)"
     }
 
     private func url(from args: [String]) throws -> URL {

@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 import Observation
 import os
 
@@ -47,6 +47,7 @@ final class Tab: Identifiable {
     @ObservationIgnored private let factory: PageFactory
     @ObservationIgnored private weak var opener: (any TabOpening)?
     @ObservationIgnored private let history: HistoryStore
+    @ObservationIgnored private let favicons: FaviconStore
     /// 次に確定する読み込みが、アドレスバーで確定して始めたものか。履歴で「打って訪れた」と数える。
     @ObservationIgnored private var typedNavigationPending = false
     /// ページを移ってから、まだ題名が届いていないか。
@@ -59,12 +60,14 @@ final class Tab: Identifiable {
         factory: PageFactory,
         opener: any TabOpening,
         history: HistoryStore,
+        favicons: FaviconStore,
         restoring saved: SavedPage? = nil
     ) {
         self.number = number
         self.factory = factory
         self.opener = opener
         self.history = history
+        self.favicons = favicons
         content = saved.map(Content.asleep) ?? .empty
     }
 
@@ -116,6 +119,9 @@ final class Tab: Identifiable {
         }
         return hasContent ? "読み込み中…" : "新規タブ"
     }
+
+    /// 行き先のサイトのアイコン。まだ取っていなければ `nil`。眠っているタブでも、覚えていれば返す。
+    var favicon: NSImage? { favicons.image(for: url) }
 
     var canGoBack: Bool { page?.canGoBack ?? false }
     var canGoForward: Bool { page?.canGoForward ?? false }
@@ -245,6 +251,7 @@ final class Tab: Identifiable {
             // 前のページと同じ題名なら変化の知らせが来ないので、読み終えたときにも入れる（空なら何もしない）。
             if let page, let url = page.url {
                 history.setTitle(page.title, for: url)
+                lookUpFavicon(of: page, at: url)
             }
         case .titleChanged(let title):
             if awaitingTitle {
@@ -265,6 +272,14 @@ final class Tab: Identifiable {
             }
         case .closeRequested:
             opener?.closeTab(self)
+        }
+    }
+
+    /// ページが示すアイコンを読んで取りに行く。読み終えるたびに読むが、同じアイコンを取り直すことはない（`FaviconStore`）。
+    private func lookUpFavicon(of page: Page, at url: URL) {
+        Task { [weak page, favicons] in
+            guard let page else { return }
+            await favicons.update(from: page, at: url)
         }
     }
 

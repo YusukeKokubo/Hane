@@ -78,7 +78,8 @@ struct TabBar: View {
 }
 
 private struct TabItem: View {
-    static let minimumWidth: CGFloat = 48
+    /// 縮めきってもアイコンと閉じるボタンは隠れない幅。題名はそこで見えなくなる。
+    static let minimumWidth: CGFloat = 60
 
     let tab: Tab
     let isSelected: Bool
@@ -88,7 +89,11 @@ private struct TabItem: View {
     @State private var isHovered = false
 
     var body: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 6) {
+            // 新しいタブには行き先がないので出さない。
+            if tab.url != nil {
+                Favicon(image: tab.favicon)
+            }
             Text(tab.title)
                 .lineLimit(1)
                 .truncationMode(.tail)
@@ -136,6 +141,28 @@ struct LoadingLine: View {
 }
 
 // MARK: 見た目の共通部品
+
+/// タブとブックマークの頭に出すサイトのアイコン。まだ取っていないサイトでは地球儀で場所を取っておき、題名の位置をそろえる。
+struct Favicon: View {
+    let image: NSImage?
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(nsImage: image)
+                    .resizable()
+                    .interpolation(.high)
+            } else {
+                Image(systemName: "globe")
+                    .resizable()
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .scaledToFit()
+        .frame(width: 16, height: 16)
+        .accessibilityHidden(true)
+    }
+}
 
 enum BarItemState {
     /// ページを持たないブックマーク。

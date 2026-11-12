@@ -155,6 +155,7 @@ final class BrowserModel {
             factory: PageFactory(dataStore: data.dataStore, contentBlocker: contentBlocker, downloads: downloads),
             bookmarks: data.bookmarks,
             history: data.history,
+            favicons: data.favicons,
             session: data.session
         )
     }
@@ -178,6 +179,7 @@ final class ProfileData {
     let dataStore: WKWebsiteDataStore
     let bookmarks: BookmarkStore
     let history: HistoryStore
+    let favicons: FaviconStore
     let session: SessionStore
 
     /// 持ち物の根元（`base`）があればプロファイルの置き場に保存し、サイトデータは `default` なら WebKit の既定、
@@ -194,6 +196,7 @@ final class ProfileData {
         }
         bookmarks = BookmarkStore(fileURL: directory?.appending(path: "bookmarks.json"))
         history = HistoryStore(fileURL: directory?.appending(path: "history.json"))
+        favicons = FaviconStore(directory: directory?.appending(path: "favicons"))
         session = SessionStore(fileURL: directory?.appending(path: "session.json"))
     }
 }

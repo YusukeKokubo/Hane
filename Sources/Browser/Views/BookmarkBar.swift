@@ -43,6 +43,7 @@ private struct BookmarkChip: View {
         let awayTitle = store.awayTitle(for: bookmark)
 
         HStack(spacing: 6) {
+            Favicon(image: store.favicons.image(for: bookmark.url))
             Text(bookmark.title)
             if let awayTitle {
                 Text("/").foregroundStyle(.tertiary)
@@ -54,7 +55,7 @@ private struct BookmarkChip: View {
         }
         .lineLimit(1)
         .font(.callout)
-        .padding(.leading, 10)
+        .padding(.leading, 8)
         .padding(.trailing, awayTitle == nil ? 10 : 4)
         .frame(height: 26)
         .barItemBackground(state(of: tab), isHovered: isHovered)
@@ -264,6 +265,7 @@ private struct FolderRow: View {
         let awayTitle = store.awayTitle(for: bookmark)
 
         HStack(spacing: 6) {
+            Favicon(image: store.favicons.image(for: bookmark.url))
             Text(awayTitle.map { "\(bookmark.title) / \($0)" } ?? bookmark.title)
                 .truncationMode(.tail)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -278,7 +280,7 @@ private struct FolderRow: View {
             }
         }
         .lineLimit(1)
-        .padding(.leading, 10)
+        .padding(.leading, 8)
         .padding(.trailing, 6)
         .frame(height: 28)
         .barItemBackground(tab == nil ? .idle : (tab?.id == store.selectedID ? .selected : .live), isHovered: false)
