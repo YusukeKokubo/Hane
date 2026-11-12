@@ -30,6 +30,18 @@ cp Support/Info.plist "$APP/Contents/Info.plist"
 # 広告ブロックのフィルタリスト。アプリが起動時に訳してコンパイルする（中身が変わったときだけ）。
 mkdir -p "$APP/Contents/Resources/Filters"
 cp Support/Filters/*.txt "$APP/Contents/Resources/Filters/"
+# アプリアイコン。Icon Composer 形式を焼いて、Liquid Glass 用の Assets.car と古い表示向けの AppIcon.icns を作る。
+# actool は手元の作業場所でなく前回の場所を基準に相対パスを解くことがあるので、絶対パスで渡す。
+actool "$PWD/Support/AppIcon.icon" --compile "$PWD/$APP/Contents/Resources" \
+    --app-icon AppIcon --enable-on-demand-resources NO --development-region ja \
+    --target-device mac --platform macosx --minimum-deployment-target 26.0 \
+    --output-partial-info-plist "$PWD/build/AppIcon-partial.plist" >/dev/null
+rm -f build/AppIcon-partial.plist
+# actool は失敗しても終了コードが 0 なので、できたものを見て確かめる。
+if [ ! -f "$APP/Contents/Resources/Assets.car" ]; then
+    echo "アプリアイコンを作れなかった（actool を直に走らせて出力を見る）" >&2
+    exit 1
+fi
 
 codesign --force --sign - "$APP"
 echo "作成: $APP, build/browserctl"
