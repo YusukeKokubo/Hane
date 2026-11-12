@@ -60,11 +60,12 @@ final class HistoryStore {
         scheduleSave()
     }
 
+    /// 題名だけの変化では書き出しを予約しない。未読の数などで題名を書き換え続けるページがあり、
+    /// そのたびに数千件を書き直すことになるため。題名は次の訪問か終了するときの書き出しに乗る。
     func setTitle(_ title: String, for url: URL) {
         guard !title.isEmpty, var entry = entries[url], entry.title != title else { return }
         entry.title = title
         entries[url] = entry
-        scheduleSave()
     }
 
     // MARK: 補う

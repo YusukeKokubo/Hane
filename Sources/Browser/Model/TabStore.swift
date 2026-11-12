@@ -61,9 +61,11 @@ final class TabStore: TabOpening {
         if !restore(session.load()) {
             newTab()
         }
-        recorder = SessionRecorder(session: session) { [weak self] includingState in
-            self?.sessionSnapshot(includingState: includingState)
-        }
+        recorder = SessionRecorder(
+            session: session,
+            watched: { [weak self] in self?.touchSessionShape() },
+            snapshot: { [weak self] in self?.sessionSnapshot() }
+        )
     }
 
     /// バーに見える順のすべてのページ。ブックマークのページが先、普通のタブが後。
@@ -318,16 +320,29 @@ final class TabStore: TabOpening {
 
     // MARK: 閲覧状態
 
-    /// 今の閲覧状態。まっさらなタブは含めない。履歴の控え（`includingState`）は書き出すときだけ含める。
-    func sessionSnapshot(includingState: Bool = true) -> SavedSession {
+    /// 今の閲覧状態。まっさらなタブは含めない。
+    func sessionSnapshot() -> SavedSession {
         var snapshot = SavedSession()
         for tab in allTabs {
-            guard var page = tab.savedPage(includingState: includingState) else { continue }
+            guard var page = tab.savedPage() else { continue }
             page.bookmark = bookmarkID(of: tab)
             if tab.id == selectedID { snapshot.selected = snapshot.pages.count }
             snapshot.pages.append(page)
         }
         return snapshot
+    }
+
+    /// 閲覧状態を書き出すきっかけにする値に触れる。並び・行き先・選択と、ページを移って最初に題名が届いたことだけで、
+    /// 題名そのものには触れない。
+    ///
+    /// 未読の数などで題名を書き換え続けるページがあり、題名まで見張るとそのたびに全タブぶんの控えを取って書き出すことになる。
+    /// 移ってから後の題名の変化は、次の書き出しか終了するときの書き出しに乗る。
+    private func touchSessionShape() {
+        _ = selectedID
+        for tab in allTabs {
+            _ = tab.url
+            _ = tab.titleArrivals
+        }
     }
 
     func saveSession() {

@@ -54,7 +54,7 @@ import WebKit
         let tab = store.tabs[0]
         tab.load(URLRequest(url: page("elsewhere").url))
         #expect(tab.title != "a")
-        #expect(tab.savedPage(includingState: false)?.title != "a", "閲覧状態にも前回の題名を残さない")
+        #expect(tab.savedPage()?.title != "a", "閲覧状態にも前回の題名を残さない")
     }
 
     /// 読み込んでいないページも、読み込みに失敗したページも、次の保存で消えない。
@@ -126,6 +126,32 @@ import WebKit
         }
         #expect(saved?.pages.map(\.url) == [page("a").url])
         #expect(saved?.selected == 0)
+    }
+
+    /// 題名が変わっただけでは書き出さない。題名は次の書き出しに乗る。
+    @Test func titleChangesAloneDoNotRewrite() async throws {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let html = directory.appending(path: "chat.html")
+        try "<title>chat</title>".write(to: html, atomically: true, encoding: .utf8)
+        let store = makeStore()
+        let tab = try #require(store.selected)
+        tab.load(URLRequest(url: html))
+        for _ in 0..<100 where SessionStore(fileURL: file).load()?.pages.first?.title != "chat" {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(SessionStore(fileURL: file).load()?.pages.first?.title == "chat", "読み終えた後に届いた題名も書き出す")
+        let written = try FileManager.default.attributesOfItem(atPath: file.path)[.systemFileNumber] as? UInt64
+
+        _ = try await tab.page?.callJavaScript("document.title = '(3) chat'", arguments: [:], contentWorld: .page)
+        for _ in 0..<50 where tab.title != "(3) chat" {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        try await Task.sleep(for: .milliseconds(200))
+        let after = try FileManager.default.attributesOfItem(atPath: file.path)[.systemFileNumber] as? UInt64
+        #expect(after == written, "題名の変化だけで書き直した")
+
+        store.saveSession()
+        #expect(SessionStore(fileURL: file).load()?.pages.first?.title == "(3) chat")
     }
 }
 

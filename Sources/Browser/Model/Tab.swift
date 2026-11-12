@@ -36,6 +36,10 @@ final class Tab: Identifiable {
     private(set) var content: Content
     /// 直近の読み込み失敗。次の読み込みが始まると消える。
     private(set) var failure: String?
+    /// ページを移ってから最初に題名が届いた回数。閲覧状態を書き出すきっかけに使う。
+    /// 題名は読み終えた後に届くことがあり、行き先が変わった時点の書き出しには間に合わないため。
+    /// その後の題名の変化では進めない（題名を書き換え続けるページで書き出しが続かないように）。
+    private(set) var titleArrivals = 0
 
     /// 最後に画面から外れた時刻。しばらく使われていないタブを眠らせるのに使う。
     @ObservationIgnored var lastShown = Date()
@@ -45,6 +49,8 @@ final class Tab: Identifiable {
     @ObservationIgnored private let history: HistoryStore
     /// 次に確定する読み込みが、アドレスバーで確定して始めたものか。履歴で「打って訪れた」と数える。
     @ObservationIgnored private var typedNavigationPending = false
+    /// ページを移ってから、まだ題名が届いていないか。
+    @ObservationIgnored private var awaitingTitle = false
     /// 読み込み中の区間の印。Instruments で読み込みの始まりと終わりを見るため。
     @ObservationIgnored private var loadSignpost: OSSignpostIntervalState?
 
@@ -153,28 +159,26 @@ final class Tab: Identifiable {
     /// ページを手放して控えだけにする。ページのプロセスが返る。眠らせたら `true`。
     @discardableResult
     func sleep() -> Bool {
-        guard hasContent, let snapshot = savedPage(includingState: true) else { return false }
+        guard hasContent, let snapshot = savedPage() else { return false }
         closePage()
         content = .asleep(snapshot)
         return true
     }
 
     /// 閲覧状態として残す内容。行き先のないまっさらなタブは残さない。ブックマークとの結びつきはタブ管理が入れる。
-    /// 履歴の控えは書き出すときだけ取る（変化を見張るたびに取ると、全タブぶん書き出しの手間がかかる）。
-    func savedPage(includingState: Bool) -> SavedPage? {
+    func savedPage() -> SavedPage? {
         switch content {
         case .empty:
             return nil
         case .asleep(var saved):
             saved.bookmark = nil
-            if !includingState { saved.state = nil }
             return saved
         case .live(let live):
             guard let url else { return nil }
             return SavedPage(
                 url: url,
                 title: live.page.title.isEmpty ? savedTitle ?? "" : live.page.title,
-                state: includingState ? live.page.interactionState : nil
+                state: live.page.interactionState
             )
         }
     }
@@ -235,6 +239,7 @@ final class Tab: Identifiable {
                 history.recordVisit(to: url, typed: typedNavigationPending)
             }
             typedNavigationPending = false
+            awaitingTitle = true
         case .finished:
             endLoadSignpost()
             // 前のページと同じ題名なら変化の知らせが来ないので、読み終えたときにも入れる（空なら何もしない）。
@@ -242,6 +247,10 @@ final class Tab: Identifiable {
                 history.setTitle(view.title ?? "", for: url)
             }
         case .titleChanged(let title):
+            if awaitingTitle {
+                awaitingTitle = false
+                titleArrivals += 1
+            }
             // 読み終えた時点ではまだ題名が届いていないことがあるので、届いたときにも入れる。
             if let url = page?.url {
                 history.setTitle(title, for: url)
