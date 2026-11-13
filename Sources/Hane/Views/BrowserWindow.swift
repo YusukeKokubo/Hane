@@ -236,6 +236,7 @@ private struct NavigationRow: View {
                 .disabled(!tab.canGoForward)
             AddressBar(tab: tab, store: store)
             BookmarkStarButton(tab: tab, store: store)
+            PasswordFillButton(fill: store.passwordFill, tab: tab)
             if tab.isLoading {
                 Button("読み込みを中止", systemImage: "xmark") { tab.stop() }
             } else {

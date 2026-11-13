@@ -26,6 +26,13 @@ struct BrowserCommands: Commands {
                 .keyboardShortcut("l")
         }
 
+        CommandGroup(after: .pasteboard) {
+            Divider()
+            Button("1Password で入力") { store.passwordFill.start(on: store.selected) }
+                .keyboardShortcut("\\")
+                .disabled(store.selected?.hasContent != true)
+        }
+
         CommandMenu("移動") {
             Button("戻る") { store.selected?.goBack() }
                 .keyboardShortcut("[")
