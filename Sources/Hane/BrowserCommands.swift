@@ -5,16 +5,19 @@ import SwiftUI
 struct BrowserCommands: Commands {
     let model: BrowserModel
 
-    /// 切り替えるとタブ管理が入れ替わるので、使うたびに今のものを読む。
+    /// 最後に前へ出た窓のタブ管理。窓を移ったりプロファイルを切り替えたりすると入れ替わるので、使うたびに今のものを読む。
     private var store: TabStore { model.store }
 
-    @Environment(\.dismissWindow) private var dismissWindow
+    @Environment(\.openWindow) private var openWindow
 
     var body: some Commands {
         // 標準の「閉じる」（Cmd+W）より前に置くことで、Cmd+W をタブ側で受ける。
         CommandGroup(replacing: .newItem) {
             Button("新規タブ") { store.newTab() }
                 .keyboardShortcut("t")
+            // 開いた窓でプロファイルを選ぶ（BrowserModel.attach）。
+            Button("新規ウインドウ") { openWindow(id: HaneApp.moreWindowsID) }
+                .keyboardShortcut("n")
             Button("タブを閉じる") { closeTab() }
                 .keyboardShortcut("w")
             Divider()
@@ -76,7 +79,7 @@ struct BrowserCommands: Commands {
             }
         }
 
-        // 選ぶと、今のタブを閉じて、そのプロファイルのタブをこの窓に戻す。
+        // 選ぶと、手前の窓のタブを閉じて、そのプロファイルのタブをその窓に戻す。ほかの窓に出ていれば、その窓を前に出す。
         // ⌃1〜9 はどのキーで移るかを見せるため。項目は後から増えるので、キーそのものは LocalShortcuts が拾う。
         CommandMenu("プロファイル") {
             ForEach(Array(model.names.enumerated()), id: \.element) { index, name in
@@ -91,7 +94,7 @@ struct BrowserCommands: Commands {
                 }
             }
             Divider()
-            Button("新しいプロファイル…") { model.isCreating = true }
+            Button("新しいプロファイル…") { model.beginCreating() }
         }
 
         if let blocker = store.contentBlocker {
@@ -120,15 +123,17 @@ struct BrowserCommands: Commands {
     }
 
     private func closeTab() {
-        // ⌘W はこの項目が標準の「閉じる」より先に受けるので、設定の窓が手前にあればタブではなくその窓を閉じる。
-        // シートやポップオーバー（親のある窓）が手前のときは、これまでどおりタブを閉じる。
-        if let front = NSApp.orderedWindows.first(where: \.isVisible),
-           front.identifier?.rawValue != HaneApp.windowID, front.parent == nil, front.sheetParent == nil {
-            front.performClose(nil)
-            return
+        // ⌘W はこの項目が標準の「閉じる」より先に受けるので、設定の窓やプロファイルを選ぶ前の窓が手前にあれば、
+        // タブではなくその窓を閉じる。シートやポップオーバー（親のある窓）が手前のときは、これまでどおりタブを閉じる。
+        if let front = NSApp.orderedWindows.first(where: \.isVisible), front.parent == nil, front.sheetParent == nil {
+            let slot = model.windows.first { $0.window === front }
+            if slot?.profile == nil {
+                front.performClose(nil)
+                return
+            }
         }
         if !store.closeSelected() {
-            dismissWindow(id: HaneApp.windowID)
+            model.currentWindow?.close()
         }
     }
 }

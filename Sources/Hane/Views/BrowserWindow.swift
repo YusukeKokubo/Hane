@@ -9,39 +9,69 @@ import WebKit
 struct BrowserWindow: View {
     @Bindable var model: BrowserModel
 
+    /// この窓。どのプロファイルを出すかは、窓が出たときに BrowserModel が決める。
+    @State private var slot = BrowserWindowSlot()
     @Environment(\.dismissWindow) private var dismissWindow
+    @Environment(\.openWindow) private var openWindow
     @State private var newProfileName = ""
 
     /// 左上の信号機ボタンを避けるための余白。
-    private static let windowControlsWidth: CGFloat = 78
+    fileprivate static let windowControlsWidth: CGFloat = 78
     /// タブが増えてもウインドウを掴んで動かせるよう、タブバーの右端に必ず残す余白。
     private static let dragAreaWidth: CGFloat = 40
 
     var body: some View {
-        // プロファイルを切り替えるとタブ管理ごと入れ替わるので、中身も作り直し、アドレスバーの書きかけなどを持ち越さない。
-        content(model.store)
-            .id(ObjectIdentifier(model.store))
-            .navigationTitle((model.store.selected?.title ?? "Browser") + (windowLabel.map { " — \($0)" } ?? ""))
-            .alert("新しいプロファイル", isPresented: $model.isCreating) {
-                TextField("名前（例: 仕事）", text: $newProfileName)
-                Button("作成して開く") {
-                    model.createAndOpen(newProfileName)
-                    newProfileName = ""
-                }
-                Button("キャンセル", role: .cancel) { newProfileName = "" }
-            } message: {
-                Text("Cookie、ブックマーク、閲覧履歴、開いているタブをほかのプロファイルと分けて持ちます。今開いているタブは閉じ、このウインドウで開きます。")
+        Group {
+            if let store = model.store(in: slot) {
+                // プロファイルを切り替えるとタブ管理ごと入れ替わるので、中身も作り直し、アドレスバーの書きかけなどを持ち越さない。
+                content(store)
+                    .id(ObjectIdentifier(store))
+            } else {
+                ProfilePicker(model: model, slot: slot)
             }
-            .alert("プロファイル", isPresented: Binding(get: { model.failure != nil }, set: { if !$0 { model.failure = nil } })) {
-                Button("OK") {}
-            } message: {
-                Text(model.failure ?? "")
+        }
+        .navigationTitle(title)
+        .background { WindowSlotBinder(model: model, slot: slot) }
+        .onAppear {
+            // 起動して戻す窓が残っていれば、続けて開く。開いた窓が出たときにまた次を開く。
+            if model.attach(slot) {
+                openWindow(id: HaneApp.moreWindowsID)
             }
+        }
+        .alert("新しいプロファイル", isPresented: Binding(
+            get: { model.creatingIn === slot },
+            set: { if !$0, model.creatingIn === slot { model.creatingIn = nil } }
+        )) {
+            TextField("名前（例: 仕事）", text: $newProfileName)
+            Button("作成して開く") {
+                model.createAndOpen(newProfileName, in: slot)
+                newProfileName = ""
+            }
+            Button("キャンセル", role: .cancel) { newProfileName = "" }
+        } message: {
+            Text(slot.profile == nil
+                ? "Cookie、ブックマーク、閲覧履歴、開いているタブをほかのプロファイルと分けて持ちます。このウインドウで開きます。"
+                : "Cookie、ブックマーク、閲覧履歴、開いているタブをほかのプロファイルと分けて持ちます。今開いているタブは閉じ、このウインドウで開きます。")
+        }
+        .alert("プロファイル", isPresented: Binding(
+            get: { model.failure != nil && model.isActive(slot) },
+            set: { if !$0 { model.failure = nil } }
+        )) {
+            Button("OK") {}
+        } message: {
+            Text(model.failure ?? "")
+        }
+    }
+
+    private var title: String {
+        guard let store = model.store(in: slot) else { return "新しいウインドウ" + (BrowserInstance.name.map { " — \($0)" } ?? "") }
+        return (store.selected?.title ?? "Browser") + (windowLabel.map { " — \($0)" } ?? "")
     }
 
     /// どの実体の、どのプロファイルの窓か。普段使いの実体の標準のプロファイルでは出さない。
     private var windowLabel: String? {
-        let parts = [BrowserInstance.name, model.current == BrowserProfile.defaultName ? nil : model.current].compactMap(\.self)
+        let profile = slot.profile.flatMap { $0 == BrowserProfile.defaultName ? nil : $0 }
+        let parts = [BrowserInstance.name, profile].compactMap(\.self)
         return parts.isEmpty ? nil : parts.joined(separator: " / ")
     }
 
@@ -54,7 +84,7 @@ struct BrowserWindow: View {
                 }
                 TabBar(store: store) { id in
                     if !store.close(id) {
-                        dismissWindow(id: HaneApp.windowID)
+                        dismissWindow()
                     }
                 }
             }
@@ -76,6 +106,99 @@ struct BrowserWindow: View {
         .frame(minWidth: 480, minHeight: 320)
         .ignoresSafeArea(edges: .top)
         .background { StillWindow() }
+    }
+}
+
+/// ⌘N で開いた窓に、出すプロファイルを選ばせる。ほかの窓に出ているものを選ぶと、その窓を前に出してこの窓は閉じる。
+private struct ProfilePicker: View {
+    let model: BrowserModel
+    let slot: BrowserWindowSlot
+
+    @Environment(\.dismissWindow) private var dismissWindow
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // タイトルバーの位置。窓を掴む所を残す。
+            Color.clear
+                .frame(height: 34)
+                .background { WindowDragArea() }
+            VStack(spacing: 10) {
+                Text("このウインドウで開くプロファイル")
+                    .font(.headline)
+                    .padding(.bottom, 6)
+                ForEach(model.names, id: \.self) { name in
+                    let shown = model.isShown(name)
+                    Button {
+                        model.open(name, in: slot)
+                        if shown { dismissWindow() }
+                    } label: {
+                        Label(BrowserModel.title(for: name) + (shown ? "（開いているウインドウへ）" : ""),
+                              systemImage: "person.crop.circle")
+                            .frame(maxWidth: 260, alignment: .leading)
+                    }
+                    .controlSize(.large)
+                }
+                Divider()
+                    .frame(width: 260)
+                Button("新しいプロファイル…") { model.beginCreating(in: slot) }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(.bottom, 34)
+        }
+        .frame(minWidth: 480, minHeight: 320)
+        .ignoresSafeArea(edges: .top)
+        .background { StillWindow() }
+    }
+}
+
+/// 窓とその AppKit の窓を BrowserModel に結ぶ。前に出たこと、閉じたことを知らせる。
+private struct WindowSlotBinder: NSViewRepresentable {
+    let model: BrowserModel
+    let slot: BrowserWindowSlot
+
+    func makeNSView(context: Context) -> Marker { Marker(model: model, slot: slot) }
+    func updateNSView(_ nsView: Marker, context: Context) {}
+
+    final class Marker: NSView {
+        private let model: BrowserModel
+        private let slot: BrowserWindowSlot
+        private var isBound = false
+
+        init(model: BrowserModel, slot: BrowserWindowSlot) {
+            self.model = model
+            self.slot = slot
+            super.init(frame: .zero)
+        }
+
+        @available(*, unavailable)
+        required init?(coder: NSCoder) { fatalError() }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            guard let window, !isBound else { return }
+            isBound = true
+            let center = NotificationCenter.default
+            center.addObserver(self, selector: #selector(becameKey), name: NSWindow.didBecomeKeyNotification, object: window)
+            center.addObserver(self, selector: #selector(willClose), name: NSWindow.willCloseNotification, object: window)
+            // 窓の大きさは SwiftUI が置いたあとに決まるので、覚えていた位置へ動かすのは一巡り待ってから。
+            Task { @MainActor [slot] in
+                slot.window = window
+            }
+            if window.isKeyWindow {
+                model.activate(slot)
+            }
+        }
+
+        @objc private func becameKey() {
+            model.activate(slot)
+        }
+
+        @objc private func willClose() {
+            NotificationCenter.default.removeObserver(self)
+            // 閉じた窓は AppKit がしばらく掴んでいることがあり、覚える名前を握ったままだと次に開く窓が使えない。
+            window?.setFrameAutosaveName("")
+            model.detach(slot)
+        }
     }
 }
 

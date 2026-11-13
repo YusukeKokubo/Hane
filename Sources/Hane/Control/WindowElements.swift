@@ -37,6 +37,12 @@ final class WindowElements {
 
     /// 直前の一覧。番号はここへの添字に1を足したもの。
     private var elements: [Element] = []
+    /// 相手にする本体の窓。窓が何枚あっても、外部操作は今のプロファイルの窓を相手にする。
+    private let mainWindow: @MainActor () -> NSWindow?
+
+    init(mainWindow: @escaping @MainActor () -> NSWindow? = { nil }) {
+        self.mainWindow = mainWindow
+    }
 
     /// 一覧に出す役割と、出すときの呼び名。画像や入れ物は数が多いわりに触る先にならないので出さない。
     private static let kinds: [String: String] = [
@@ -73,7 +79,7 @@ final class WindowElements {
     }
 
     private func collectAll() throws -> String {
-        let windows = Self.windows()
+        let windows = Self.windows(main: mainWindow())
         guard let main = windows.first?.window else { throw ControlError("窓が出ていない。") }
         elements = []
         var lines: [String] = []
@@ -89,12 +95,13 @@ final class WindowElements {
         return lines.joined(separator: "\n")
     }
 
-    /// 窓と、その上に出ているシートやポップオーバー、本体の窓より手前にある別の窓（設定の窓など）。
-    /// キーを受けるのは後ろにあるものほど手前。
-    static func windows() -> [(window: NSWindow, kind: String)] {
-        // 設定の窓も本体の窓になれるので、本体の窓は識別子で選ぶ。
+    /// 窓と、その上に出ているシートやポップオーバー、本体の窓より手前にある別の窓（設定の窓、ほかのプロファイルの窓など）。
+    /// キーを受けるのは後ろにあるものほど手前。本体の窓は `main`（今のプロファイルの窓）で、なければ識別子で探す。
+    static func windows(main preferred: NSWindow?) -> [(window: NSWindow, kind: String)] {
         let visible = NSApp.windows.filter(\.isVisible)
-        guard let main = visible.first(where: { $0.identifier?.rawValue == HaneApp.windowID })
+        // 設定の窓も本体の窓になれるので、本体の窓は識別子で選ぶ。WindowGroup の窓は識別子の後ろに番号が付く。
+        guard let main = preferred.flatMap({ visible.contains($0) ? $0 : nil })
+            ?? visible.first(where: { $0.identifier?.rawValue.hasPrefix(HaneApp.windowID) == true })
             ?? visible.first(where: \.canBecomeMain)
         else { return [] }
         var result: [(NSWindow, String)] = [(main, "window")]

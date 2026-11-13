@@ -115,6 +115,9 @@ public struct ProfileRegistry: Codable, Equatable, Sendable {
     /// 最後に開いていたプロファイル。次の起動でそれを開く。ないときや一覧にないときは `default`。
     /// 後から足した項目なので、前の版のファイルにはない（Optional なので、なくても読める）。
     public var lastOpened: String?
+    /// 終えたときに窓を開いていたプロファイル（`lastOpened` も含む、窓を開いた順）。次の起動でそれぞれの窓を戻す。
+    /// `lastOpened` と同じく後から足した項目で、ないときは `lastOpened` の窓だけを開く。
+    public var lastWindows: [String]?
 
     public init() {}
 

@@ -229,7 +229,7 @@ expect "ページのプロセスにタブの番号が付く" '"tabs" : [' stats 
 expect "窓の中身を撮る" 'appearance:' window-screenshot "${TMPDIR:-/tmp}/hane-verify-window.png"
 expect "窓の枠を覚える" "remembered as \"main-${HANE_INSTANCE}\"" ui
 
-# プロファイルは一つの窓の中で切り替える。使い捨ての実体では、一覧はこの実体の中だけにあり、何も保存しない。
+# 窓の中でプロファイルを切り替える。使い捨ての実体では、一覧はこの実体の中だけにあり、何も保存しない。
 expect "使い捨ての実体のプロファイル" '* 標準 (default)' profiles
 expect "プロファイルを作る" '  仕事' profile-new 仕事
 "$CTL" open "$FIXTURES/smoke.html" >/dev/null
@@ -245,6 +245,19 @@ expect "⌃1で1番目のプロファイルへ戻る" 'profile: default' ui
 expect "戻ると前のタブが戻る" 'Smoke' wait
 expect "戻ると前のサイトデータを使う" '"default"' eval "localStorage.getItem('verify')"
 expect "戻ると前のブックマークが戻る" 'bookmarks bar: [' ui
+
+# ⌘N の窓でプロファイルを選ぶと、別の窓に並べて開く。前の窓のタブは閉じない。
+"$CTL" key cmd+n >/dev/null
+expect "⌘Nの窓でプロファイルを選ぶ" 'button "仕事"' ui-snapshot
+expect "別の窓で開く" 'profile: 仕事' ui-click 仕事
+expect "窓の枠はプロファイルごとに覚える" "remembered as \"main-${HANE_INSTANCE}-profile-仕事\"" ui
+expect "ほかの窓に出ているプロファイル" '+ 標準 (default)' profiles
+expect "開いている窓へ移る" 'profile: default' key ctrl+1
+expect "前の窓のタブは残る" 'Smoke' tabs
+"$CTL" key ctrl+2 >/dev/null
+"$CTL" key cmd+w >/dev/null
+expect "窓を閉じるとそのプロファイルを閉じる" '  仕事' profiles
+expect "残った窓が相手になる" 'profile: default' ui
 
 echo "== 資源"
 "$CTL" stats

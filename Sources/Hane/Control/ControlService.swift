@@ -13,7 +13,7 @@ final class ControlService {
     /// 要素の控えを置く実行環境。ページ自身のスクリプトからは見えない。
     private let world = WKContentWorld.world(name: "hanectl")
     /// `ui-snapshot` で振った番号と、窓まわりの部品の対応。
-    private let windowElements = WindowElements()
+    private let windowElements: WindowElements
     /// アプリの起動とほぼ同時に作られるので、起動した時刻として使う。
     private let launchedAt = Date()
 
@@ -22,6 +22,7 @@ final class ControlService {
     init(model: BrowserModel, settings: SettingsStore = SettingsStore()) {
         self.model = model
         self.settings = settings
+        windowElements = WindowElements { [weak model] in model?.currentWindow }
     }
 
     /// テスト用。渡したタブ管理を持つ使い捨ての実体として振る舞う。
@@ -29,7 +30,7 @@ final class ControlService {
         self.init(model: BrowserModel(store: store))
     }
 
-    /// 今のプロファイルのタブ管理。プロファイルを切り替えると入れ替わるので、掴んでおかずに毎回読む。
+    /// 今のプロファイル（最後に前へ出たプロファイルの窓）のタブ管理。窓を移ったりプロファイルを切り替えたりすると入れ替わるので、掴んでおかずに毎回読む。
     private var store: TabStore { model.store }
 
     func start() {
@@ -188,7 +189,7 @@ final class ControlService {
             return await afterUIAction("chose \"\(item.title)\" from \(menu.label)")
 
         case "window-size":
-            guard let window = Self.mainWindow() else { throw ControlError("窓が出ていない。") }
+            guard let window = mainWindow() else { throw ControlError("窓が出ていない。") }
             let width = try integer(try argument(args, 0, "幅"), "幅")
             let height = try integer(try argument(args, 1, "高さ"), "高さ")
             // 左上を動かさずに大きさだけ変える（AppKit の座標は左下から測る）。
@@ -343,7 +344,7 @@ final class ControlService {
         case "activate":
             // 同じ実体を二重に起動しようとしたときに、後から起きた方が頼んでくる。最小化や隠れていれば戻す。
             NSApp.unhide(nil)
-            if let window = NSApp.windows.first(where: \.canBecomeMain) {
+            if let window = model.currentWindow ?? NSApp.windows.first(where: \.canBecomeMain) {
                 window.deminiaturize(nil)
                 window.makeKeyAndOrderFront(nil)
             }
@@ -431,7 +432,7 @@ final class ControlService {
     /// Core Animation の層をそのまま描く。窓の背景の素材は中身の外にあって写らないので、
     /// 外観に合わせた窓の背景色を下に敷く。
     private func windowScreenshot(to path: String?) throws -> String {
-        guard let window = Self.mainWindow(), let view = window.contentView, let layer = view.layer else {
+        guard let window = mainWindow(), let view = window.contentView, let layer = view.layer else {
             throw ControlError("窓が出ていない。")
         }
         view.layoutSubtreeIfNeeded()
@@ -546,11 +547,12 @@ final class ControlService {
         return lines.joined(separator: "\n")
     }
 
-    /// プロファイルの一覧。今開いているものに * を付ける。
+    /// プロファイルの一覧。今のもの（外部操作の相手）に *、ほかの窓に出ているものに + を付ける。
     private func describeProfiles() -> String {
         var lines = ["instance: \(BrowserInstance.label) (" + (model.isPersistent ? "保存する" : "使い捨て") + ")"]
         for name in model.names {
-            lines.append((name == model.current ? "* " : "  ") + BrowserModel.title(for: name)
+            let mark = name == model.current ? "* " : model.isShown(name) ? "+ " : "  "
+            lines.append(mark + BrowserModel.title(for: name)
                 + (name == BrowserProfile.defaultName ? " (default)" : ""))
         }
         if !model.isPersistent {
@@ -584,7 +586,7 @@ final class ControlService {
             }
             lines.append("folder list: \(folder.name) " + (rows.isEmpty ? "(空)" : rows.joined(separator: " ")))
         }
-        for (_, kind) in WindowElements.windows().dropFirst() {
+        for (_, kind) in WindowElements.windows(main: model.currentWindow).dropFirst() {
             lines.append("overlay: \(kind)（中身は ui-snapshot）")
         }
         lines.append("tabs (left to right):")
@@ -614,7 +616,7 @@ final class ControlService {
     /// 窓の大きさと位置、覚えている名前。窓の枠を戻す仕組みが効いているかを外から確かめるため。
     /// 位置は画面の左上からの距離で表す（AppKit の座標は左下から測るので向きを直す）。
     private func describeWindowFrame() -> String {
-        guard let window = Self.mainWindow() else { return "(なし)" }
+        guard let window = mainWindow() else { return "(なし)" }
         let frame = window.frame
         let screen = window.screen?.frame ?? .zero
         let name = window.frameAutosaveName.isEmpty ? "(覚えない)" : "\"\(window.frameAutosaveName)\""
@@ -662,7 +664,7 @@ final class ControlService {
             let named = Self.keys.keys.filter { Self.letterKeys[$0] == nil }.sorted()
             throw ControlError("知らないキー: \(name)（a〜z, \(named.joined(separator: ", "))）")
         }
-        guard let window = NSApp.keyWindow ?? Self.backgroundKeyTarget() else {
+        guard let window = NSApp.keyWindow ?? backgroundKeyTarget() else {
             throw ControlError("ウインドウがない。")
         }
         guard let event = NSEvent.keyEvent(
@@ -685,7 +687,7 @@ final class ControlService {
     /// 入力欄の編集部品（フィールドエディタ）へ文字を直接入れる。文字ごとに間を置き、
     /// 画面が1文字ずつ変化を受け取れるようにする。
     private func typeText(_ text: String, replacing: Bool) async throws {
-        let window = NSApp.keyWindow ?? Self.backgroundKeyTarget()
+        let window = NSApp.keyWindow ?? backgroundKeyTarget()
         if replacing {
             guard let editor = window?.firstResponder as? NSTextView else {
                 throw ControlError("文字を受け付ける入力欄にフォーカスがない。")
@@ -702,12 +704,12 @@ final class ControlService {
     }
 
     /// 裏にいるとき、前に出ていればキーを受けたはずのウインドウ。シートやポップオーバーが出ていればそちら。
-    private static func backgroundKeyTarget() -> NSWindow? {
-        WindowElements.windows().last?.window
+    private func backgroundKeyTarget() -> NSWindow? {
+        WindowElements.windows(main: model.currentWindow).last?.window
     }
 
-    private static func mainWindow() -> NSWindow? {
-        WindowElements.windows().first?.window
+    private func mainWindow() -> NSWindow? {
+        WindowElements.windows(main: model.currentWindow).first?.window
     }
 
     /// 窓まわりを操作したあと、画面の更新とポップオーバーの出し入れを待ってから様子を添えて返す。

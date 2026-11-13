@@ -11,6 +11,11 @@ import WebKit
     private let directory = FileManager.default.temporaryDirectory.appending(path: "profiles-\(UUID().uuidString)")
     private var file: URL { ProfileRegistry.fileURL(in: directory) }
 
+    init() {
+        // テストの実行環境ではアプリの本体（`NSApp`）が誰かが窓を作るまでできず、`ui` のような窓まわりの命令が先に走ると落ちる。
+        _ = NSApplication.shared
+    }
+
     /// 保存する置き場を試すモデル。WebKit のサイトデータの置き場は作らない。
     private func persistentModel() -> BrowserModel {
         BrowserModel(directory: directory, contentBlocker: nil, keepsSiteData: false)
@@ -282,5 +287,97 @@ import WebKit
 
         response = await run("pid")
         #expect(response.output == "pid \(getpid())")
+    }
+
+    // MARK: 窓
+
+    /// 窓一枚にプロファイルを一つずつ出す。⌘N の窓はプロファイルを選ぶまで空で、選んでもほかの窓のページは閉じない。
+    @Test func eachWindowShowsItsOwnProfile() throws {
+        let model = temporaryModel()
+        _ = try model.create("仕事")
+        let first = BrowserWindowSlot()
+        #expect(!model.attach(first))
+        #expect(first.profile == BrowserProfile.defaultName)
+        let standard = try #require(model.store(in: first))
+
+        let second = BrowserWindowSlot()
+        #expect(!model.attach(second))
+        #expect(second.profile == nil, "⌘N の窓はプロファイルを選ぶ前")
+        #expect(model.store(in: second) == nil)
+
+        #expect(try model.switchTo("仕事", in: second))
+        #expect(second.profile == "仕事")
+        #expect(model.current == "仕事")
+        #expect(model.store === model.store(in: second))
+        #expect(model.store(in: first) === standard)
+        #expect(!standard.isShutDown, "ほかの窓のページは閉じない")
+
+        model.activate(first)
+        #expect(model.current == BrowserProfile.defaultName)
+        #expect(model.store === standard)
+
+        // ほかの窓に出ているプロファイルを選ぶと、その窓が前に出るだけ。
+        #expect(try model.switchTo("仕事", in: first))
+        #expect(first.profile == BrowserProfile.defaultName)
+        #expect(model.activeWindow === second)
+        #expect(model.current == "仕事")
+        #expect(try model.switchTo("仕事") == false)
+    }
+
+    /// 窓を閉じると、そのプロファイルのページを閉じる。最後の窓のときは残し、次に開いた窓に戻す。
+    @Test func closingAWindowReleasesItsProfileUnlessItIsTheLast() throws {
+        let model = temporaryModel()
+        _ = try model.create("仕事")
+        let first = BrowserWindowSlot()
+        let second = BrowserWindowSlot()
+        _ = model.attach(first)
+        _ = model.attach(second)
+        try model.switchTo("仕事", in: second)
+        let work = model.store
+
+        model.detach(second)
+        #expect(work.isShutDown)
+        #expect(model.current == BrowserProfile.defaultName)
+        #expect(model.windows.count == 1)
+
+        let standard = model.store
+        model.detach(first)
+        #expect(!standard.isShutDown, "最後の窓のタブは残す")
+        let reopened = BrowserWindowSlot()
+        _ = model.attach(reopened)
+        #expect(reopened.profile == BrowserProfile.defaultName)
+        #expect(model.store(in: reopened) === standard)
+    }
+
+    /// 次の起動では、終えたときに窓を開いていたプロファイルをそれぞれの窓に戻す。最後に前にあったものを最初に開く。
+    @Test func windowsAreRestoredOnNextLaunch() throws {
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let model = persistentModel()
+        _ = try model.create("仕事")
+        let first = BrowserWindowSlot()
+        let second = BrowserWindowSlot()
+        _ = model.attach(first)
+        _ = model.attach(second)
+        try model.switchTo("仕事", in: second)
+        model.activate(first)
+        model.saveBeforeQuit()
+        // 終えるときに窓が閉じても、戻す一覧は変えない。
+        model.detach(second)
+        var registry = try ProfileRegistry.load(from: file)
+        #expect(registry.lastOpened == nil)
+        #expect(registry.lastWindows == [BrowserProfile.defaultName, "仕事"])
+
+        let next = persistentModel()
+        let restored = (BrowserWindowSlot(), BrowserWindowSlot())
+        #expect(next.attach(restored.0), "まだ戻す窓がある")
+        #expect(!next.attach(restored.1))
+        #expect(restored.0.profile == BrowserProfile.defaultName)
+        #expect(restored.1.profile == "仕事")
+
+        // 窓が一枚に戻れば、窓の一覧は書かない。
+        next.detach(restored.0)
+        registry = try ProfileRegistry.load(from: file)
+        #expect(registry.lastOpened == "仕事")
+        #expect(registry.lastWindows == nil)
     }
 }
