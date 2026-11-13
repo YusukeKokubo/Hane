@@ -97,8 +97,11 @@ struct BrowserWindow: View {
             }
             Divider()
             if let tab = store.selected {
-                PageArea(tab: tab)
-                    .id(tab.id)
+                ZStack(alignment: .top) {
+                    LivePages(store: store, selectedID: tab.id)
+                    PageArea(tab: tab)
+                        .id(tab.id)
+                }
             } else {
                 Color.clear
             }
@@ -248,16 +251,33 @@ private struct NavigationRow: View {
     }
 }
 
-/// 選択中のタブのページ。ページを持たないタブには Web ビューを置かない。
+/// 生きているページの Web ビューを、選んでいないものも窓に置いたまま隠しておく。
+///
+/// 窓から外すと WebKit は描いた絵を手放し、窓へ戻したとき描き直すまでの間ページがちらつくため。
+/// 隠した Web ビューは WebKit から見えていない扱いになり、裏のタブとして絞られる。
+private struct LivePages: View {
+    let store: TabStore
+    let selectedID: Tab.ID
+
+    var body: some View {
+        ZStack {
+            ForEach(store.allTabs.filter { $0.page != nil }) { tab in
+                if let page = tab.page {
+                    PageView(page: page, isHidden: tab.id != selectedID)
+                        .id(ObjectIdentifier(page))
+                }
+            }
+        }
+    }
+}
+
+/// 選択中のタブの、ページに重ねるもの。ページを持たないタブでは背景で覆う。
 private struct PageArea: View {
     let tab: Tab
 
     var body: some View {
         ZStack(alignment: .top) {
-            if let page = tab.page {
-                PageView(page: page)
-                    .id(ObjectIdentifier(page))
-            } else {
+            if tab.page == nil {
                 Color(nsColor: .windowBackgroundColor)
             }
             if let failure = tab.failure {
@@ -283,12 +303,16 @@ private struct PageArea: View {
 /// Web ビューは `Page` が持っているので、画面から外れても捨てずに、また選ばれたら同じものを置く。
 private struct PageView: NSViewRepresentable {
     let page: Page
+    let isHidden: Bool
 
     func makeNSView(context: Context) -> WKWebView {
-        page.webView
+        page.webView.isHidden = isHidden
+        return page.webView
     }
 
-    func updateNSView(_ view: WKWebView, context: Context) {}
+    func updateNSView(_ view: WKWebView, context: Context) {
+        view.isHidden = isHidden
+    }
 }
 
 /// ページ上端に出す細い進捗バー。
