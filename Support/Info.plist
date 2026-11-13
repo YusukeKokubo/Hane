@@ -5,17 +5,17 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>ja</string>
 	<key>CFBundleExecutable</key>
-	<string>Browser</string>
+	<string>Hane</string>
 	<key>CFBundleIconFile</key>
 	<string>AppIcon</string>
 	<key>CFBundleIconName</key>
 	<string>AppIcon</string>
 	<key>CFBundleIdentifier</key>
-	<string>local.personal.browser</string>
+	<string>local.personal.hane</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>Browser</string>
+	<string>Hane</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -34,9 +34,9 @@
 	<array>
 		<dict>
 			<key>UTTypeIdentifier</key>
-			<string>local.personal.browser.bar-item</string>
+			<string>local.personal.hane.bar-item</string>
 			<key>UTTypeDescription</key>
-			<string>Browser のタブまたはブックマーク</string>
+			<string>Hane のタブまたはブックマーク</string>
 			<key>UTTypeConformsTo</key>
 			<array>
 				<string>public.data</string>

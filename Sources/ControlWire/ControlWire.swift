@@ -26,7 +26,7 @@ public struct ControlSocketError: Error, CustomStringConvertible {
 
 /// Unixドメインソケットの薄い包み。1接続につき、改行で終わるJSONを1往復だけやり取りする。
 public enum ControlSocket {
-    public static let bundleIdentifier = "local.personal.browser"
+    public static let bundleIdentifier = "local.personal.hane"
 
     /// この実体の待ち受け場所。利用者のライブラリ配下なので、他のユーザーからは届かない。
     /// 実体ごとに別の場所になるので、開発用の実体と普段使いの実体は混ざらない。

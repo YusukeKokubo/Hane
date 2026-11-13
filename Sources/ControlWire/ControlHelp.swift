@@ -1,9 +1,9 @@
 /// 命令の一覧と書式。アプリとコマンドの両方がこれを仕様の正本として使う。
 public enum ControlHelp {
     public static let text = """
-    browserctl — 起動中の Browser を外から操作する。アプリが起動していなければ自動で起動する。
+    hanectl — 起動中の Hane を外から操作する。アプリが起動していなければ自動で起動する。
 
-    使い方: browserctl [--tab <番号>] <命令> [引数…]
+    使い方: hanectl [--tab <番号>] <命令> [引数…]
       --tab を省くと、選択中のタブ（一覧で * の付いたタブ）が対象になる。
 
     タブ
@@ -44,7 +44,7 @@ public enum ControlHelp {
     ページを操作する（番号は直前の snapshot のもの）
       click <番号>            クリックする
                              ページが alert / confirm / prompt を出すと窓のシートになり、答えるまでその命令は返らない。
-                             別の browserctl から ui-snapshot と ui-click で答える
+                             別の hanectl から ui-snapshot と ui-click で答える
                              （裏のタブのページが出したものは、取り消したものとして答える）
                              ファイルの選択もシートで出るが、中身は別のプロセスが描くので拾えず、答えられない。
                              ui に overlay: sheet と出たままになったら quit で閉じる
@@ -122,17 +122,17 @@ public enum ControlHelp {
       quit                   アプリを終了する
 
     環境変数
-      BROWSER_INSTANCE=<名前> 普段使いとは別の実体を相手にする。ソケットが別になり、Cookie なども保存しない使い捨てになる。
-                             開発や検証では dev を使うこと。起動していなければ、隣の build/Browser.app を裏で起こす（前には出ない）
-                             （前の BROWSER_PROFILE と BROWSER_EPHEMERAL は使えない。付いていると止まる）
-      BROWSER_LAUNCH=front   自動で起こすとき前に出す。乗せたときだけ出る表示（ui-hover）は前面でしか確かめられない
+      HANE_INSTANCE=<名前>    普段使いとは別の実体を相手にする。ソケットが別になり、Cookie なども保存しない使い捨てになる。
+                             開発や検証では dev を使うこと。起動していなければ、隣の build/Hane.app を裏で起こす（前には出ない）
+                             （前の BROWSER_INSTANCE、BROWSER_PROFILE、BROWSER_EPHEMERAL は使えない。付いていると止まる）
+      HANE_LAUNCH=front      自動で起こすとき前に出す。乗せたときだけ出る表示（ui-hover）は前面でしか確かめられない
 
     典型的な流れ
-      browserctl open example.com
-      browserctl snapshot          # → [3] textbox "検索" などが並ぶ
-      browserctl fill 3 "swift"
-      browserctl press Enter 3
-      browserctl text
+      hanectl open example.com
+      hanectl snapshot          # → [3] textbox "検索" などが並ぶ
+      hanectl fill 3 "swift"
+      hanectl press Enter 3
+      hanectl text
 
     注意
       ・ページが変わったら番号は無効になる。操作の前に snapshot を取り直すこと。

@@ -1,15 +1,16 @@
 import Foundation
 
-/// 環境変数 `BROWSER_INSTANCE` で選ぶ、アプリの実体（プロセス）の区別。
+/// 環境変数 `HANE_INSTANCE` で選ぶ、アプリの実体（プロセス）の区別。
 ///
 /// 実体を分けるのは、開発や計測で持ち主の普段使いに触れないためだけ。プロファイルは一つの実体の中で切り替える（`BrowserProfile`）。
 /// 指定がなければ普段使いの実体で、持ち物を保存する。名前を付けた実体（dev、bench など）は何も保存しない使い捨てで、
 /// 操作用ソケットも別になる。
 public enum BrowserInstance {
-    public static let environmentKey = "BROWSER_INSTANCE"
+    public static let environmentKey = "HANE_INSTANCE"
     public static let defaultName = "default"
-    /// 以前、実体とプロファイルを兼ねて使っていた変数。付いたまま呼ばれると、黙って普段使いの実体を相手にしてしまうので断る。
-    public static let retiredKeys = ["BROWSER_PROFILE", "BROWSER_EPHEMERAL"]
+    /// 以前の変数（名前を Hane にする前の実体の指定と、実体とプロファイルを兼ねていた頃のもの）。
+    /// 付いたまま呼ばれると、黙って普段使いの実体を相手にしてしまうので断る。
+    public static let retiredKeys = ["BROWSER_INSTANCE", "BROWSER_PROFILE", "BROWSER_EPHEMERAL"]
 
     /// 使い捨ての実体の名前。普段使いなら `nil`。
     public static let name: String? = {
@@ -26,7 +27,7 @@ public enum BrowserInstance {
         let environment = ProcessInfo.processInfo.environment
         if let retired = retiredKeys.first(where: { environment[$0] != nil }) {
             return "\(retired) は使えなくなった。開発用の実体は \(environmentKey)=<名前> で分ける"
-                + "（BROWSER_PROFILE=dev なら \(environmentKey)=dev）。プロファイルは実体の中で profile-open で切り替える。"
+                + "（\(retired)=dev なら \(environmentKey)=dev）。プロファイルは実体の中で profile-open で切り替える。"
         }
         if let name, let problem = problem(withName: name) { return "\(environmentKey) の名前が使えない: \(problem)" }
         return nil
@@ -38,7 +39,7 @@ public enum BrowserInstance {
     /// アプリの持ち物の根元。普段使いのプロファイル（`default`）の持ち物もここに直に置く。
     public static var baseDirectory: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appending(path: "Browser", directoryHint: .isDirectory)
+            .appending(path: "Hane", directoryHint: .isDirectory)
     }
 
     /// 操作用ソケットの置き場。普段使いは分ける前からの場所のまま。
@@ -164,7 +165,7 @@ public func spawnDetached(_ executable: String, environment: [String: String] = 
     posix_spawnattr_init(&attributes)
     defer { posix_spawnattr_destroy(&attributes) }
     // 呼んだ側の記述子は渡さない。操作用ソケットを引き継ぐと、呼んだ側が終わったあとも子がソケットを握ったままになり、
-    // そこへ繋いだ browserctl が来ない応答を待ち続けた。
+    // そこへ繋いだ hanectl が来ない応答を待ち続けた。
     posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_SETSID | POSIX_SPAWN_CLOEXEC_DEFAULT))
     // 起こしたアプリを、呼んだ側ではなく自分自身の責任にする。そうしないと端末から起こした実体どうしで
     // WebKit の補助プロセスの持ち主が同じ端末になり、stats が別の実体のプロセスまで数えてしまう。

@@ -16,23 +16,23 @@
 #   要約には真ん中の値と、括弧の中に最小〜最大が出る。
 #   URL を省くと Tests/Fixtures のページを使う（ネットワークに出ない）。URL を渡したときは、
 #   タブを足す段階で一つ目を開いてから二つ目へ移る。
-#   実体は BROWSER_INSTANCE（既定 bench）で分けるので、普段使いにも verify.sh の dev にも触れない。
+#   実体は HANE_INSTANCE（既定 bench）で分けるので、普段使いにも verify.sh の dev にも触れない。
 #   結果は build/bench/<日時>/ に段階ごとの JSON と要約を残し、前回の要約と並べて出す。
 set -eu
 
 cd "$(dirname "$0")/.."
 ROOT="$(pwd)"
-case "${BROWSER_INSTANCE:-}" in
-    ""|default) export BROWSER_INSTANCE=bench ;;
-    *) export BROWSER_INSTANCE ;;
+case "${HANE_INSTANCE:-}" in
+    ""|default) export HANE_INSTANCE=bench ;;
+    *) export HANE_INSTANCE ;;
 esac
 SECONDS_PER_PHASE="${BENCH_SECONDS:-10}"
 SETTLE="${BENCH_SETTLE:-15}"
 NAVIGATE_SECONDS="${BENCH_NAVIGATE:-6}"
 MANY_TABS="${BENCH_TABS:-10}"
-CTL="$ROOT/build/browserctl"
+CTL="$ROOT/build/hanectl"
 # 前面で測る。裏のアプリは macOS に間引かれることがあり、前の結果と比べられなくなるため。
-export BROWSER_LAUNCH=front
+export HANE_LAUNCH=front
 
 BUILD=1
 RUNS=1
@@ -79,7 +79,7 @@ measure() {
     "$CTL" stats --seconds "$SECONDS_PER_PHASE" --json > "$OUT/run$1/$2.json"
 }
 
-echo "== 計測（実体: ${BROWSER_INSTANCE}、${RUNS} 回、${SETTLE} 秒待って ${SECONDS_PER_PHASE} 秒ずつ）"
+echo "== 計測（実体: ${HANE_INSTANCE}、${RUNS} 回、${SETTLE} 秒待って ${SECONDS_PER_PHASE} 秒ずつ）"
 run=1
 while [ "$run" -le "$RUNS" ]; do
     mkdir -p "$OUT/run$run"
@@ -162,7 +162,7 @@ def cell(values, digits=1):
 print(f"{'phase':<15} {'processes':>9} {'memory MB':>20} {'app MB':>20} {'cpu %':>16} {'app cpu %':>16} {'wakeups/s':>20}")
 for phase in phases:
     reports = [json.load(open(os.path.join(run, phase + ".json")))["report"] for run in runs]
-    app = [next(p for p in r["processes"] if p["name"] == "Browser (app)") for r in reports]
+    app = [next(p for p in r["processes"] if p["name"] == "Hane (app)") for r in reports]
     print(f"{phase:<15} {cell([len(r['processes']) for r in reports], 0):>9}"
           f" {cell([r['total']['memoryBytes'] / 1048576 for r in reports]):>20}"
           f" {cell([a['memoryBytes'] / 1048576 for a in app]):>20}"

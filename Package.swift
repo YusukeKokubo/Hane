@@ -2,20 +2,20 @@
 import PackageDescription
 
 let package = Package(
-    name: "Browser",
+    name: "Hane",
     platforms: [.macOS("26.7")],
     targets: [
         // アプリ本体。
         .executableTarget(
-            name: "Browser",
+            name: "Hane",
             dependencies: ["ControlWire"],
-            path: "Sources/Browser"
+            path: "Sources/Hane"
         ),
         // 外部（LLMエージェントなど）からアプリを操作するコマンド。
         .executableTarget(
-            name: "browserctl",
+            name: "hanectl",
             dependencies: ["ControlWire"],
-            path: "Sources/browserctl"
+            path: "Sources/hanectl"
         ),
         // アプリとコマンドが共有する通信の取り決め。
         .target(
@@ -23,9 +23,9 @@ let package = Package(
             path: "Sources/ControlWire"
         ),
         .testTarget(
-            name: "BrowserTests",
-            dependencies: ["Browser"],
-            path: "Tests/BrowserTests"
+            name: "HaneTests",
+            dependencies: ["Hane"],
+            path: "Tests/HaneTests"
         ),
     ],
     swiftLanguageModes: [.v6]

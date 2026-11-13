@@ -4,10 +4,10 @@
 #
 # 使い方:
 #   scripts/profile.sh record <秒> [--tab N | --process gpu|networking]
-#       BROWSER_INSTANCE（既定 dev）の実体のアプリ本体を記録し、build/profile/<日時>.trace に置いて要約を出す。
+#       HANE_INSTANCE（既定 dev）の実体のアプリ本体を記録し、build/profile/<日時>.trace に置いて要約を出す。
 #       --tab N でそのタブを描いているページのプロセス（WebContent）を、--process で補助プロセスを記録する。
 #       ページのスクリプトや描画が重いときはアプリ本体には出ないので、--tab で見る。
-#       記録の間に browserctl で操作するなら、これを裏で走らせて、2秒ほど待ってから操作する。
+#       記録の間に hanectl で操作するなら、これを裏で走らせて、2秒ほど待ってから操作する。
 #   scripts/profile.sh summary <trace> [開始秒 終了秒] [--top N] [--step 秒]
 #       記録済みのものを要約する。秒ごとの表で山を見つけたら、その時間帯を指定して中身を見る。
 #       --step 0.1 のように刻みを細かくすると、区間の印と山の前後を突き合わせやすい。
@@ -16,9 +16,9 @@
 set -eu
 
 cd "$(dirname "$0")/.."
-case "${BROWSER_INSTANCE:-}" in
-    ""|default) export BROWSER_INSTANCE=dev ;;
-    *) export BROWSER_INSTANCE ;;
+case "${HANE_INSTANCE:-}" in
+    ""|default) export HANE_INSTANCE=dev ;;
+    *) export HANE_INSTANCE ;;
 esac
 
 usage() {
@@ -92,7 +92,7 @@ open_marks = {}
 # 同じ印が別の表にも載ることがあるので、時刻と種類で重ねて数えないようにする。
 seen = set()
 for row, _ in rows(signposts_path):
-    if row.get("subsystem") is None or row["subsystem"].text != "local.personal.browser":
+    if row.get("subsystem") is None or row["subsystem"].text != "local.personal.hane":
         continue
     identity = (row["event-time"].text, row["event-type"].text, row["signpost-name"].text)
     if identity in seen:
@@ -135,12 +135,12 @@ chosen = [s for s in samples if window is None or window[0] <= s[0] < window[1]]
 span = f"{window[0]}s〜{window[1]}s" if window else "全体"
 print(f"\n== 重い関数（{span}、{len(chosen)} サンプル）")
 threads = collections.Counter(thread for _, thread, _ in chosen)
-# 「Main Thread (0x1a1129) (Browser, pid: 123)」の後ろのプロセス名は、どれも同じなので削る。
+# 「Main Thread (0x1a1129) (Hane, pid: 123)」の後ろのプロセス名は、どれも同じなので削る。
 print("スレッド: " + ", ".join(f"{re.sub(r' [(][^()]*, pid: [0-9]+[)]$', '', name)} {count}" for name, count in threads.most_common(5)))
 
 def is_plumbing(name):
     """入口や、コンパイラが挟む仲立ちの関数。どの記録でも上に来るだけで手がかりにならない。"""
-    return (name in ("main", "static BrowserApp.$main()")
+    return (name in ("main", "static HaneApp.$main()")
             or name.startswith(("partial apply", "thunk", "specialized thunk", "reabstraction thunk", "<deduplicated")))
 
 
@@ -152,7 +152,7 @@ for _, _, frames in chosen:
         leaves[frames[0][0]] += 1
     for name, binary in set(frames):
         inclusive[name] += 1
-        if binary == "Browser" and not is_plumbing(name):
+        if binary == "Hane" and not is_plumbing(name):
             own[name] += 1
 
 
@@ -184,15 +184,15 @@ case "${1:-}" in
             "") ;;
             *) usage ;;
         esac
-        pid="$(build/browserctl stats --json | python3 -I -c '
+        pid="$(build/hanectl stats --json | python3 -I -c '
 import json, sys
 which = sys.argv[1]
 processes = json.load(sys.stdin)["report"]["processes"]
-names = {"app": "Browser (app)", "gpu": "com.apple.WebKit.GPU", "networking": "com.apple.WebKit.Networking"}
+names = {"app": "Hane (app)", "gpu": "com.apple.WebKit.GPU", "networking": "com.apple.WebKit.Networking"}
 if which.startswith("tab "):
     number = int(which[4:])
     found = [p for p in processes if number in (p.get("tabs") or [])]
-    hint = "そのタブはまだ読み込んでいないか、ない（browserctl tabs と stats で確かめる）"
+    hint = "そのタブはまだ読み込んでいないか、ない（hanectl tabs と stats で確かめる）"
 else:
     found = [p for p in processes if p["name"] == names.get(which)]
     hint = "--process は gpu か networking"
@@ -201,7 +201,7 @@ if not found:
 print(found[0]["pid"])' "$which")"
         mkdir -p build/profile
         trace="build/profile/$(date +%Y%m%d-%H%M%S).trace"
-        echo "== 記録（実体: ${BROWSER_INSTANCE}、${which}、pid ${pid}、${seconds} 秒）"
+        echo "== 記録（実体: ${HANE_INSTANCE}、${which}、pid ${pid}、${seconds} 秒）"
         xctrace record --template 'Time Profiler' --attach "$pid" --time-limit "${seconds}s" \
             --output "$trace" >/dev/null 2>&1
         echo "記録: $trace"

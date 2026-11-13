@@ -1,19 +1,19 @@
 #!/bin/sh
 # 変更を確かめる一発スクリプト。ビルド、単体テスト、実機での通し確認を順に行う。
 #
-# 通し確認は開発用の使い捨ての実体（BROWSER_INSTANCE=dev）で行うので、
+# 通し確認は開発用の使い捨ての実体（HANE_INSTANCE=dev）で行うので、
 # 普段使いのブラウザのタブやCookieには触れない。ネットワークにも出ない。
 # 使い方: scripts/verify.sh
-#   別の作業と並べて走らせるときは BROWSER_INSTANCE=<名前> で実体を分けられる（default は使えない）。
+#   別の作業と並べて走らせるときは HANE_INSTANCE=<名前> で実体を分けられる（default は使えない）。
 set -eu
 
 cd "$(dirname "$0")/.."
 ROOT="$(pwd)"
-case "${BROWSER_INSTANCE:-}" in
-    ""|default) export BROWSER_INSTANCE=dev ;;
-    *) export BROWSER_INSTANCE ;;
+case "${HANE_INSTANCE:-}" in
+    ""|default) export HANE_INSTANCE=dev ;;
+    *) export HANE_INSTANCE ;;
 esac
-CTL="$ROOT/build/browserctl"
+CTL="$ROOT/build/hanectl"
 FIXTURES="file://$ROOT/Tests/Fixtures"
 
 echo "== テスト"
@@ -29,14 +29,14 @@ rm -f "$TEST_LOG"
 echo "== ビルド"
 scripts/bundle.sh | tail -1
 
-echo "== 通し確認（実体: ${BROWSER_INSTANCE}）"
+echo "== 通し確認（実体: ${HANE_INSTANCE}）"
 # 途中で落ちたり切ったりすると実体が残り、次の回を詰まらせるので、始めにも終わりにも止める。
 stop_all() {
     "$CTL" quit >/dev/null 2>&1 || true
 }
 stop_all
 sleep 1
-# browserctl に起こさせる。自分で直に起こすと、端末から起こした別の実体と補助プロセスの持ち主が
+# hanectl に起こさせる。自分で直に起こすと、端末から起こした別の実体と補助プロセスの持ち主が
 # 同じになり、stats がそちらのプロセスまで数えてしまう。
 "$CTL" ui >/dev/null
 trap stop_all EXIT
@@ -51,7 +51,7 @@ expect() {
         echo "  ok   $label"
     else
         echo "  FAIL $label"
-        echo "       命令: browserctl $*"
+        echo "       命令: hanectl $*"
         echo "       期待: $wanted"
         printf '%s\n' "$output" | sed 's/^/       > /'
         failures=$((failures + 1))
@@ -64,7 +64,7 @@ reject() {
     output="$("$CTL" "$@" 2>&1)" || true
     if printf '%s' "$output" | grep -qF -- "$unwanted"; then
         echo "  FAIL $label"
-        echo "       命令: browserctl $*"
+        echo "       命令: hanectl $*"
         echo "       含まれてはいけない: $unwanted"
         printf '%s\n' "$output" | sed 's/^/       > /'
         failures=$((failures + 1))
@@ -193,7 +193,7 @@ frame="$("$CTL" ui | sed -n 's/^window frame: \([0-9]*\)x\([0-9]*\) .*/\1 \2/p')
 expect "窓の大きさを変える" 'window frame: 700x500' window-size 700 500
 "$CTL" window-size $frame >/dev/null
 expect "外観を固定する" 'appearance: light' appearance light
-expect "固定した外観で撮る" 'appearance: light' window-screenshot "${TMPDIR:-/tmp}/browser-verify-light.png"
+expect "固定した外観で撮る" 'appearance: light' window-screenshot "${TMPDIR:-/tmp}/hane-verify-light.png"
 "$CTL" appearance system >/dev/null
 
 # 資源の数字を前と比べられるよう、ここで開いたタブを閉じて元の並びに戻す。
@@ -214,7 +214,7 @@ expect "隠した要素は読み込み直しても隠れる" '"none"' eval 'getC
 expect "隠した要素を戻す" 'restored 1' unhide
 expect "戻した要素は見える" '"block"' eval 'getComputedStyle(document.querySelector(".promo")).display'
 # 子フレームの中の ⌥右クリックは、親へ知らせてフレームごと選ばせる。その知らせを子へ送って確かめる。
-"$CTL" eval 'document.getElementById("frame").contentWindow.postMessage({browserElementPicker: "pick"}, "*")' >/dev/null
+"$CTL" eval 'document.getElementById("frame").contentWindow.postMessage({haneElementPicker: "pick"}, "*")' >/dev/null
 sleep 0.5
 "$CTL" press Enter >/dev/null
 expect "子フレームはフレームごと隠す" '  #frame' adblock
@@ -223,11 +223,11 @@ expect "セレクタを指して隠す" 'hid 1 element' hide '#article p'
 "$CTL" unhide >/dev/null
 expect "読み込み失敗の報告" '読み込みに失敗' open "$FIXTURES/missing.html"
 expect "失敗が記録に残る" '[navigation]' logs
-expect "資源の計測" 'Browser (app)' stats
+expect "資源の計測" 'Hane (app)' stats
 expect "ページのプロセスにタブの番号が付く" '"tabs" : [' stats --json
 # 窓の枠は実体ごとの名前で覚える。普段使いの窓の位置を動かさないため。
-expect "窓の中身を撮る" 'appearance:' window-screenshot "${TMPDIR:-/tmp}/browser-verify-window.png"
-expect "窓の枠を覚える" "remembered as \"main-${BROWSER_INSTANCE}\"" ui
+expect "窓の中身を撮る" 'appearance:' window-screenshot "${TMPDIR:-/tmp}/hane-verify-window.png"
+expect "窓の枠を覚える" "remembered as \"main-${HANE_INSTANCE}\"" ui
 
 # プロファイルは一つの窓の中で切り替える。使い捨ての実体では、一覧はこの実体の中だけにあり、何も保存しない。
 expect "使い捨ての実体のプロファイル" '* 標準 (default)' profiles
