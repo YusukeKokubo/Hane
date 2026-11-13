@@ -263,7 +263,7 @@ private struct LivePages: View {
         ZStack {
             ForEach(store.allTabs.filter { $0.page != nil }) { tab in
                 if let page = tab.page {
-                    PageView(page: page, isHidden: tab.id != selectedID)
+                    PageView(page: page, isHidden: tab.id != selectedID, focusRequest: store.pageFocusRequest)
                         .id(ObjectIdentifier(page))
                 }
             }
@@ -304,6 +304,14 @@ private struct PageArea: View {
 private struct PageView: NSViewRepresentable {
     let page: Page
     let isHidden: Bool
+    /// `TabStore.pageFocusRequest`。前に受けたものから変わっていて、見えていれば、キーボードのフォーカスを受ける。
+    let focusRequest: Int
+
+    final class Coordinator {
+        var handledFocusRequest = 0
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
 
     func makeNSView(context: Context) -> WKWebView {
         page.webView.isHidden = isHidden
@@ -312,6 +320,12 @@ private struct PageView: NSViewRepresentable {
 
     func updateNSView(_ view: WKWebView, context: Context) {
         view.isHidden = isHidden
+        guard !isHidden, focusRequest != context.coordinator.handledFocusRequest else { return }
+        context.coordinator.handledFocusRequest = focusRequest
+        // 起こしたばかりのページはまだ窓に載っていないので、載ってから渡す。
+        Task { @MainActor in
+            view.window?.makeFirstResponder(view)
+        }
     }
 }
 

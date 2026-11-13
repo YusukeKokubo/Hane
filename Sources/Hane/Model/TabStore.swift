@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 import Observation
 
 /// 開いているタブの一覧と選択状態。今開いているプロファイルにつき一つで、窓は一つきり（`BrowserModel` が持つ）。
@@ -24,6 +24,8 @@ final class TabStore: TabOpening {
             if let previous = oldValue.flatMap(tab(withID:)) { previous.lastShown = Date() }
             selected?.wake()
             sleepIdleTabs()
+            // 移った先のページでそのままキーを使えるように。まっさらなタブでは、続けてアドレスバーへ移す（`newTab`）。
+            pageFocusRequest += 1
         }
     }
 
@@ -33,6 +35,9 @@ final class TabStore: TabOpening {
 
     /// アドレスバーにフォーカスを移してほしいときに増やす合図。
     private(set) var addressFocusRequest = 0
+    /// 選択中のページへキーボードのフォーカスを移してほしいときに増やす合図。
+    /// アドレスバーで開いたあとやタブを移ったあと、クリックしなくてもページでキーを使えるようにするため。
+    private(set) var pageFocusRequest = 0
     /// 選択中のページについて、ブックマークの追加・編集画面を開いてほしいときに増やす合図。
     private(set) var bookmarkEditorRequest = 0
     /// 一覧を下に出しているフォルダ。キーボードからも開け閉めするので、画面ではなくここで持つ。
@@ -143,6 +148,25 @@ final class TabStore: TabOpening {
         if !close(tab.id) { newTab() }
     }
 
+    func perform(_ command: KeyCommand, from tab: Tab) {
+        guard !isShutDown, allTabs.contains(where: { $0 === tab }) else { return }
+        switch command {
+        case .back: tab.goBack()
+        case .forward: tab.goForward()
+        case .reload: tab.reload()
+        case .nextTab: select(offset: 1)
+        case .previousTab: select(offset: -1)
+        // ⌘W と違い、最後の1枚でも窓は閉じない。ページの中の一打で窓ごと消えないように。
+        case .closeTab: closeTab(tab)
+        case .focusAddressBar: focusAddressBar()
+        case .copyURL:
+            guard let url = tab.url else { return }
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(url.absoluteString, forType: .string)
+        case .openInNewTab(let url): open(URLRequest(url: url), inBackground: true)
+        }
+    }
+
     @discardableResult
     func closeSelected() -> Bool {
         guard let selectedID else { return !allTabs.isEmpty }
@@ -181,6 +205,10 @@ final class TabStore: TabOpening {
 
     func focusAddressBar() {
         addressFocusRequest += 1
+    }
+
+    func focusPage() {
+        pageFocusRequest += 1
     }
 
     func requestBookmarkEditor() {

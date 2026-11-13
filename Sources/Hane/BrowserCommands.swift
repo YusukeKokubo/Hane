@@ -4,6 +4,7 @@ import SwiftUI
 /// メニューとキーボードショートカット。
 struct BrowserCommands: Commands {
     let model: BrowserModel
+    let settings: SettingsStore
 
     /// 最後に前へ出た窓のタブ管理。窓を移ったりプロファイルを切り替えたりすると入れ替わるので、使うたびに今のものを読む。
     private var store: TabStore { model.store }
@@ -51,6 +52,14 @@ struct BrowserCommands: Commands {
                 Button(number == 9 ? "最後のタブ" : "バーの左から \(number) 番目") { store.activateBarItem(number: number) }
                     .keyboardShortcut(KeyEquivalent(Character("\(number)")))
             }
+            Divider()
+            // ページ自身が文字のキーで操作するサイトで、その場で外せるように。一覧は設定の窓で見る。
+            let host = store.selected?.url?.host() ?? ""
+            Toggle(host.isEmpty ? "このサイトではキー操作を使わない" : "\(host) ではキー操作を使わない", isOn: Binding(
+                get: { !host.isEmpty && settings.isExcludedFromKeyNavigation(host) },
+                set: { settings.setKeyNavigation(excluded: $0, on: host) }
+            ))
+            .disabled(host.isEmpty || !settings.usesKeyNavigation)
         }
 
         // バーと同じものを、キーボードやメニューからも選べるようにする。

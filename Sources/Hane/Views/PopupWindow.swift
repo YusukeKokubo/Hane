@@ -69,7 +69,8 @@ final class PopupWindow: NSObject, NSWindowDelegate {
         case .committed, .titleChanged: updateTitle()
         // ログインが済むと小窓は自分で閉じる。
         case .closeRequested: close()
-        case .started, .finished, .failed: break
+        // タブを移る・閉じるといったキー操作は、タブのためのものなので小窓では受けない。
+        case .started, .finished, .failed, .keyCommand: break
         }
     }
 

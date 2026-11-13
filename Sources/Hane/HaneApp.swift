@@ -29,6 +29,7 @@ struct HaneApp: App {
         control = ControlService(model: model, settings: settings)
         control.start()
         LocalShortcuts.install(model: model)
+        ExternalLinks.install(model: model)
         InstanceMark.install()
         // 閲覧状態と履歴は変化から少し遅れて書き出すので、
         // 終了直前の変化を取りこぼさないよう最後にもう一度書く。
@@ -51,7 +52,7 @@ struct HaneApp: App {
         // ウインドウの状態が変わるたびに窓全体の画像を取って保存し、その写しで本体が25MBほど膨らんだまま戻らない。
         .restorationBehavior(.disabled)
         .commands {
-            BrowserCommands(model: model)
+            BrowserCommands(model: model, settings: settings)
         }
 
         WindowGroup("Hane", id: Self.moreWindowsID) {

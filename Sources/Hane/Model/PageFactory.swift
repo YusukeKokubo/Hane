@@ -29,6 +29,7 @@ final class PageFactory {
         // 受け口は全ページで一つ。ページからの知らせは、どの Web ビューから来たかで振り分ける。
         let userContent = WKUserContentController()
         PageLog.attach(to: userContent)
+        KeyNavigation.attach(to: userContent)
         contentBlocker?.attach(to: userContent)
         configuration.userContentController = userContent
         configuration.applicationNameForUserAgent = BrowserSettings.userAgentSuffix

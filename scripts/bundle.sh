@@ -8,6 +8,8 @@ set -eu
 
 cd "$(dirname "$0")/.."
 
+LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+
 INSTALL=0
 RUN=0
 for arg in "$@"; do
@@ -53,9 +55,17 @@ if [ "$INSTALL" = 1 ]; then
     rm -rf "$DEST"
     ditto "$APP" "$DEST"
     # 索引の更新を待つとしばらく検索に出ないので、Launch Services と Spotlight にすぐ登録させる。
-    /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$DEST"
+    "$LSREGISTER" -f "$DEST"
     mdimport "$DEST"
     echo "配置: $DEST"
+fi
+
+# 既定のブラウザとしてリンクを受け持つのは、置いた方だけにする。build/Hane.app も同じバンドルIDなので、
+# 受け持つと宣言したままだと候補に二つ並び、リンクでこちらが起こされうる（環境変数がないので普段使いの実体として動く）。
+/usr/libexec/PlistBuddy -c "Delete :CFBundleURLTypes" "$APP/Contents/Info.plist"
+codesign --force --sign - "$APP" 2>/dev/null
+"$LSREGISTER" -f "$APP"
+if [ "$INSTALL" = 1 ]; then
     APP="$DEST"
 fi
 

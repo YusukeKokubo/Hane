@@ -8,6 +8,8 @@ protocol TabOpening: AnyObject {
     func openTab(with request: URLRequest, inBackground: Bool)
     /// タブのページが `window.close()` で自分を閉じた。
     func closeTab(_ tab: Tab)
+    /// タブのページの中のキー操作から頼まれたこと。
+    func perform(_ command: KeyCommand, from tab: Tab)
 }
 
 /// タブや小窓が今読み込んでいるページ。`WKWebView` を一つ持ち、画面と操作に要る値を Observable にして見せる。
@@ -32,6 +34,8 @@ final class Page {
         case failed(String?)
         /// ページが `window.close()` で自分を閉じた。タブなら閉じ、小窓なら窓を閉じる。
         case closeRequested
+        /// ページの中のキー操作が、ブラウザにしかできないことを頼んできた（`KeyNavigation`）。
+        case keyCommand(KeyCommand)
     }
 
     private(set) var url: URL?
@@ -64,6 +68,7 @@ final class Page {
         webView.allowsBackForwardNavigationGestures = true
         webView.isInspectable = true
         PageLog.route(from: webView, to: log)
+        KeyNavigation.route(from: webView, to: self)
         observe()
     }
 
@@ -87,6 +92,11 @@ final class Page {
 
     func stopLoading() {
         webView.stopLoading()
+    }
+
+    /// キー操作から頼まれたことを、持ち主（タブか小窓）へ渡す。
+    func receive(_ command: KeyCommand) {
+        onEvent(.keyCommand(command))
     }
 
     /// 戻る・進むの履歴と今の位置の控え。眠らせるときと閲覧状態の保存に使う。中身は WebKit だけが読める。

@@ -380,4 +380,44 @@ import WebKit
         #expect(registry.lastOpened == "仕事")
         #expect(registry.lastWindows == nil)
     }
+
+    @Test func externalLinksOpenInTheLastProfileWindow() throws {
+        #expect(ExternalLinks.url(from: "https://example.com/a") != nil)
+        #expect(ExternalLinks.url(from: "mailto:someone@example.com") == nil)
+        #expect(ExternalLinks.url(from: "file:///etc/hosts") == nil)
+
+        let model = temporaryModel()
+        _ = try model.create("仕事")
+        let first = BrowserWindowSlot()
+        _ = model.attach(first)
+        let second = BrowserWindowSlot()
+        _ = model.attach(second)
+        #expect(try model.switchTo("仕事", in: second))
+        let work = try #require(model.store(in: second))
+        let standard = try #require(model.store(in: first))
+        let page = try writePage("<p>外から</p>")
+
+        // 開いたばかりの空のタブは使い回す。
+        let blank = try #require(work.selected)
+        ExternalLinks.place(page, in: model)
+        #expect(work.selected === blank)
+        #expect(blank.hasContent)
+
+        // 中身のあるタブが選ばれていれば、新しいタブで開く。
+        let before = work.tabs.count
+        ExternalLinks.place(page, in: model)
+        #expect(work.tabs.count == before + 1)
+        #expect(standard.tabs.allSatisfy { !$0.hasContent }, "前に出ていない窓のプロファイルには開かない")
+
+        // 今のプロファイルの窓を閉じ、プロファイルを選ぶ前の窓だけが残ったときは、そこへ出して開く。
+        model.activate(first)
+        let picker = BrowserWindowSlot()
+        _ = model.attach(picker)
+        model.detach(second)
+        model.detach(first)
+        #expect(picker.profile == nil)
+        ExternalLinks.place(page, in: model)
+        #expect(picker.profile == model.current)
+        #expect(model.store(in: picker)?.selected?.hasContent == true)
+    }
 }

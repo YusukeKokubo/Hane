@@ -272,6 +272,8 @@ final class Tab: Identifiable {
             }
         case .closeRequested:
             opener?.closeTab(self)
+        case .keyCommand(let command):
+            opener?.perform(command, from: self)
         }
     }
 

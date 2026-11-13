@@ -30,6 +30,7 @@ struct AddressBar: View {
                     show(url)
                 }
                 isFocused = false
+                store.focusPage()
             }
             .onExitCommand {
                 // 補った続きが出ていれば、まずそれだけを取り消す。
@@ -39,6 +40,7 @@ struct AddressBar: View {
                 }
                 showCurrentURL()
                 isFocused = false
+                store.focusPage()
             }
             // タブを切り替えたら、入力途中の文字は捨ててそのタブのURLを出す。
             .onChange(of: tab.id, initial: true) { showCurrentURL() }
