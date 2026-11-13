@@ -57,6 +57,10 @@
 			</array>
 		</dict>
 	</array>
+	<key>NSCameraUsageDescription</key>
+	<string>Web サイトのビデオ通話などでカメラを使うため。</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Web サイトのビデオ通話などでマイクを使うため。</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoadsInWebContent</key>
