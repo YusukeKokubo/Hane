@@ -73,11 +73,11 @@ build/hanectl quit               # 終わったら止める（pkill は普段使
 - `Sources/Hane/Views` — 画面。`BrowserWindow`（上からタブバー、ナビゲーションの段、ページ。ページの Web ビューは中の `PageView` が置く。⌘N で開いてプロファイルを選ぶ前の窓では、選ぶ画面を出す。ほかのプロファイルを新しい窓で開く頼みもここで受けて窓を開く）、`AddressBar`、`TabBar`（左にブックマーク、右に普通のタブを一列に並べる）、`BookmarkBar`（ブックマークとフォルダの項目、追加・編集のポップオーバー）、`SettingsView`（設定の窓。⌘,）、`PopupWindow`（大きさを指定して開かれた小窓。中身はタブと同じ `Page` で、AppKit の窓に置く）、`PageDialogs`（ページの `alert` などとファイルの選択を窓のシートで出す）、`DownloadsButton`（ダウンロードの一覧）、`PasswordFillButton`（1Password で入れるボタンと、候補を選ぶ一覧）。
 - `Sources/Hane/Model` の広告ブロック — `ContentBlocker`（ルールリストのコンパイルと全ページへの配布）、`FilterList`（Adblock Plus 形式をWebKitのルールに訳す）、`ContentRule`（WebKitのルールのJSON）、`HiddenElementStore`（⌥右クリックで隠した要素の保存）、`ElementPicker`（⌥右クリックで要素を選ぶページ内スクリプト）。フィルタリストの本体は `Support/Filters`。
 - `Sources/Hane/Model/KeyNavigation` — 文字のキーでの操作（Vimium と同じ考え方）。ページ内スクリプトがスクロールとリンクの印を受け持ち、タブの移動などは `KeyCommand` としてタブ管理へ頼む。使わないサイトの一覧は `SettingsStore` が持つ。
-- `Sources/Hane/Control` — 外部操作。`ControlServer`（ソケット）、`ControlService`（命令の解釈）、`PageScripts`（ページ内で走らせるJavaScript）、`WindowElements`（窓まわりの部品の一覧とマウス操作）、`ProcessStats`、`PageProcess`（タブとページのプロセスの対応）。
+- `Sources/Hane/Control` — 外部操作。`ControlServer`（ソケット）、`ControlService`（命令の名前と引数を読んで受け持ちへ振り分ける）、`PageScripting`（ページの中を読む・操作する。iframe の辿り方、snapshot、wait もここ）、`PageRequests`（通信の記録）、`PageInput`（ページへの本物の入力と撮影）、`WindowInput`（窓まわりへのキーと文字、新しい窓の重ね方、窓の撮影）、`StateText`（状態を答えの文字に整える）、`KeySpec`（キーの名前）、`MenuCatcher`（出たメニューをすぐ閉じる）、`PageScripts`（ページ内で走らせるJavaScript）、`WindowElements`（窓まわりの部品の一覧とマウス操作）、`ProcessStats`、`PageProcess`（タブとページのプロセスの対応）。依り方は `ControlService` から各層への一方向で、層どうしでは `PageScripting` がいちばん下。
 - `Sources/ControlWire` — アプリと `hanectl` が共有する通信の取り決めと、命令の説明文（`ControlHelp`。これが仕様の正本）、実体とプロファイルの決まり（`Profile`。`HANE_INSTANCE` の実体、プロファイルの名前と置き場、登録した一覧）。
 - `Sources/hanectl` — コマンド本体。引数をそのまま送るだけで、命令の意味は知らない。
 
-新しい操作命令を足すときは `ControlService` に `case` を足し、`ControlHelp` の文面と `ControlServiceTests`、必要なら `scripts/verify.sh` を一緒に直す。`hanectl` 側の変更は要らない。
+新しい操作命令を足すときは `ControlService` の命令の群れ（タブ、ページ、窓まわりなど）に `case` を足して受け持ちの層へ渡し、`ControlHelp` の文面と `ControlServiceTests`、必要なら `scripts/verify.sh` を一緒に直す。`hanectl` 側の変更は要らない。
 
 ## いつも気をつけること
 
