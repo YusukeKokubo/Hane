@@ -122,7 +122,7 @@ expect "⌘Wで手前の小窓を閉じる" '* tab 1: Popup' key cmd+w
 expect "小窓を閉じたことが開いた側に伝わる" '"true"' eval 'String(window.login.closed)'
 expect "⌘,で設定の窓を開く" 'overlay: window' key cmd+,
 expect "設定の窓の中身も一覧に出る" 'checkbox' ui-snapshot
-# ⌘W はタブを閉じる項目が先に受ける。設定の窓が手前なら、タブではなくその窓を閉じる。
+# ⌘W は手前の窓を見て相手を決める。設定の窓が手前なら、タブではなくその窓を閉じる。
 expect "⌘Wで手前の設定の窓だけ閉じる" '* tab 1: Popup' key cmd+w
 expect "設定の窓が閉じている" 'tabs (left to right):' ui
 "$CTL" open "$FIXTURES/smoke.html" >/dev/null
