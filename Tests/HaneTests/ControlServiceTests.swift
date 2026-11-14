@@ -259,7 +259,12 @@ import WebKit
     }
 
     /// アプリ自身の記録（AppLog）を、このプロセスの分だけ読める。ページの console 出力は混ざらない。
-    @Test func readsAppLogs() async throws {
+    ///
+    /// 統一ログを読むのに 3 秒ほどかかり、記録の出し方か読み方を変えたときにしか結果が変わらないので、普段は飛ばす。
+    @Test(.enabled(
+        if: HeavyTests.enabled,
+        "重いので飛ばした。AppLog か、StateText の app-logs の読み方を変えたら HANE_HEAVY_TESTS=1 swift test --filter readsAppLogs で回す"))
+    func readsAppLogs() async throws {
         let marker = "app-log-test-\(UUID().uuidString.prefix(8))"
         AppLog.logger.error("保存できませんでした: \(marker, privacy: .public)")
         try await open(html: "<title>Console</title><script>console.log('page-only-message')</script>")
