@@ -113,8 +113,13 @@ import WebKit
     }
 
     /// 同梱しているリストを全部訳して、WebKit がコンパイルできるか。ルール数の上限（15万件）も見張る。
+    ///
+    /// 6 秒ほどかかり、リストか訳し方を変えたときにしか結果が変わらないので、普段は飛ばす。
     @MainActor
-    @Test func bundledListsCompile() async throws {
+    @Test(.enabled(
+        if: HeavyTests.enabled,
+        "重いので飛ばした。Support/Filters、FilterList、ContentRule を変えたら HANE_HEAVY_TESTS=1 swift test --filter FilterListTests で回す"))
+    func bundledListsCompile() async throws {
         let directory = URL(filePath: #filePath).deletingLastPathComponent().appending(path: "../../Support/Filters")
         let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
             .filter { $0.pathExtension == "txt" }

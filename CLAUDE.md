@@ -14,12 +14,13 @@
 
 ```sh
 swift build                 # デバッグビルド
-swift test                  # 単体テスト
+swift test                  # 単体テスト（重いテストは飛ばし、飛ばした行に回す条件が出る）
+HANE_HEAVY_TESTS=1 swift test --filter <名前>  # 飛ばしている重いテストも回す。飛ばした行の条件に当たる所を変えたときだけ
 scripts/bundle.sh [--install] [--run]  # リリースビルド → build/Hane.app と build/hanectl（Ad-hoc署名）。--install で ~/Applications に置く（Raycast から起動できる）
 scripts/verify.sh           # テスト → ビルド → 開発用の別実体で通し確認（1分ほど）。決まりで回すものではない（進め方を参照）
 scripts/bench.sh [--no-build] [--runs N] [URL…]  # 決まった手順で負荷をかけてメモリ・CPU・起床回数を測り、前回と並べる
 scripts/profile.sh record <秒>  # 動いている実体に Time Profiler を付けて記録し、文字で要約する
-scripts/update-filters.sh   # 広告ブロックのフィルタリストを取ってきて Support/Filters を置き換える
+scripts/update-filters.sh   # 広告ブロックのフィルタリストを取ってきて Support/Filters を置き換え、コンパイルできるか確かめる
 ```
 
 ## 進め方

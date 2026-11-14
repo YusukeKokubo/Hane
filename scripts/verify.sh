@@ -18,7 +18,8 @@ FIXTURES="file://$ROOT/Tests/Fixtures"
 
 echo "== テスト"
 TEST_LOG="$(mktemp)"
-if ! swift test >"$TEST_LOG" 2>&1; then
+# 普段は飛ばしている重いテストも、ここでは回す。
+if ! HANE_HEAVY_TESTS=1 swift test >"$TEST_LOG" 2>&1; then
     grep -E '✘|error:|Test run with' "$TEST_LOG" || tail -20 "$TEST_LOG"
     echo "単体テストが失敗"
     exit 1
