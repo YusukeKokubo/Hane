@@ -791,6 +791,17 @@ final class ControlService {
         ) else { throw ControlError("キーの事象を作れない: \(spec)") }
 
         if LocalShortcuts.handle(event, model: model) { return }
+        // 離す事象がないと、ページの文字のキーでの操作（KeyNavigation）が押しっぱなしとみなしてスクロールを流し続ける。
+        // 修飾なしの文字は Web ビューが performKeyEquivalent で拾ってページへ渡すので、どの道でも最後に離す。
+        // 押す事象と同じく待ち行列に積まず直に渡す。
+        defer {
+            if let release = NSEvent.keyEvent(
+                with: .keyUp, location: .zero, modifierFlags: flags,
+                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                context: nil, characters: characters, charactersIgnoringModifiers: characters,
+                isARepeat: false, keyCode: keyCode
+            ) { window.sendEvent(release) }
+        }
         // メニューより先に窓の部品へ渡す。アラートや編集欄の既定のボタン（Return）とキャンセル（Esc）はここで拾われる。
         if window.performKeyEquivalent(with: event) { return }
         if NSApp.mainMenu?.performKeyEquivalent(with: event) == true { return }
