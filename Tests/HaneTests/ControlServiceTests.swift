@@ -13,6 +13,8 @@ import WebKit
     init() {
         // テストの実行環境ではアプリの本体（`NSApp`）が誰かが窓を作るまでできず、窓まわりの命令が先に走ると落ちる。
         _ = NSApplication.shared
+        // 本物のメニューを出すテストがあり、閉じたあとに届く起こしの合図でプロセスが黙って終わらないようにする。
+        MainRunLoop.keepRunning()
         store = TabStore(factory: PageFactory(dataStore: .nonPersistent()))
         service = ControlService(store: store)
     }

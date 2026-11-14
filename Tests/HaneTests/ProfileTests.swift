@@ -14,6 +14,7 @@ import WebKit
     init() {
         // テストの実行環境ではアプリの本体（`NSApp`）が誰かが窓を作るまでできず、`ui` のような窓まわりの命令が先に走ると落ちる。
         _ = NSApplication.shared
+        MainRunLoop.keepRunning()
     }
 
     /// 保存する置き場を試すモデル。WebKit のサイトデータの置き場は作らない。

@@ -12,6 +12,7 @@ import WebKit
 
     init() {
         _ = NSApplication.shared
+        MainRunLoop.keepRunning()
     }
 
     @Test func excludedSitesIncludeSubdomains() {
