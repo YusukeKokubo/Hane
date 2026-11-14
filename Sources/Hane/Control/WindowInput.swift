@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import WebKit
 
 /// 窓まわり（メニュー、バー、シート、ポップオーバー）へのキーと文字の入力と、窓そのものの扱い（大きさ、外観、
 /// 前に出す、撮る）。
@@ -37,7 +38,7 @@ final class WindowInput {
 
     /// ページの外（メニューやバー）へ、利用者が打ったのと同じ道筋でキーを送る。
     ///
-    /// 本物のキーが通る順（局所モニタ、窓の部品のキー、メニュー、ウインドウ）をここで辿って手渡しする。
+    /// 本物のキーが通る順（窓の部品のキー、メニュー、ウインドウ）をここで辿って手渡しする。
     /// 裏にいるとキーを受けるウインドウがなく、自分から前に出ることもシステムに断られるため。
     /// 前面にいるときも同じ道を通す。待ち行列に積むと、アラートの Return と Esc が効かなかった。
     private func sendKey(_ spec: String) throws {
@@ -52,7 +53,6 @@ final class WindowInput {
             isARepeat: false, keyCode: keyCode
         ) else { throw ControlError("キーの事象を作れない: \(spec)") }
 
-        if LocalShortcuts.handle(event, model: model) { return }
         // 離す事象がないと、ページの文字のキーでの操作（KeyNavigation）が押しっぱなしとみなしてスクロールを流し続ける。
         // 修飾なしの文字は Web ビューが performKeyEquivalent で拾ってページへ渡すので、どの道でも最後に離す。
         // 押す事象と同じく待ち行列に積まず直に渡す。
@@ -65,6 +65,14 @@ final class WindowInput {
             ) { window.sendEvent(release) }
         }
         // メニューより先に窓の部品へ渡す。アラートや編集欄の既定のボタン（Return）とキャンセル（Esc）はここで拾われる。
+        // ページにフォーカスがあるときの ⌘ や ⌃ のキーは、アプリの事象の道（NSApp.sendEvent）に載せる。窓の
+        // performKeyEquivalent に直に渡すと Web ビューが受けて「済んだ」と返し、ページが使わなかったキーを AppKit へ
+        // 送り返す道も裏では通らず、⌃Tab がメニューへ届かなかった。本物のキーが通る sendEvent に載せると、
+        // ⌃Tab はページに見えないままメニューが受け、裏にいても届いた。
+        if window.firstResponder is WKWebView, !flags.isDisjoint(with: [.command, .control]) {
+            NSApp.sendEvent(event)
+            return
+        }
         if window.performKeyEquivalent(with: event) { return }
         // 既定のボタン（アラートの OK など）の Return は、窓がキーを受ける窓のときしか効かない。裏にいるアプリの窓は
         // キーを受ける窓になれないので、裏ではシートが Return で閉じなかった（Esc のような、ボタン自身に割り当てたキーは効く）。

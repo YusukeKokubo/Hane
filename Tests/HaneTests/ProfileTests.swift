@@ -286,11 +286,15 @@ import WebKit
         #expect(!PopupWindows.windows.contains { $0 === popup })
     }
 
-    /// ⌃N と ⌃Tab だけを拾い、並んでいない番号やほかの修飾キーはページなど本来の受け手へ流す。
-    @Test func localShortcuts() throws {
+    /// メニューのキーで、⌃N は N 番目のプロファイル、⌃Tab / ⌃⇧Tab は前後のタブ。並んでいない番号やほかの修飾キーは
+    /// ページなど本来の受け手へ流す。メニューを組んだあとに足したプロファイルにも、メニューを開かずに効く。
+    @Test func menuKeys() async throws {
         let model = temporaryModel()
-        _ = try model.create("仕事")
         launch(model)
+        let menu = MainMenu(model: model, settings: SettingsStore())
+        _ = try model.create("仕事")
+        // 一覧の変化を受けて作り直すのは、次の一巡り。
+        await Task.yield()
         let store = try #require(model.store)
         let first = store.tabs[0]
         let second = store.newTab()
@@ -299,21 +303,23 @@ import WebKit
                              context: nil, characters: characters, charactersIgnoringModifiers: characters,
                              isARepeat: false, keyCode: keyCode)!
         }
-        func handle(_ event: NSEvent) -> Bool { LocalShortcuts.handle(event, model: model) }
+        func handle(_ event: NSEvent) -> Bool { menu.menu.performKeyEquivalent(with: event) }
 
         #expect(!handle(key("3", .control)))
-        #expect(!handle(key("2", .command)), "⌘2 はメニューのバーの項目")
         #expect(!handle(key("2", [.command, .option])), "⌥⌘数字はページの見出しなどに残す")
 
         #expect(handle(key("\t", .control, keyCode: 48)))
         #expect(store.selectedID == first.id, "最後のタブの次は最初へ巡る")
         #expect(handle(key("\t", [.control, .shift], keyCode: 48)))
         #expect(store.selectedID == second.id)
+        // 本物の ⌃⇧Tab は文字が backtab で届く。
+        #expect(handle(key("\u{19}", [.control, .shift], keyCode: 48)))
+        #expect(store.selectedID == first.id)
         #expect(!handle(key("\t", [], keyCode: 48)), "Tab だけはページの入力欄へ")
 
         #expect(handle(key("1", .control)), "1 番目は今のプロファイル（何も開かない）")
         #expect(model.windows.count == 1)
-        #expect(handle(key("2", .control)))
+        #expect(handle(key("2", .control)), "メニューを組んだあとに足したプロファイル")
         #expect(model.windows.count == 2, "2 番目は新しい窓で開く")
         #expect(model.current == "仕事")
         #expect(!store.isShutDown)

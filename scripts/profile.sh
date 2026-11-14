@@ -140,7 +140,7 @@ print("スレッド: " + ", ".join(f"{re.sub(r' [(][^()]*, pid: [0-9]+[)]$', '',
 
 def is_plumbing(name):
     """入口や、コンパイラが挟む仲立ちの関数。どの記録でも上に来るだけで手がかりにならない。"""
-    return (name in ("main", "static HaneApp.$main()")
+    return (name == "main"
             or name.startswith(("partial apply", "thunk", "specialized thunk", "reabstraction thunk", "<deduplicated")))
 
 

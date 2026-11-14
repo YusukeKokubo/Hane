@@ -101,7 +101,7 @@ final class WindowElements {
         let visible = NSApp.windows.filter(\.isVisible)
         // 設定の窓も本体の窓になれるので、本体の窓は識別子で選ぶ。本体の窓は MainWindow が識別子を付ける。
         guard let main = preferred.flatMap({ visible.contains($0) ? $0 : nil })
-            ?? visible.first(where: { $0.identifier?.rawValue.hasPrefix(HaneApp.windowID) == true })
+            ?? visible.first(where: { $0.identifier?.rawValue.hasPrefix(MainWindow.windowID) == true })
             ?? visible.first(where: \.canBecomeMain)
         else { return [] }
         var result: [(NSWindow, String)] = [(main, "window")]

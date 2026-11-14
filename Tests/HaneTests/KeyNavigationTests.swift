@@ -118,6 +118,29 @@ import WebKit
         <input id="field"><div id="space"></div>
         """
 
+    /// ページにフォーカスがあっても、⌃Tab はメニューの「次のタブ」へ届く。本物のキーと同じくアプリの事象の道
+    /// （`NSApp.sendEvent`）に載せる。テストの窓はキーを受ける窓になれないが、それでも届く。
+    @Test func controlTabReachesTheMenuFromThePage() async throws {
+        let (tab, window) = try await open(Self.tallPage)
+        defer { window.close() }
+        let other = store.newTab()
+        store.selectedID = tab.id
+        #expect(store.selectedID == tab.id)
+        let menu = MainMenu(model: BrowserModel(store: store), settings: SettingsStore())
+        let before = NSApp.mainMenu
+        NSApp.mainMenu = menu.menu
+        defer { NSApp.mainMenu = before }
+        let event = try #require(NSEvent.keyEvent(
+            with: .keyDown, location: .zero, modifierFlags: .control,
+            timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
+            characters: "\t", charactersIgnoringModifiers: "\t", isARepeat: false, keyCode: 48))
+        NSApp.sendEvent(event)
+        for _ in 0..<50 where store.selectedID != other.id {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(store.selectedID == other.id)
+    }
+
     /// 合成したキーには応じない。ページが勝手にタブを閉じたりできないように。
     @Test func syntheticKeysAreIgnored() async throws {
         let (tab, window) = try await open(Self.tallPage)
