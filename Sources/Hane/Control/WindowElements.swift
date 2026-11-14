@@ -99,7 +99,7 @@ final class WindowElements {
     /// キーを受けるのは後ろにあるものほど手前。本体の窓は `main`（今のプロファイルの窓）で、なければ識別子で探す。
     static func windows(main preferred: NSWindow?) -> [(window: NSWindow, kind: String)] {
         let visible = NSApp.windows.filter(\.isVisible)
-        // 設定の窓も本体の窓になれるので、本体の窓は識別子で選ぶ。WindowGroup の窓は識別子の後ろに番号が付く。
+        // 設定の窓も本体の窓になれるので、本体の窓は識別子で選ぶ。本体の窓は MainWindow が識別子を付ける。
         guard let main = preferred.flatMap({ visible.contains($0) ? $0 : nil })
             ?? visible.first(where: { $0.identifier?.rawValue.hasPrefix(HaneApp.windowID) == true })
             ?? visible.first(where: \.canBecomeMain)

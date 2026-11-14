@@ -4,10 +4,10 @@ import SwiftUI
 
 @main
 struct HaneApp: App {
+    /// 本体の窓の識別子。窓まわりの部品を拾うときに、設定の窓と見分ける。
     static let windowID = "main"
-    /// ⌘N や、起動したときに戻す二枚目からの窓。
-    static let moreWindowsID = "more"
 
+    @NSApplicationDelegateAdaptor private var delegate: AppDelegate
     @State private var model: BrowserModel
     @State private var settings: SettingsStore
     private let control: ControlService
@@ -24,7 +24,11 @@ struct HaneApp: App {
         let blocker = ContentBlocker.forInstance()
         Task { await blocker.prepare() }
         let model = BrowserModel.forInstance(contentBlocker: blocker)
-        model.reopenApp = ExternalLinks.reopen
+        model.makeWindow = { [weak model] slot in
+            guard let model else { return }
+            MainWindow.open(slot, model: model)
+        }
+        AppDelegate.model = model
         _model = State(initialValue: model)
         _settings = State(initialValue: settings)
         control = ControlService(model: model, settings: settings)
@@ -42,30 +46,30 @@ struct HaneApp: App {
     }
 
     var body: some Scene {
-        // 窓一枚にプロファイルを一つずつ出す。どの窓にどれを出すかは BrowserModel が決め、窓を閉じるまで変えない。
-        // 最初の窓は Window にする。WindowGroup は、hanectl のように裏で直に起こすと起動したときの窓を作らないため。
-        Window("Hane", id: Self.windowID) {
-            BrowserWindow(model: model)
-        }
-        .windowStyle(.hiddenTitleBar)
-        .defaultSize(width: 1200, height: 800)
-        // タブは閲覧状態（SessionStore）で戻すので、macOS の再開には任せない。任せると
-        // ウインドウの状態が変わるたびに窓全体の画像を取って保存し、その写しで本体が25MBほど膨らんだまま戻らない。
-        .restorationBehavior(.disabled)
-        .commands {
-            BrowserCommands(model: model, settings: settings)
-        }
-
-        WindowGroup("Hane", id: Self.moreWindowsID) {
-            BrowserWindow(model: model)
-        }
-        .windowStyle(.hiddenTitleBar)
-        .defaultSize(width: 1200, height: 800)
-        .restorationBehavior(.disabled)
-
+        // 本体の窓は AppKit で作る（MainWindow）。モデルの側からその場で開けるようにするため。
+        // シーンは設定の窓だけで、メニューはここに付ける。
         Settings {
             SettingsView(settings: settings)
         }
+        .commands {
+            BrowserCommands(model: model, settings: settings)
+        }
+    }
+}
+
+/// 起動したときに覚えていた窓を開き、Dock からの開き直しで窓を出す。
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    static var model: BrowserModel?
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        Self.model?.restoreWindows()
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        guard let model = Self.model, model.windows.isEmpty else { return true }
+        model.reopen()
+        return false
     }
 }
 

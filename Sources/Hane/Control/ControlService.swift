@@ -103,10 +103,11 @@ final class ControlService {
         guard let command = args.first else { return ControlHelp.text }
         args.removeFirst()
 
-        // 起動した直後は、最初の窓が出るまでタブ管理がない。hanectl は起こしてすぐ命令を送るので、窓が出るのを待つ。
+        // 操作用ソケットはアプリの init で開くが、起動したときの窓は起動を終えたとき（applicationDidFinishLaunching）に開く。
+        // その間に hanectl が起こしてすぐ送った命令が届くことがあるので、窓を開き終えるまで待つ。
         let clock = ContinuousClock()
         let deadline = clock.now + .seconds(10)
-        while model.store == nil, model.isOpeningWindow, clock.now < deadline {
+        while model.isLaunching, clock.now < deadline {
             try await Task.sleep(for: .milliseconds(20))
         }
 
@@ -475,9 +476,7 @@ final class ControlService {
                 result = "brought to front: \(name)"
             case .shownInEmptyWindow:
                 result = "opened in this window: \(name)"
-            case .requestedWindow:
-                // 窓は SwiftUI が少し後に開く。出て、AppKit の窓に置かれるまで待つ。
-                try await windows.waitForWindow(showing: name)
+            case .openedInNewWindow:
                 windows.orderNewWindowsFront(since: before)
                 result = "opened in new window: \(name)"
             }

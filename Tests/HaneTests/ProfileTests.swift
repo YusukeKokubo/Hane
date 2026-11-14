@@ -26,32 +26,25 @@ import WebKit
         BrowserModel(directory: nil, contentBlocker: nil)
     }
 
-    /// 窓が出たことにする。AppKit の窓は持たない。
+    /// 起動したときの窓を開く。AppKit の窓は作らない。最初に開いた窓を返す。
     @discardableResult
-    private func attachWindow(to model: BrowserModel) -> BrowserWindowSlot {
-        let window = BrowserWindowSlot()
-        _ = model.attach(window)
-        return window
+    private func launch(_ model: BrowserModel) -> BrowserWindowSlot {
+        model.restoreWindows()
+        return model.windows[0]
     }
 
-    /// 新しい窓で開くよう頼み、その窓が出たことにする。
+    /// 窓をすべて閉じたあとに、Dock などで開き直す。
+    private func reopen(_ model: BrowserModel) -> BrowserWindowSlot {
+        model.reopen()
+        return model.windows[model.windows.count - 1]
+    }
+
+    /// 新しい窓で開く。
     private func openInNewWindow(_ name: String, in model: BrowserModel) throws -> BrowserWindowSlot {
-        #expect(try model.openProfile(name) == .requestedWindow)
-        #expect(model.awaitsWindow)
-        let window = attachWindow(to: model)
-        #expect(window.profile == name)
-        #expect(!model.awaitsWindow)
+        #expect(try model.openProfile(name) == .openedInNewWindow)
+        let window = try #require(model.window(showing: name))
+        #expect(model.activeWindow === window)
         return window
-    }
-
-    /// 外部操作が新しい窓を頼んだら、窓が出たことにする（アプリでは窓の画面が SwiftUI に開かせる）。
-    private func serveWindows(for model: BrowserModel) -> Task<Void, Never> {
-        Task { @MainActor in
-            while !Task.isCancelled {
-                if model.awaitsWindow { attachWindow(to: model) }
-                try? await Task.sleep(for: .milliseconds(10))
-            }
-        }
     }
 
     /// HTMLを一時ファイルに書く。ネットワークには出ない。
@@ -134,7 +127,7 @@ import WebKit
 
     @Test func openingTheShownProfileStays() throws {
         let model = temporaryModel()
-        let window = attachWindow(to: model)
+        let window = launch(model)
         let store = try #require(model.store)
         #expect(try model.openProfile(BrowserProfile.defaultName) == .alreadyHere)
         #expect(model.store === store)
@@ -147,7 +140,7 @@ import WebKit
     @Test func closingAWindowReleasesItsPages() async throws {
         let model = temporaryModel()
         _ = try model.create("仕事")
-        let first = attachWindow(to: model)
+        let first = launch(model)
         let standard = try #require(first.store)
         weak var page: Page?
         weak var tab: Tab?
@@ -182,7 +175,7 @@ import WebKit
     @Test func closedProfileOpensNothingAndWritesNothing() throws {
         defer { try? FileManager.default.removeItem(at: directory) }
         let model = persistentModel()
-        let window = attachWindow(to: model)
+        let window = launch(model)
         let old = try #require(model.store)
         old.open(URLRequest(url: try writePage("<title>Kept</title>")))
         model.detach(window)
@@ -204,7 +197,7 @@ import WebKit
         let kept = try writePage("<title>Kept</title>")
         let model = persistentModel()
         _ = try model.create("仕事")
-        let first = attachWindow(to: model)
+        let first = launch(model)
         let standard = try #require(first.store)
         standard.open(URLRequest(url: kept))
 
@@ -220,7 +213,7 @@ import WebKit
 
         // 最後の窓を閉じてから、Dock などで開き直す。
         model.detach(first)
-        let reopened = attachWindow(to: model)
+        let reopened = reopen(model)
         #expect(reopened.profile == BrowserProfile.defaultName)
         #expect(reopened.store !== standard)
         #expect(try #require(reopened.store).allTabs.contains { $0.url == kept })
@@ -228,19 +221,19 @@ import WebKit
         _ = try openInNewWindow("仕事", in: model)
         model.saveBeforeQuit()
         let next = persistentModel()
-        let restored = BrowserWindowSlot()
-        #expect(next.attach(restored), "まだ戻す窓がある")
+        let restored = launch(next)
         #expect(restored.profile == "仕事")
+        #expect(next.windows.count == 2)
     }
 
     /// 使い捨ての実体でも、窓を閉じてから開き直すと閲覧状態が戻る（ファイルには書かない）。
     @Test func temporaryProfilesKeepTheirTabsInMemory() throws {
         let kept = try writePage("<title>Kept</title>")
         let model = temporaryModel()
-        let window = attachWindow(to: model)
+        let window = launch(model)
         try #require(model.store).open(URLRequest(url: kept))
         model.detach(window)
-        attachWindow(to: model)
+        _ = reopen(model)
         #expect(try #require(model.store).allTabs.contains { $0.url == kept })
     }
 
@@ -249,9 +242,7 @@ import WebKit
     @Test func siteDataIsSeparatedPerProfile() async throws {
         let model = temporaryModel()
         _ = try model.create("仕事")
-        let standard = attachWindow(to: model)
-        let server = serveWindows(for: model)
-        defer { server.cancel() }
+        let standard = launch(model)
         let service = ControlService(model: model)
         let url = try writePage("<title>Storage</title>").absoluteString
         func run(_ args: String...) async throws -> String {
@@ -280,7 +271,7 @@ import WebKit
     /// 窓を閉じたプロファイルが開いた小窓（ログインの小窓など）は閉じる。そのプロファイルのサイトデータを使っているため。
     @Test func closingAWindowClosesPopupsOfItsProfile() async throws {
         let model = temporaryModel()
-        let window = attachWindow(to: model)
+        let window = launch(model)
         let service = ControlService(model: model)
         let login = try writePage("<title>Login</title>").absoluteString
         _ = await service.respond(to: ControlRequest(args: ["open", try writePage("<title>Opener</title>").absoluteString]))
@@ -299,7 +290,7 @@ import WebKit
     @Test func localShortcuts() throws {
         let model = temporaryModel()
         _ = try model.create("仕事")
-        attachWindow(to: model)
+        launch(model)
         let store = try #require(model.store)
         let first = store.tabs[0]
         let second = store.newTab()
@@ -321,10 +312,9 @@ import WebKit
         #expect(!handle(key("\t", [], keyCode: 48)), "Tab だけはページの入力欄へ")
 
         #expect(handle(key("1", .control)), "1 番目は今のプロファイル（何も開かない）")
-        #expect(!model.awaitsWindow)
+        #expect(model.windows.count == 1)
         #expect(handle(key("2", .control)))
-        #expect(model.awaitsWindow, "2 番目は新しい窓で開く")
-        attachWindow(to: model)
+        #expect(model.windows.count == 2, "2 番目は新しい窓で開く")
         #expect(model.current == "仕事")
         #expect(!store.isShutDown)
     }
@@ -332,9 +322,7 @@ import WebKit
     @Test func profileCommands() async {
         let model = temporaryModel()
         // 起動したときの窓を閉じて、窓がひとつもない所から始める。
-        model.detach(attachWindow(to: model))
-        let server = serveWindows(for: model)
-        defer { server.cancel() }
+        model.detach(launch(model))
         let service = ControlService(model: model)
         func run(_ args: String...) async -> ControlResponse {
             await service.respond(to: ControlRequest(args: args))
@@ -383,11 +371,11 @@ import WebKit
         let model = temporaryModel()
         _ = try model.create("仕事")
         _ = try model.create("趣味")
-        let first = attachWindow(to: model)
+        let first = launch(model)
         #expect(first.profile == BrowserProfile.defaultName)
         let standard = try #require(first.store)
 
-        let second = attachWindow(to: model)
+        let second = model.openEmptyWindow()
         #expect(second.profile == nil, "⌘N の窓はプロファイルを選ぶ前")
         #expect(second.store == nil)
         #expect(model.store === standard, "選ぶ前の窓は今のものにならない")
@@ -410,22 +398,21 @@ import WebKit
         #expect(try model.openProfile("仕事") == .alreadyHere)
 
         // 手前がプロファイルを選ぶ前の窓なら、メニューやキーで選んでもその窓に出す。
-        let third = attachWindow(to: model)
+        let third = model.openEmptyWindow()
         model.activate(third)
         #expect(model.current == "仕事", "選ぶ前の窓が前に出ても、今のものは変えない")
         #expect(try model.openProfile("趣味") == .shownInEmptyWindow)
         #expect(third.profile == "趣味")
 
-        // 出ていないプロファイルは新しい窓で開く。窓が出る前に重ねて頼んでも、窓は一枚。
+        // 出ていないプロファイルは新しい窓で開く。重ねて開いても、窓は一枚。
         model.detach(first)
-        #expect(try model.openProfile(BrowserProfile.defaultName) == .requestedWindow)
-        #expect(try model.openProfile(BrowserProfile.defaultName) == .requestedWindow)
+        #expect(try model.openProfile(BrowserProfile.defaultName) == .openedInNewWindow)
+        #expect(try model.openProfile(BrowserProfile.defaultName) == .alreadyHere)
         #expect(second.profile == "仕事" && third.profile == "趣味", "今の窓は入れ替えない")
-        let fourth = attachWindow(to: model)
-        #expect(fourth.profile == BrowserProfile.defaultName)
+        let fourth = try #require(model.window(showing: BrowserProfile.defaultName))
         #expect(model.activeWindow === fourth)
-        #expect(!model.awaitsWindow)
-        #expect(attachWindow(to: model).profile == nil)
+        #expect(model.windows.count == 3)
+        #expect(model.openEmptyWindow().profile == nil)
     }
 
     /// 次の起動では、終えたときに窓を開いていたプロファイルをそれぞれの窓に戻す。最後に前にあったものを最初に開く。
@@ -433,7 +420,7 @@ import WebKit
         defer { try? FileManager.default.removeItem(at: directory) }
         let model = persistentModel()
         _ = try model.create("仕事")
-        let first = attachWindow(to: model)
+        let first = launch(model)
         let second = try openInNewWindow("仕事", in: model)
         model.activate(first)
         model.saveBeforeQuit()
@@ -445,9 +432,11 @@ import WebKit
         #expect(registry.lastWindows == [BrowserProfile.defaultName, "仕事"])
 
         let next = persistentModel()
-        let restored = (BrowserWindowSlot(), BrowserWindowSlot())
-        #expect(next.attach(restored.0), "まだ戻す窓がある")
-        #expect(!next.attach(restored.1))
+        var opened: [BrowserWindowSlot] = []
+        next.makeWindow = { opened.append($0) }
+        next.restoreWindows()
+        #expect(opened.count == 2, "戻す窓をその場で順に開く")
+        let restored = (next.windows[0], next.windows[1])
         #expect(restored.0.profile == BrowserProfile.defaultName)
         #expect(restored.1.profile == "仕事")
         #expect(next.activeWindow === restored.0)
@@ -466,7 +455,7 @@ import WebKit
 
         let model = temporaryModel()
         _ = try model.create("仕事")
-        let first = attachWindow(to: model)
+        let first = launch(model)
         let second = try openInNewWindow("仕事", in: model)
         let work = try #require(second.store)
         let standard = try #require(first.store)
@@ -486,7 +475,7 @@ import WebKit
 
         // プロファイルの窓をすべて閉じ、プロファイルを選ぶ前の窓だけが残ったときは、最後に前にあったプロファイルを出して開く。
         model.activate(first)
-        let picker = attachWindow(to: model)
+        let picker = model.openEmptyWindow()
         model.detach(second)
         model.detach(first)
         #expect(picker.profile == nil)
@@ -498,6 +487,6 @@ import WebKit
         // 窓がひとつもなければ置かない（窓を開いてもらってから置く）。
         model.detach(picker)
         #expect(!ExternalLinks.place(page, in: model))
-        #expect(model.awaitsWindow == false, "置くだけでは窓を頼まない")
+        #expect(model.windows.isEmpty, "置くだけでは窓を開かない")
     }
 }

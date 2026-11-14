@@ -35,19 +35,13 @@ enum ExternalLinks {
             bringToFront(model)
             return
         }
-        // 窓をすべて閉じている。最後に前へ出ていたプロファイルの窓を開いてもらい、出てから置く。
+        // 窓をすべて閉じている。最後に前へ出ていたプロファイルの窓を開いて置く。
         model.openLastProfile()
-        NSApp.activate()
-        Task { @MainActor in
-            for _ in 0..<100 where model.store == nil {
-                try? await Task.sleep(for: .milliseconds(50))
-            }
-            guard place(url, in: model) else {
-                AppLog.logger.error("外から渡されたリンクを開けませんでした（窓が開かなかった）: \(url.absoluteString, privacy: .public)")
-                return
-            }
-            bringToFront(model)
+        guard place(url, in: model) else {
+            AppLog.logger.error("外から渡されたリンクを開けませんでした（窓が開かなかった）: \(url.absoluteString, privacy: .public)")
+            return
         }
+        bringToFront(model)
     }
 
     /// 今のプロファイルのタブ管理にリンクを置く。窓を前に出すのは `open` の役目。
@@ -77,16 +71,6 @@ enum ExternalLinks {
             window.makeKeyAndOrderFront(nil)
         }
         NSApp.activate()
-    }
-
-    /// 窓をひとつも開いていないときに窓を出してもらう。窓を開く手段は SwiftUI の画面の中にしかないので、
-    /// Dock と同じ開き直しの頼みを自分に送る。
-    static func reopen() {
-        let reopen = NSAppleEventDescriptor(
-            eventClass: AEEventClass(kCoreEventClass), eventID: AEEventID(kAEReopenApplication),
-            targetDescriptor: .currentProcess(), returnID: AEReturnID(kAutoGenerateReturnID),
-            transactionID: AETransactionID(kAnyTransactionID))
-        _ = try? reopen.sendEvent(options: .noReply, timeout: TimeInterval(kAEDefaultTimeout))
     }
 
     @MainActor

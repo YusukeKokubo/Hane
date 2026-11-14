@@ -10,8 +10,6 @@ struct BrowserCommands: Commands {
     /// 窓がひとつもなければ `nil` で、タブやページに向けた項目は効かない。
     private var store: TabStore? { model.store }
 
-    @Environment(\.openWindow) private var openWindow
-
     var body: some Commands {
         // 標準の「閉じる」（Cmd+W）より前に置くことで、Cmd+W をタブ側で受ける。
         // タブ管理がない（窓がない）ときも項目は無効にしない。起動した時点では窓がまだなく、SwiftUI はメニューを
@@ -19,8 +17,8 @@ struct BrowserCommands: Commands {
         CommandGroup(replacing: .newItem) {
             Button("新規タブ") { store?.newTab() }
                 .keyboardShortcut("t")
-            // 開いた窓でプロファイルを選ぶ（BrowserModel.attach）。
-            Button("新規ウインドウ") { openWindow(id: HaneApp.moreWindowsID) }
+            // 開いた窓でプロファイルを選ぶ。
+            Button("新規ウインドウ") { model.openEmptyWindow() }
                 .keyboardShortcut("n")
             Button("タブを閉じる") { closeTab() }
                 .keyboardShortcut("w")

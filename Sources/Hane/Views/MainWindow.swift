@@ -1,0 +1,66 @@
+import AppKit
+import SwiftUI
+
+/// 本体の窓一枚の持ち主。AppKit の窓を作って中身に `BrowserWindow` を載せ、前に出た・閉じたを `BrowserModel` へ伝える。
+///
+/// SwiftUI のシーンで窓を開く `openWindow` は画面の中からしか呼べず、モデルの側から窓を開くのに回り道が要ったため、
+/// 窓は AppKit で作る。
+@MainActor
+final class MainWindow: NSObject, NSWindowDelegate {
+    /// 開いている窓の持ち主。窓が閉じるまで掴んでおく。
+    private static var owners: [MainWindow] = []
+
+    let window: NSWindow
+    let slot: BrowserWindowSlot
+    private let model: BrowserModel
+
+    /// `BrowserModel.makeWindow` に渡す。
+    static func open(_ slot: BrowserWindowSlot, model: BrowserModel) {
+        let owner = MainWindow(slot: slot, model: model)
+        owners.append(owner)
+        owner.window.makeKeyAndOrderFront(nil)
+    }
+
+    private init(slot: BrowserWindowSlot, model: BrowserModel) {
+        self.slot = slot
+        self.model = model
+        window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1200, height: 800),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+            backing: .buffered, defer: false)
+        super.init()
+        // タブバーをタイトルバーの位置に置く。
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
+        // タブは閲覧状態（SessionStore）で戻すので、macOS の再開には任せない。任せると
+        // ウインドウの状態が変わるたびに窓全体の画像を取って保存し、その写しで本体が25MBほど膨らんだまま戻らない。
+        window.isRestorable = false
+        window.isReleasedWhenClosed = false
+        window.identifier = NSUserInterfaceItemIdentifier(HaneApp.windowID)
+        let hosting = NSHostingController(rootView: BrowserWindow(model: model, slot: slot))
+        // 大きさは窓が決める。中身の大きさに合わせて窓を縮めないよう、最小の大きさだけ受ける。
+        hosting.sizingOptions = [.minSize]
+        // 画面の navigationTitle を窓の題名にする（hanectl ui が読む）。
+        hosting.sceneBridgingOptions = [.title]
+        window.contentViewController = hosting
+        window.setContentSize(NSSize(width: 1200, height: 800))
+        window.center()
+        window.delegate = self
+        // 覚えていた位置があれば、そこへ動かす。
+        slot.window = window
+    }
+
+    func windowDidBecomeKey(_ notification: Notification) {
+        model.activate(slot)
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        // 閉じた窓は AppKit がしばらく掴んでいることがあり、覚える名前を握ったままだと次に開く窓が使えない。
+        window.setFrameAutosaveName("")
+        window.delegate = nil
+        model.detach(slot)
+        Task { @MainActor in
+            Self.owners.removeAll { $0 === self }
+        }
+    }
+}

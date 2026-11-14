@@ -9,10 +9,8 @@ import WebKit
 struct BrowserWindow: View {
     @Bindable var model: BrowserModel
 
-    /// この窓。どのプロファイルを出すかは、窓が出たとき（⌘N の窓ではプロファイルを選んだとき）に BrowserModel が決め、閉じるまで変えない。
-    @State private var slot = BrowserWindowSlot()
-    @Environment(\.dismissWindow) private var dismissWindow
-    @Environment(\.openWindow) private var openWindow
+    /// この窓。どのプロファイルを出すかは、窓を開くとき（⌘N の窓ではプロファイルを選んだとき）に BrowserModel が決め、閉じるまで変えない。
+    let slot: BrowserWindowSlot
     @State private var newProfileName = ""
 
     /// 左上の信号機ボタンを避けるための余白。
@@ -29,27 +27,6 @@ struct BrowserWindow: View {
             }
         }
         .navigationTitle(title)
-        // 窓を結び直すときは、AppKit の窓への見張りも付け直す。
-        .background { WindowSlotBinder(model: model, slot: slot).id(ObjectIdentifier(slot)) }
-        .onAppear {
-            // 閉じた最初の窓（Window）を開き直すと、SwiftUI は閉じる前の画面の状態のまま出すので、窓の持ち物を作り直す。
-            // 閉じた窓のタブ管理は閉じてあり、窓のプロファイルは入れ替えないため。
-            var window = slot
-            if window.isClosed {
-                window = BrowserWindowSlot()
-                slot = window
-            }
-            // 起動して戻す窓が残っていれば、続けて開く。開いた窓が出たときにまた次を開く。
-            if model.attach(window) {
-                openWindow(id: HaneApp.moreWindowsID)
-            }
-        }
-        .onChange(of: model.windowRequests) {
-            // ほかのプロファイルを新しい窓で開くよう頼まれた。開くのは窓のうち一枚だけが受け持つ。
-            if model.windows.first === slot {
-                openWindow(id: HaneApp.moreWindowsID)
-            }
-        }
         .alert("新しいプロファイル", isPresented: Binding(
             get: { model.creatingIn === slot },
             set: { if !$0, model.creatingIn === slot { model.creatingIn = nil } }
@@ -96,7 +73,7 @@ struct BrowserWindow: View {
                 }
                 TabBar(store: store) { id in
                     if !store.close(id) {
-                        dismissWindow()
+                        slot.window?.close()
                     }
                 }
             }
@@ -129,8 +106,6 @@ private struct ProfilePicker: View {
     let model: BrowserModel
     let slot: BrowserWindowSlot
 
-    @Environment(\.dismissWindow) private var dismissWindow
-
     var body: some View {
         VStack(spacing: 0) {
             // タイトルバーの位置。窓を掴む所を残す。
@@ -145,7 +120,7 @@ private struct ProfilePicker: View {
                     let shown = model.isShown(name)
                     Button {
                         model.open(name, in: slot)
-                        if shown { dismissWindow() }
+                        if shown { slot.window?.close() }
                     } label: {
                         Label(BrowserModel.title(for: name) + (shown ? "（開いているウインドウへ）" : ""),
                               systemImage: "person.crop.circle")
@@ -163,57 +138,6 @@ private struct ProfilePicker: View {
         .frame(minWidth: 480, minHeight: 320)
         .ignoresSafeArea(edges: .top)
         .background { StillWindow() }
-    }
-}
-
-/// 窓とその AppKit の窓を BrowserModel に結ぶ。前に出たこと、閉じたことを知らせる。
-private struct WindowSlotBinder: NSViewRepresentable {
-    let model: BrowserModel
-    let slot: BrowserWindowSlot
-
-    func makeNSView(context: Context) -> Marker { Marker(model: model, slot: slot) }
-    func updateNSView(_ nsView: Marker, context: Context) {}
-
-    final class Marker: NSView {
-        private let model: BrowserModel
-        private let slot: BrowserWindowSlot
-        private var isBound = false
-
-        init(model: BrowserModel, slot: BrowserWindowSlot) {
-            self.model = model
-            self.slot = slot
-            super.init(frame: .zero)
-        }
-
-        @available(*, unavailable)
-        required init?(coder: NSCoder) { fatalError() }
-
-        override func viewDidMoveToWindow() {
-            super.viewDidMoveToWindow()
-            guard let window, !isBound else { return }
-            isBound = true
-            let center = NotificationCenter.default
-            center.addObserver(self, selector: #selector(becameKey), name: NSWindow.didBecomeKeyNotification, object: window)
-            center.addObserver(self, selector: #selector(willClose), name: NSWindow.willCloseNotification, object: window)
-            // 窓の大きさは SwiftUI が置いたあとに決まるので、覚えていた位置へ動かすのは一巡り待ってから。
-            Task { @MainActor [slot] in
-                slot.window = window
-            }
-            if window.isKeyWindow {
-                model.activate(slot)
-            }
-        }
-
-        @objc private func becameKey() {
-            model.activate(slot)
-        }
-
-        @objc private func willClose() {
-            NotificationCenter.default.removeObserver(self)
-            // 閉じた窓は AppKit がしばらく掴んでいることがあり、覚える名前を握ったままだと次に開く窓が使えない。
-            window?.setFrameAutosaveName("")
-            model.detach(slot)
-        }
     }
 }
 

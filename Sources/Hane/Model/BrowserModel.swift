@@ -21,9 +21,6 @@ final class BrowserModel {
     private(set) var activeWindow: BrowserWindowSlot?
     /// 最後に前へ出た窓。プロファイルを選ぶ前の窓のこともある。アラートを出す窓と、プロファイルを割り当てる空の窓を決める。
     private(set) var focusedWindow: BrowserWindowSlot?
-    /// 新しい窓を開いてほしいという頼みの通し番号。窓の画面が見張っていて、増えたら一枚開く（`BrowserWindow`）。
-    /// モデルの側から窓を開く手段がないため。
-    private(set) var windowRequests = 0
     /// 新しいプロファイルの名前を尋ねている窓。
     var creatingIn: BrowserWindowSlot?
     /// 利用者に見せる失敗。
@@ -34,12 +31,12 @@ final class BrowserModel {
     let downloads: Downloads
     /// 1Password で入れる場所として教わったもの。プロファイルによらずアプリ全体で一つ。
     @ObservationIgnored let loginFields: LoginFieldStore
-    /// 窓をひとつも開いていないときに、自分へ Dock と同じ開き直しの頼みを送る。テストでは何もしない。
-    @ObservationIgnored var reopenApp: @MainActor () -> Void = {}
-    /// 起動したとき、続けて窓を開いて戻すプロファイル。
+    /// 窓一枚ぶんの AppKit の窓を作って前に出す。アプリでは `MainWindow.open`。テストでは AppKit の窓を作らない。
+    @ObservationIgnored var makeWindow: @MainActor (BrowserWindowSlot) -> Void = { _ in }
+    /// 起動したときに窓を開いて戻すプロファイル。`restoreWindows` で使い切る。
     @ObservationIgnored private var restoring: [String] = []
-    /// 新しい窓に出すよう頼まれたプロファイル。窓が出たら順に割り当てる。
-    @ObservationIgnored private var requested: [String] = []
+    /// 起動したときの窓をまだ開いていない。外部操作は起こしてすぐ命令を送るので、これを見て窓が出るのを待つ。
+    private(set) var isLaunching = true
     /// 最後に前へ出ていたプロファイル。窓をすべて閉じたあとに開いた窓に戻すものと、次の起動で最初に開くもの。
     @ObservationIgnored private var lastProfile: String
     /// 持ち物の根元。使い捨ての実体では `nil` で、何も保存せず、作った名前はこの実体の中にだけ持つ。
@@ -89,6 +86,7 @@ final class BrowserModel {
         registered = []
         names = [BrowserProfile.defaultName]
         lastProfile = BrowserProfile.defaultName
+        isLaunching = false
         let window = BrowserWindowSlot()
         window.show(BrowserProfile.defaultName, store)
         windows = [window]
@@ -147,8 +145,8 @@ final class BrowserModel {
         case broughtToFront
         /// プロファイルを選ぶ前の窓に出した。
         case shownInEmptyWindow
-        /// 新しい窓を頼んだ。窓が出たときに割り当てる。
-        case requestedWindow
+        /// 新しい窓で開いた。
+        case openedInNewWindow
     }
 
     /// そのプロファイルを開く。窓に出ていればその窓を前に出し、出ていなければ新しい窓で開く。今の窓のタブは閉じない。
@@ -169,15 +167,47 @@ final class BrowserModel {
             remember()
             return .shownInEmptyWindow
         }
-        if !requested.contains(name) {
-            requested.append(name)
-            if windows.isEmpty {
-                reopenApp()
-            } else {
-                windowRequests += 1
-            }
+        let slot = BrowserWindowSlot()
+        slot.show(name, makeStore(for: name))
+        add(slot)
+        // 命令やキーが、続けてこの窓を相手にできるように。裏にいると窓が前に出た知らせが来ないため。
+        activeWindow = slot
+        lastProfile = name
+        remember()
+        return .openedInNewWindow
+    }
+
+    /// プロファイルを選ぶ前の窓を開く（⌘N）。
+    @discardableResult
+    func openEmptyWindow() -> BrowserWindowSlot {
+        let slot = BrowserWindowSlot()
+        add(slot)
+        return slot
+    }
+
+    /// 起動したときに一度だけ呼ぶ。覚えていたプロファイルの窓を順に開き、最後に前にあったものを前に出す。
+    func restoreWindows() {
+        let names = restoring
+        restoring = []
+        isLaunching = false
+        var first: BrowserWindowSlot?
+        for name in names where !isShown(name) {
+            let slot = BrowserWindowSlot()
+            slot.show(name, makeStore(for: name))
+            add(slot)
+            first = first ?? slot
         }
-        return .requestedWindow
+        if let first {
+            first.window?.makeKeyAndOrderFront(nil)
+            activate(first)
+        }
+        remember()
+    }
+
+    /// Dock のアイコンなどで開き直したとき。窓がひとつもなければ、最後に前へ出ていたプロファイルの窓を開く。
+    func reopen() {
+        guard windows.isEmpty else { return }
+        openLastProfile()
     }
 
     /// メニューやキー、プロファイルを選ぶ窓から。失敗はアラートで見せる。
@@ -222,38 +252,12 @@ final class BrowserModel {
 
     // MARK: 窓
 
-    /// 窓が出たとき。起動して戻す窓がまだ残っていれば `true` を返すので、続けて窓を開くこと。
-    ///
-    /// 起動したときは覚えていたプロファイルを順に出す。新しい窓を頼んでいれば、頼んだプロファイルを出す。
-    /// 窓をすべて閉じたあとに開いた窓には、最後に前へ出ていたプロファイルを戻す。それ以外（⌘N）はプロファイルを選ぶ前の窓になる。
-    func attach(_ window: BrowserWindowSlot) -> Bool {
-        guard !windows.contains(where: { $0 === window }) else { return false }
+    /// 窓を一覧に足して、AppKit の窓を作る。
+    private func add(_ window: BrowserWindowSlot) {
         windows.append(window)
-        if !restoring.isEmpty {
-            let name = restoring.removeFirst()
-            if !isShown(name) {
-                window.show(name, makeStore(for: name))
-            }
-            if activeWindow == nil {
-                activeWindow = window
-            }
-        } else if !requested.isEmpty {
-            let name = requested.removeFirst()
-            if !isShown(name) {
-                window.show(name, makeStore(for: name))
-                // 頼んだ命令やキーが、続けてこの窓を相手にできるように。裏にいると窓が前に出た知らせが来ないため。
-                activeWindow = window
-            }
-        } else if activeWindow == nil, !isShown(lastProfile) {
-            window.show(lastProfile, makeStore(for: lastProfile))
-            activeWindow = window
-        }
-        if focusedWindow == nil {
-            focusedWindow = window
-        }
-        guard restoring.isEmpty else { return true }
-        remember()
-        return false
+        // 裏にいると窓が前に出た知らせが来ないので、アラートを出す窓とプロファイルを割り当てる空の窓をここで移す。
+        focusedWindow = window
+        makeWindow(window)
     }
 
     /// 窓が閉じたとき。最後の一枚でも、閉じた窓のプロファイルのタブ管理を閉じる。
@@ -261,7 +265,6 @@ final class BrowserModel {
     func detach(_ window: BrowserWindowSlot) {
         guard windows.contains(where: { $0 === window }) else { return }
         windows.removeAll { $0 === window }
-        window.isClosed = true
         if creatingIn === window { creatingIn = nil }
         if focusedWindow === window { focusedWindow = windows.last }
         if activeWindow === window {
@@ -293,12 +296,6 @@ final class BrowserModel {
     func window(showing name: String) -> BrowserWindowSlot? {
         windows.first { $0.profile == name }
     }
-
-    /// 新しい窓に出すのを待っているプロファイルがあるか。
-    var awaitsWindow: Bool { !requested.isEmpty }
-
-    /// 起動して戻す窓か、頼んだ窓がまだ出ていないか。
-    var isOpeningWindow: Bool { !restoring.isEmpty || !requested.isEmpty }
 
     /// アラートを出す窓か。
     func isActive(_ window: BrowserWindowSlot) -> Bool {
@@ -350,9 +347,7 @@ final class BrowserModel {
 final class BrowserWindowSlot {
     private(set) var profile: String?
     private(set) var store: TabStore?
-    /// 窓が閉じた。閉じた最初の窓を開き直したときは、画面がこれを見て新しい窓の持ち物を作る。
-    @ObservationIgnored fileprivate(set) var isClosed = false
-    /// 窓に置かれるまでは `nil`。テストでは窓を持たない。
+    /// 窓を作るまでは `nil`。テストでは窓を持たない。
     @ObservationIgnored weak var window: NSWindow? {
         didSet { rememberFrame() }
     }

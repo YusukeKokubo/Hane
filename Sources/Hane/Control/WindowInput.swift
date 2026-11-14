@@ -127,23 +127,6 @@ final class WindowInput {
         }
     }
 
-    /// 新しい窓に開くよう頼んだプロファイルが、窓に出て AppKit の窓に置かれるまで待つ。
-    func waitForWindow(showing name: String) async throws {
-        let clock = ContinuousClock()
-        let deadline = clock.now + .seconds(10)
-        while !model.isShown(name) {
-            guard clock.now < deadline else {
-                throw ControlError("「\(name)」の窓が 10 秒たっても開かなかった。")
-            }
-            try await Task.sleep(for: .milliseconds(20))
-        }
-        // AppKit の窓は、窓が出た知らせより一巡り遅れて結ばれる。テストの窓は AppKit の窓を持たないので、待ちきらずに進む。
-        let bound = clock.now + .seconds(1)
-        while model.window(showing: name)?.window == nil, clock.now < bound {
-            try await Task.sleep(for: .milliseconds(20))
-        }
-    }
-
     // MARK: 窓そのもの
 
     /// 左上を動かさずに大きさだけ変える（AppKit の座標は左下から測る）。
