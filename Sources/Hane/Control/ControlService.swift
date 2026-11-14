@@ -42,8 +42,16 @@ final class ControlService {
         self.init(model: BrowserModel(store: store))
     }
 
-    /// 今のプロファイル（最後に前へ出たプロファイルの窓）のタブ管理。窓を移ったりプロファイルを切り替えたりすると入れ替わるので、掴んでおかずに毎回読む。
-    private var store: TabStore { model.store }
+    /// 今のプロファイル（最後に前へ出たプロファイルの窓）のタブ管理。窓を移ったり閉じたりすると入れ替わるので、掴んでおかずに毎回読む。
+    /// プロファイルを出している窓がひとつもなければ断る。
+    private var store: TabStore {
+        get throws {
+            guard let store = model.store else {
+                throw ControlError("プロファイルを出している窓がない。profile-open <名前> で開くこと。")
+            }
+            return store
+        }
+    }
 
     func start() {
         do {
@@ -78,34 +86,41 @@ final class ControlService {
 
         func target() throws -> Tab { try tab(numbered: tabNumber) }
 
+        // 起動した直後は、最初の窓が出るまでタブ管理がない。hanectl は起こしてすぐ命令を送るので、窓が出るのを待つ。
+        let clock = ContinuousClock()
+        let deadline = clock.now + .seconds(10)
+        while model.store == nil, model.isOpeningWindow, clock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
         switch command {
         case "help", "--help", "-h":
             return ControlHelp.text
 
         case "tabs":
-            return store.allTabs.map(describe).joined(separator: "\n")
+            return try store.allTabs.map(describe).joined(separator: "\n")
 
         case "new":
             if args.isEmpty {
-                return describe(store.newTab())
+                return describe(try store.newTab())
             }
-            let tab = store.open(URLRequest(url: try url(from: args)))
+            let tab = try store.open(URLRequest(url: try url(from: args)))
             return try await settled(tab)
 
         case "select":
             let tab = try tab(numbered: try integer(try argument(args, 0, "タブ番号"), "タブ番号"))
-            store.selectedID = tab.id
+            try store.selectedID = tab.id
             return describe(tab)
 
         case "close":
             let number = try args.first.map { try integer($0, "タブ番号") } ?? tabNumber
             let tab = try tab(numbered: number)
             // ブックマークのページは閉じてもウインドウが残るので、最後の1枚でも閉じてよい。
-            guard store.allTabs.count > 1 || store.bookmarkID(of: tab) != nil else {
+            guard try store.allTabs.count > 1 || store.bookmarkID(of: tab) != nil else {
                 throw ControlError("最後の1枚は閉じられない（ウインドウが閉じてアプリが終了するため）。")
             }
-            store.close(tab.id)
-            return "closed tab \(tab.number)\n" + store.allTabs.map(describe).joined(separator: "\n")
+            try store.close(tab.id)
+            return try "closed tab \(tab.number)\n" + store.allTabs.map(describe).joined(separator: "\n")
 
         case "open":
             let tab = try target()
@@ -152,9 +167,9 @@ final class ControlService {
         case "sleep":
             let number = try args.first.map { try integer($0, "タブ番号") } ?? tabNumber
             let tab = try tab(numbered: number)
-            guard tab.id != store.selectedID else { throw ControlError("画面に出ているタブは眠らせられない。先に別のタブを選ぶこと。") }
+            guard try tab.id != store.selectedID else { throw ControlError("画面に出ているタブは眠らせられない。先に別のタブを選ぶこと。") }
             guard tab.sleep() else { throw ControlError("このタブはページを持っていない（もう眠っているか、まだ何も開いていない）。") }
-            return store.allTabs.map(describe).joined(separator: "\n")
+            return try store.allTabs.map(describe).joined(separator: "\n")
 
         case "snapshot":
             let tab = try target()
@@ -258,10 +273,11 @@ final class ControlService {
 
         case "key":
             let windowsBefore = Set(NSApp.windows.map(ObjectIdentifier.init))
+            let frontBefore = mainWindow()
             try sendKey(try argument(args, 0, "キー"))
             // 画面の更新とポップオーバーの出し入れを待ってから様子を返す。
             try? await Task.sleep(for: .milliseconds(300))
-            orderNewWindowsFront(excluding: windowsBefore)
+            orderNewWindowsFront(excluding: windowsBefore, above: frontBefore)
             return describeUI()
 
         case "type":
@@ -272,7 +288,7 @@ final class ControlService {
             return describeUI()
 
         case "history":
-            let recent = store.history.entries.values.sorted { $0.lastVisit > $1.lastVisit }.prefix(limit ?? 30)
+            let recent = try store.history.entries.values.sorted { $0.lastVisit > $1.lastVisit }.prefix(limit ?? 30)
             guard !recent.isEmpty else { return "（履歴なし）" }
             return recent.map { entry in
                 "\(Self.clock.string(from: entry.lastVisit)) typed \(entry.typedCount) visits \(entry.visitCount)  "
@@ -280,15 +296,16 @@ final class ControlService {
             }.joined(separator: "\n")
 
         case "bookmarks":
-            return describeBookmarks()
+            return try describeBookmarks()
 
         case "downloads":
-            if clear { store.downloads.clearFinished() }
+            if clear { model.downloads.clearFinished() }
             return describeDownloads()
 
         case "bookmark-add":
             let name = try takeOption("--name", from: &args)
             let folderName = try takeOption("--folder", from: &args)
+            let store = try store
             let folderID = folderName.map { store.bookmarks.folder(named: $0)?.id ?? store.bookmarks.addFolder(named: $0).id }
             if args.isEmpty {
                 let tab = try target()
@@ -300,16 +317,16 @@ final class ControlService {
                 let url = try url(from: args)
                 store.bookmarks.add(title: name ?? "", url: url, folder: folderID)
             }
-            return describeBookmarks()
+            return try describeBookmarks()
 
         case "bookmark-open":
             let id = try bookmarkID(try argument(args, 0, "ブックマークの番号"))
-            guard let tab = store.activate(bookmark: id) else { throw ControlError("フォルダは開けない。中のブックマークの番号を指定すること。") }
+            guard let tab = try store.activate(bookmark: id) else { throw ControlError("フォルダは開けない。中のブックマークの番号を指定すること。") }
             return try await settled(tab)
 
         case "bookmark-remove":
-            store.removeBookmark(try bookmarkID(try argument(args, 0, "ブックマークの番号")))
-            return describeBookmarks()
+            try store.removeBookmark(try bookmarkID(try argument(args, 0, "ブックマークの番号")))
+            return try describeBookmarks()
 
         case "settings":
             if let name = args.first {
@@ -388,7 +405,8 @@ final class ControlService {
                 return value
             } ?? 0.5
             let json = takeFlag("--json", from: &args)
-            let all = store.allTabs
+            // 窓がなくても、プロセスの資源は測る。
+            let all = model.store?.allTabs ?? []
             let pages = Dictionary(grouping: all.filter(\.hasContent)) { $0.page.flatMap(PageProcess.identifier(of:)) }
             let byProcess = pages.reduce(into: [pid_t: [Int]]()) { result, entry in
                 if let pid = entry.key { result[pid] = entry.value.map(\.number) }
@@ -396,7 +414,7 @@ final class ControlService {
             let report = await ProcessStats.measure(for: .milliseconds(Int(seconds * 1000)), tabs: byProcess)
             let tabs = StatsTabs(
                 total: all.count, withContent: all.count { $0.hasContent }, asleep: all.count { $0.isAsleep },
-                bookmarkPages: store.bookmarkTabs.count)
+                bookmarkPages: model.store?.bookmarkTabs.count ?? 0)
             if json {
                 let encoder = JSONEncoder()
                 encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
@@ -429,8 +447,23 @@ final class ControlService {
 
         case "profile-open":
             let name = try argument(args, 0, "プロファイルの名前")
-            guard try model.switchTo(name) else { return "already here: \(name)" }
-            return "switched: \(name)\n" + store.allTabs.map(describe).joined(separator: "\n")
+            let frontBefore = mainWindow()
+            let windowsBefore = Set(NSApp.windows.map(ObjectIdentifier.init))
+            let result: String
+            switch try model.openProfile(name) {
+            case .alreadyHere:
+                return "already here: \(name)"
+            case .broughtToFront:
+                result = "brought to front: \(name)"
+            case .shownInEmptyWindow:
+                result = "opened in this window: \(name)"
+            case .requestedWindow:
+                // 窓は SwiftUI が少し後に開く。出て、AppKit の窓に置かれるまで待つ。
+                try await waitForWindow(showing: name)
+                orderNewWindowsFront(excluding: windowsBefore, above: frontBefore)
+                result = "opened in new window: \(name)"
+            }
+            return try result + "\n" + store.allTabs.map(describe).joined(separator: "\n")
 
         case "quit":
             // 終わると決めたら、もう命令を受けない。終わるまでの間に届いた命令は、答える前に終わってしまい
@@ -817,7 +850,7 @@ final class ControlService {
     /// 本物の入力を渡せるページ。画面に出ているタブのページでなければ断る（隠れた Web ビューは入力を受けない）。
     private func inputPage(of tab: Tab) throws -> Page {
         guard let page = tab.page else { throw ControlError("このタブにはまだページがない。先に `open <URL>` を行うこと。") }
-        guard tab.id == store.selectedID else {
+        guard try tab.id == store.selectedID else {
             throw ControlError("画面に出ているタブにしか入力を渡せない。先に `select \(tab.number)` を行うこと。")
         }
         guard page.canReceiveInput else { throw ControlError("ページが窓に出ていない。") }
@@ -902,7 +935,7 @@ final class ControlService {
         }
         // スクロールやタブの移動が画面に出るのを待つ。
         try? await Task.sleep(for: .milliseconds(300))
-        return "sent \(specs.joined(separator: " "))\n" + store.allTabs.map(describe).joined(separator: "\n")
+        return try "sent \(specs.joined(separator: " "))\n" + store.allTabs.map(describe).joined(separator: "\n")
     }
 
     /// `page-key` のキー。`key` と同じ書き方に、大文字（Shift つきの英字）を加える。
@@ -951,7 +984,7 @@ final class ControlService {
 
     private func screenshot(of tab: Tab, to path: String?, fullPage: Bool) async throws -> String {
         guard let page = tab.page else { throw ControlError("このタブにはまだページがない。") }
-        guard tab.id == store.selectedID else {
+        guard try tab.id == store.selectedID else {
             throw ControlError("画面に出ているタブしか撮れない。先に `select \(tab.number)` を行うこと。")
         }
         let data = try await page.snapshot(fullPage: fullPage)
@@ -1200,7 +1233,7 @@ final class ControlService {
     // MARK: 広告ブロック
 
     private func contentBlocker() throws -> ContentBlocker {
-        guard let blocker = store.contentBlocker else { throw ControlError("広告ブロックが付いていない。") }
+        guard let blocker = model.contentBlocker else { throw ControlError("広告ブロックが付いていない。") }
         return blocker
     }
 
@@ -1223,7 +1256,7 @@ final class ControlService {
         let elements = blocker.hidden.elements
         let sites = Set(elements.map(\.site))
         lines.append("hidden elements: \(elements.count) on \(sites.count) site(s)")
-        if let tab = store.selected, let site = tab.url.flatMap(HiddenElementStore.site(for:)) {
+        if let tab = model.store?.selected, let site = tab.url.flatMap(HiddenElementStore.site(for:)) {
             let selectors = blocker.hidden.selectors(on: site)
             lines.append("this site: \(site) (\(selectors.count))")
             lines += selectors.map { "  \($0)" }
@@ -1233,7 +1266,7 @@ final class ControlService {
 
     /// ダウンロードの一覧。始まった順。
     private func describeDownloads() -> String {
-        let downloads = store.downloads
+        let downloads = model.downloads
         var lines = ["folder: \(downloads.directory.path(percentEncoded: false))"]
         if downloads.items.isEmpty { lines.append("（ダウンロードなし）") }
         for item in downloads.items {
@@ -1266,7 +1299,12 @@ final class ControlService {
 
     /// ウインドウの枠まわり（ページの外側）が今どう見えているか。
     private func describeUI() -> String {
-        var lines = ["instance: \(BrowserInstance.label), profile: \(model.current)", describeBuild(), "window frame: " + describeWindowFrame()]
+        var lines = ["instance: \(BrowserInstance.label), profile: \(model.current ?? "(窓なし)")", describeBuild(),
+                     "window frame: " + describeWindowFrame()]
+        guard let store = model.store else {
+            lines.append("（プロファイルを出している窓がない）")
+            return lines.joined(separator: "\n")
+        }
         if let tab = store.selected {
             let state: (Bool) -> String = { $0 ? "enabled" : "disabled" }
             lines.append("window title: \(tab.title)")
@@ -1281,7 +1319,7 @@ final class ControlService {
                 lines.append("failure shown: \(failure)")
             }
         }
-        lines.append("bookmarks bar: " + describeBookmarkBar())
+        lines.append("bookmarks bar: " + describeBookmarkBar(of: store))
         if let open = store.openFolder, let folder = store.bookmarks.folder(open.id) {
             // 選択の当たっている行に > を付ける。番号は数字キーで開くときのもの。
             let rows = folder.bookmarks.enumerated().map { index, bookmark in
@@ -1329,7 +1367,7 @@ final class ControlService {
 
     /// バーの左側を、画面に出ている文字のとおりに一行で表す。
     /// 選ばれている項目には *、ページを開いている項目には (open) を付ける。
-    private func describeBookmarkBar() -> String {
+    private func describeBookmarkBar(of store: TabStore) -> String {
         guard !store.bookmarks.items.isEmpty else { return "(なし)" }
         return store.bookmarks.items.map { item in
             switch item {
@@ -1422,11 +1460,29 @@ final class ControlService {
     /// 振る舞いが変わるので、前で打ったときと同じく手前に並べる。`orderFront` や `makeKeyAndOrderFront` は
     /// 50 ミリ秒もたたずに本体の窓の裏へ戻されたが、本体の窓を指して上に重ねれば残った（小窓と同じやり方）。
     /// ほかのアプリの窓より前には出さない。前面にいるときは AppKit が手前に置くので何もしない。
-    private func orderNewWindowsFront(excluding before: Set<ObjectIdentifier>) {
-        guard !NSApp.isActive, let main = mainWindow() else { return }
+    /// キーで開いた窓（⌘N や、⌃数字で開いたプロファイル）が新しい窓を前の窓の裏に置かれないよう、`main`（開く前に前にいた窓）の上に重ねる。
+    private func orderNewWindowsFront(excluding before: Set<ObjectIdentifier>, above main: NSWindow?) {
+        guard !NSApp.isActive, let main else { return }
         for window in NSApp.windows where !before.contains(ObjectIdentifier(window)) {
             guard window.isVisible, window.parent == nil, window.sheetParent == nil, window.canBecomeMain else { continue }
             window.order(.above, relativeTo: main.windowNumber)
+        }
+    }
+
+    /// 新しい窓に開くよう頼んだプロファイルが、窓に出て AppKit の窓に置かれるまで待つ。
+    private func waitForWindow(showing name: String) async throws {
+        let clock = ContinuousClock()
+        let deadline = clock.now + .seconds(10)
+        while !model.isShown(name) {
+            guard clock.now < deadline else {
+                throw ControlError("「\(name)」の窓が 10 秒たっても開かなかった。")
+            }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        // AppKit の窓は、窓が出た知らせより一巡り遅れて結ばれる。テストの窓は AppKit の窓を持たないので、待ちきらずに進む。
+        let bound = clock.now + .seconds(1)
+        while model.window(showing: name)?.window == nil, clock.now < bound {
+            try await Task.sleep(for: .milliseconds(20))
         }
     }
 
@@ -1472,7 +1528,8 @@ final class ControlService {
     }()
 
     /// ブックマークを番号つきで一覧する。番号はフォルダも含めた上からの通し番号。
-    private func describeBookmarks() -> String {
+    private func describeBookmarks() throws -> String {
+        let store = try store
         var lines: [String] = []
         var number = 0
         func line(_ bookmark: Bookmark, indent: String) -> String {
@@ -1495,13 +1552,13 @@ final class ControlService {
     }
 
     private func mark(_ tab: Tab?) -> String {
-        tab != nil && tab?.id == store.selectedID ? "*" : ""
+        tab != nil && tab?.id == model.store?.selectedID ? "*" : ""
     }
 
     /// `bookmarks` の一覧に出る番号を、ブックマークかフォルダのIDに引き直す。
     private func bookmarkID(_ text: String) throws -> UUID {
         let number = try integer(text, "ブックマークの番号")
-        let ids = store.bookmarks.items.flatMap { item -> [UUID] in
+        let ids = try store.bookmarks.items.flatMap { item -> [UUID] in
             switch item {
             case .bookmark(let bookmark): [bookmark.id]
             case .folder(let folder): [folder.id] + folder.bookmarks.map(\.id)
@@ -1523,21 +1580,21 @@ final class ControlService {
 
     private func tab(numbered number: Int?) throws -> Tab {
         guard let number else {
-            guard let selected = store.selected else { throw ControlError("タブがない。") }
+            guard let selected = try store.selected else { throw ControlError("タブがない。") }
             return selected
         }
-        guard let tab = store.allTabs.first(where: { $0.number == number }) else {
+        guard let tab = try store.allTabs.first(where: { $0.number == number }) else {
             throw ControlError("タブ \(number) はない。`tabs` で一覧を見ること。")
         }
         return tab
     }
 
     private func describe(_ tab: Tab) -> String {
-        let mark = tab.id == store.selectedID ? "*" : " "
+        let mark = tab.id == model.store?.selectedID ? "*" : " "
         let url = tab.url?.absoluteString ?? "(空)"
         let loading = tab.isLoading ? " [loading]" : tab.isAsleep ? " [asleep]" : ""
         let icon = tab.favicon != nil ? " [icon]" : ""
-        let bookmark = store.bookmarkID(of: tab).flatMap(store.bookmarks.bookmark).map { " [bookmark: \($0.title)]" } ?? ""
+        let bookmark = model.store.flatMap { store in store.bookmarkID(of: tab).flatMap(store.bookmarks.bookmark) }.map { " [bookmark: \($0.title)]" } ?? ""
         return "\(mark) tab \(tab.number): \(tab.title) — \(url)\(loading)\(icon)\(bookmark)"
     }
 

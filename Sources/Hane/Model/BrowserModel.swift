@@ -3,38 +3,45 @@ import Foundation
 import Observation
 import WebKit
 
-/// アプリ全体の状態。プロファイルの一覧と、窓を開いているプロファイルごとのタブ管理を持つ。
+/// アプリ全体の状態。プロファイルの一覧と、開いている本体の窓を持つ。
 ///
-/// プロファイルは窓一枚に一つずつ出し、同じプロファイルを二枚の窓には出さない（閲覧状態を書き合わないため）。
-/// メニュー・外部操作は、最後に前へ出たプロファイルの窓（`current`）の `TabStore` を見る。
-/// 起動時に渡した `TabStore` を掴み続けると、切り替えたあと古いプロファイルを相手にしてしまうので、使うたびに `store` を読むこと。
+/// プロファイルは窓一枚に一つずつ出し、その窓（`BrowserWindowSlot`）がプロファイルのタブ管理を持つ。
+/// 一度出した窓は閉じるまで同じプロファイルのままで、ほかのプロファイルを開くときは別の窓に出す。
+/// 同じプロファイルを二枚の窓には出さない（閲覧状態を書き合わないため）。
+/// メニュー・外部操作は、最後に前へ出たプロファイルの窓（`activeWindow`）のタブ管理（`store`）を見る。
+/// 窓を閉じるとそのタブ管理も閉じるので、掴んでおかずに使うたびに `store` を読むこと。
 @MainActor
 @Observable
 final class BrowserModel {
-    /// 最後に前へ出たプロファイルの窓のプロファイル。窓がなければ、最後に窓を閉じたプロファイル。
-    private(set) var current: String
     /// メニューに並べる順。`default` が先頭で、続いて登録した順（使い捨ての実体では作った順）。
     private(set) var names: [String]
-    /// `current` のタブ管理。
-    private(set) var store: TabStore
     /// 開いている本体の窓。開いた順。
     private(set) var windows: [BrowserWindowSlot] = []
-    /// 最後に前へ出た窓。プロファイルを選ぶ前の窓のこともある。メニューや外部操作で移る先を出す窓。
+    /// 最後に前へ出たプロファイルの窓。メニューや外部操作の相手。プロファイルを出している窓がなければ `nil`。
     private(set) var activeWindow: BrowserWindowSlot?
+    /// 最後に前へ出た窓。プロファイルを選ぶ前の窓のこともある。アラートを出す窓と、プロファイルを割り当てる空の窓を決める。
+    private(set) var focusedWindow: BrowserWindowSlot?
+    /// 新しい窓を開いてほしいという頼みの通し番号。窓の画面が見張っていて、増えたら一枚開く（`BrowserWindow`）。
+    /// モデルの側から窓を開く手段がないため。
+    private(set) var windowRequests = 0
     /// 新しいプロファイルの名前を尋ねている窓。
     var creatingIn: BrowserWindowSlot?
     /// 利用者に見せる失敗。
     var failure: String?
 
     @ObservationIgnored let contentBlocker: ContentBlocker?
-    /// ダウンロードの一覧。プロファイルを切り替えても続く。
+    /// ダウンロードの一覧。プロファイルによらずアプリ全体で一つ。
     let downloads: Downloads
     /// 1Password で入れる場所として教わったもの。プロファイルによらずアプリ全体で一つ。
     @ObservationIgnored let loginFields: LoginFieldStore
-    /// 開いているプロファイルのタブ管理。窓に出ているものと、窓がひとつもなくなったときの `current`。
-    private var stores: [String: TabStore]
+    /// 窓をひとつも開いていないときに、自分へ Dock と同じ開き直しの頼みを送る。テストでは何もしない。
+    @ObservationIgnored var reopenApp: @MainActor () -> Void = {}
     /// 起動したとき、続けて窓を開いて戻すプロファイル。
-    @ObservationIgnored private var pendingWindows: [String] = []
+    @ObservationIgnored private var restoring: [String] = []
+    /// 新しい窓に出すよう頼まれたプロファイル。窓が出たら順に割り当てる。
+    @ObservationIgnored private var requested: [String] = []
+    /// 最後に前へ出ていたプロファイル。窓をすべて閉じたあとに開いた窓に戻すものと、次の起動で最初に開くもの。
+    @ObservationIgnored private var lastProfile: String
     /// 持ち物の根元。使い捨ての実体では `nil` で、何も保存せず、作った名前はこの実体の中にだけ持つ。
     @ObservationIgnored private let directory: URL?
     /// サイトデータを保存するか。テストでは保存する置き場を試しても、WebKit の置き場は作らない。
@@ -43,7 +50,7 @@ final class BrowserModel {
     @ObservationIgnored private let capturesConsole: Bool
     @ObservationIgnored private var registered: [ProfileRegistry.Entry]
     @ObservationIgnored private var temporaryNames: [String] = []
-    /// 一度開いたプロファイルの持ち物。離れても捨てずに、戻ったときに同じものを使う。
+    /// 一度開いたプロファイルの持ち物。窓を閉じても捨てずに、また開いたときに同じものを使う。
     /// 同じファイルを二つのストアが書き合わないためと、使い捨ての実体でも閲覧状態を戻せるようにするため。
     @ObservationIgnored private var opened: [String: ProfileData] = [:]
     /// 終了の途中。終えるときに窓が閉じても、次の起動で戻す窓の一覧から外さない。
@@ -55,33 +62,23 @@ final class BrowserModel {
         self.capturesConsole = capturesConsole
         self.contentBlocker = contentBlocker
         self.keepsSiteData = keepsSiteData
-        let downloads = Downloads.forInstance(persistent: directory != nil && keepsSiteData, instance: BrowserInstance.name)
-        self.downloads = downloads
-        let loginFields = LoginFieldStore(fileURL: keepsSiteData ? directory?.appending(path: "login-fields.json") : nil)
-        self.loginFields = loginFields
+        downloads = Downloads.forInstance(persistent: directory != nil && keepsSiteData, instance: BrowserInstance.name)
+        loginFields = LoginFieldStore(fileURL: keepsSiteData ? directory?.appending(path: "login-fields.json") : nil)
         let registry = directory.flatMap { try? ProfileRegistry.load(from: ProfileRegistry.fileURL(in: $0)) } ?? ProfileRegistry()
         let names = [BrowserProfile.defaultName] + registry.profiles.map(\.name)
         let start = registry.lastOpened.flatMap { names.contains($0) ? $0 : nil } ?? BrowserProfile.defaultName
         registered = registry.profiles
         self.names = names
-        current = start
-        let data = ProfileData(
-            name: start, entry: registry.profiles.first { $0.name == start }, directory: directory, keepsSiteData: keepsSiteData)
-        opened = [start: data]
-        let store = Self.makeStore(
-            with: data, contentBlocker: contentBlocker, downloads: downloads, loginFields: loginFields,
-            capturesConsole: capturesConsole)
-        self.store = store
-        stores = [start: store]
+        lastProfile = start
         // 最初の窓に最後に開いていたプロファイルを出し、ほかは続けて開く窓に出す。
-        var pending = [start]
-        for name in registry.lastWindows ?? [] where names.contains(name) && !pending.contains(name) {
-            pending.append(name)
+        var restoring = [start]
+        for name in registry.lastWindows ?? [] where names.contains(name) && !restoring.contains(name) {
+            restoring.append(name)
         }
-        pendingWindows = pending
+        self.restoring = restoring
     }
 
-    /// テスト用。渡したタブ管理を `default` として持つ、使い捨ての実体のモデル。
+    /// テスト用。AppKit の窓を持たない窓一枚が、渡したタブ管理を `default` として出して前にいる、使い捨ての実体のモデル。
     init(store: TabStore) {
         directory = nil
         keepsSiteData = false
@@ -91,9 +88,12 @@ final class BrowserModel {
         loginFields = store.passwordFill.places
         registered = []
         names = [BrowserProfile.defaultName]
-        current = BrowserProfile.defaultName
-        self.store = store
-        stores = [BrowserProfile.defaultName: store]
+        lastProfile = BrowserProfile.defaultName
+        let window = BrowserWindowSlot()
+        window.show(BrowserProfile.defaultName, store)
+        windows = [window]
+        activeWindow = window
+        focusedWindow = window
     }
 
     /// 普段使いの実体は登録した一覧を使い、使い捨ての実体は見せない（そこから持ち主のデータに触れないため）。
@@ -104,15 +104,24 @@ final class BrowserModel {
 
     var isPersistent: Bool { directory != nil }
 
+    /// 最後に前へ出たプロファイルの窓のプロファイル。窓がなければ `nil`。
+    var current: String? { activeWindow?.profile }
+
+    /// 最後に前へ出たプロファイルの窓のタブ管理。窓がなければ `nil`。
+    var store: TabStore? { activeWindow?.store }
+
+    /// 最後に前へ出たプロファイルの窓の AppKit の窓。
+    var currentWindow: NSWindow? { activeWindow?.window }
+
     private var registryURL: URL? { directory.map(ProfileRegistry.fileURL(in:)) }
 
     static func title(for name: String) -> String {
         name == BrowserProfile.defaultName ? "標準" : name
     }
 
-    // MARK: 作る・移る
+    // MARK: 作る・開く
 
-    /// プロファイルを作って一覧に足す。開くのは別（`switchTo`）。
+    /// プロファイルを作って一覧に足す。開くのは別（`openProfile`）。
     func create(_ rawName: String) throws -> String {
         let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
         if let registryURL {
@@ -130,58 +139,70 @@ final class BrowserModel {
         return name
     }
 
-    /// そのプロファイルへ移る。窓を省くと、最後に前へ出た窓で移る。移ったら `true`、もうそこにいたら `false`。
+    /// プロファイルを開いた結果。
+    enum Opening: Equatable {
+        /// もう前に出ている窓に出ていた。
+        case alreadyHere
+        /// ほかの窓に出ていたので、その窓を前に出した。
+        case broughtToFront
+        /// プロファイルを選ぶ前の窓に出した。
+        case shownInEmptyWindow
+        /// 新しい窓を頼んだ。窓が出たときに割り当てる。
+        case requestedWindow
+    }
+
+    /// そのプロファイルを開く。窓に出ていればその窓を前に出し、出ていなければ新しい窓で開く。今の窓のタブは閉じない。
     ///
-    /// ほかの窓に出ていれば、その窓を前に出すだけにする。そうでなければ、窓に出ていたプロファイルの閲覧状態を書き出して
-    /// ページをすべて閉じ、移る先のタブを閲覧状態から戻す。離れたプロファイルのページは生かしておかない
-    /// （切り替えは頻繁ではないので、戻ったときに選んでいたページだけ読み込み直す）。
+    /// プロファイルを選ぶ前の窓を渡すと（省くと、最後に前へ出た窓がそれなら）、新しい窓ではなくその窓に出す。
     @discardableResult
-    func switchTo(_ name: String, in window: BrowserWindowSlot? = nil) throws -> Bool {
+    func openProfile(_ name: String, in window: BrowserWindowSlot? = nil) throws -> Opening {
         guard names.contains(name) else { throw ProfileError("「\(name)」というプロファイルはない") }
-        let target = window ?? activeWindow
         if let shown = windows.first(where: { $0.profile == name }) {
-            guard shown !== target else { return false }
+            let wasActive = shown === activeWindow
             shown.window?.makeKeyAndOrderFront(nil)
             activate(shown)
-            return true
+            return wasActive ? .alreadyHere : .broughtToFront
         }
-        guard let target else {
-            // 窓がない（テストや、窓をすべて閉じたあと）。窓のない今のプロファイルを入れ替える。
-            guard name != current else { return false }
-            let leaving = current
-            show(name)
-            close(leaving)
+        if let empty = window ?? focusedWindow, empty.profile == nil, windows.contains(where: { $0 === empty }) {
+            empty.show(name, makeStore(for: name))
+            activate(empty)
             remember()
-            return true
+            return .shownInEmptyWindow
         }
-        let leaving = target.profile
-        show(name)
-        target.profile = name
-        activeWindow = target
-        if let leaving { close(leaving) }
-        closeProfilesWithoutWindow()
-        remember()
-        return true
+        if !requested.contains(name) {
+            requested.append(name)
+            if windows.isEmpty {
+                reopenApp()
+            } else {
+                windowRequests += 1
+            }
+        }
+        return .requestedWindow
     }
 
     /// メニューやキー、プロファイルを選ぶ窓から。失敗はアラートで見せる。
     func open(_ name: String, in window: BrowserWindowSlot? = nil) {
         do {
-            try switchTo(name, in: window)
+            try openProfile(name, in: window)
         } catch {
             failure = String(describing: error)
         }
     }
 
+    /// 窓をすべて閉じたあとに、最後に前へ出ていたプロファイルを開き直す（外から渡されたリンクのため）。
+    func openLastProfile() {
+        open(lastProfile)
+    }
+
     /// 新しいプロファイルの名前を、その窓で尋ねる。
     func beginCreating(in window: BrowserWindowSlot? = nil) {
-        creatingIn = window ?? activeWindow
+        creatingIn = window ?? focusedWindow
     }
 
     /// 名前を尋ねたシートから。失敗はアラートで見せる。
     func createAndOpen(_ rawName: String, in window: BrowserWindowSlot? = nil) {
         do {
-            try switchTo(try create(rawName), in: window)
+            try openProfile(try create(rawName), in: window)
         } catch {
             failure = String(describing: error)
         }
@@ -190,8 +211,8 @@ final class BrowserModel {
     /// 終了直前に呼ぶ。閲覧状態と履歴は変化から少し遅れて書き出すので、最後の変化を取りこぼさないよう書く。
     func saveBeforeQuit() {
         isQuitting = true
-        for store in stores.values {
-            store.saveSession()
+        for window in windows {
+            window.store?.saveSession()
         }
         for data in opened.values {
             data.history.saveNow()
@@ -203,113 +224,94 @@ final class BrowserModel {
 
     /// 窓が出たとき。起動して戻す窓がまだ残っていれば `true` を返すので、続けて窓を開くこと。
     ///
-    /// 起動したときは覚えていたプロファイルを順に出す。窓をすべて閉じたあとに開いた窓には、閉じる前のプロファイルを戻す。
-    /// それ以外（⌘N）はプロファイルを選ぶ前の窓になる。
+    /// 起動したときは覚えていたプロファイルを順に出す。新しい窓を頼んでいれば、頼んだプロファイルを出す。
+    /// 窓をすべて閉じたあとに開いた窓には、最後に前へ出ていたプロファイルを戻す。それ以外（⌘N）はプロファイルを選ぶ前の窓になる。
     func attach(_ window: BrowserWindowSlot) -> Bool {
         guard !windows.contains(where: { $0 === window }) else { return false }
         windows.append(window)
-        if !pendingWindows.isEmpty {
-            let name = pendingWindows.removeFirst()
-            if stores[name] == nil {
-                stores[name] = makeStore(for: name)
+        if !restoring.isEmpty {
+            let name = restoring.removeFirst()
+            if !isShown(name) {
+                window.show(name, makeStore(for: name))
             }
-            window.profile = name
-        } else if !isShown(current) {
-            window.profile = current
-        }
-        if activeWindow == nil {
+            if activeWindow == nil {
+                activeWindow = window
+            }
+        } else if !requested.isEmpty {
+            let name = requested.removeFirst()
+            if !isShown(name) {
+                window.show(name, makeStore(for: name))
+                // 頼んだ命令やキーが、続けてこの窓を相手にできるように。裏にいると窓が前に出た知らせが来ないため。
+                activeWindow = window
+            }
+        } else if activeWindow == nil, !isShown(lastProfile) {
+            window.show(lastProfile, makeStore(for: lastProfile))
             activeWindow = window
         }
-        guard pendingWindows.isEmpty else { return true }
+        if focusedWindow == nil {
+            focusedWindow = window
+        }
+        guard restoring.isEmpty else { return true }
         remember()
         return false
     }
 
-    /// 窓が閉じたとき。ほかにプロファイルを出している窓があれば、閉じた窓のプロファイルのページを閉じる。
-    /// 最後の窓なら、タブ管理はそのまま残す（Dock から窓を開き直したときに戻す）。
+    /// 窓が閉じたとき。最後の一枚でも、閉じた窓のプロファイルのタブ管理を閉じる。
+    /// 閲覧状態は書き出してあるので、窓を開き直せば戻る。
     func detach(_ window: BrowserWindowSlot) {
         guard windows.contains(where: { $0 === window }) else { return }
         windows.removeAll { $0 === window }
+        window.isClosed = true
         if creatingIn === window { creatingIn = nil }
+        if focusedWindow === window { focusedWindow = windows.last }
         if activeWindow === window {
-            activeWindow = windows.last { $0.profile != nil } ?? windows.last
+            activeWindow = windows.last { $0.profile != nil }
         }
         // 終えるときに窓が閉じても、次の起動で戻せるよう何も変えない（書き出しは saveBeforeQuit で済んでいる）。
-        guard !isQuitting, let name = window.profile,
-              let next = activeWindow?.profile ?? windows.last(where: { $0.profile != nil })?.profile
-        else { return }
-        if name == current { show(next) }
-        close(name)
+        guard !isQuitting, let name = window.profile, let store = window.store else { return }
+        lastProfile = activeWindow?.profile ?? name
+        store.shutDown()
+        // 小窓は開いたプロファイルのサイトデータを使っているので、残すと別のプロファイルの中に紛れる。
+        PopupWindows.close(openedBy: store)
         remember()
     }
 
-    /// 窓が前に出たとき。メニューと外部操作は、この窓のプロファイルを相手にする。
+    /// 窓が前に出たとき。プロファイルを出している窓なら、メニューと外部操作はこの窓のタブ管理を相手にする。
     func activate(_ window: BrowserWindowSlot) {
         guard windows.contains(where: { $0 === window }) else { return }
+        focusedWindow = window
+        guard let name = window.profile else { return }
         activeWindow = window
-        if let name = window.profile, name != current { show(name) }
-    }
-
-    /// その窓に出すタブ管理。プロファイルを選ぶ前の窓では `nil`。
-    func store(in window: BrowserWindowSlot) -> TabStore? {
-        window.profile.flatMap { stores[$0] }
+        lastProfile = name
     }
 
     func isShown(_ name: String) -> Bool {
         windows.contains { $0.profile == name }
     }
 
-    /// アラートを出す窓か。
-    func isActive(_ window: BrowserWindowSlot) -> Bool {
-        activeWindow === window
+    /// そのプロファイルを出している窓。
+    func window(showing name: String) -> BrowserWindowSlot? {
+        windows.first { $0.profile == name }
     }
 
-    /// `current` を出している AppKit の窓。
-    var currentWindow: NSWindow? {
-        windows.first { $0.profile == current }?.window
+    /// 新しい窓に出すのを待っているプロファイルがあるか。
+    var awaitsWindow: Bool { !requested.isEmpty }
+
+    /// 起動して戻す窓か、頼んだ窓がまだ出ていないか。
+    var isOpeningWindow: Bool { !restoring.isEmpty || !requested.isEmpty }
+
+    /// アラートを出す窓か。
+    func isActive(_ window: BrowserWindowSlot) -> Bool {
+        (focusedWindow ?? activeWindow) === window
     }
 
     // MARK: 内部
-
-    /// そのプロファイルを今のものにする。タブ管理がなければ閲覧状態から作る。
-    private func show(_ name: String) {
-        let next = stores[name] ?? makeStore(for: name)
-        stores[name] = next
-        current = name
-        store = next
-    }
-
-    /// プロファイルのページを閉じる。今のプロファイルは閉じない（`store` が閉じたものを指さないため）。
-    private func close(_ name: String) {
-        guard name != current, let leaving = stores.removeValue(forKey: name) else { return }
-        leaving.shutDown()
-        // 小窓は開いたプロファイルのサイトデータを使っているので、残すと別のプロファイルの中に紛れる。
-        PopupWindows.close(openedBy: leaving)
-    }
-
-    /// 窓に出ていないプロファイルのページを閉じる。プロファイルを出している窓がひとつもなければ何もしない。
-    private func closeProfilesWithoutWindow() {
-        let shown = Set(windows.compactMap(\.profile))
-        guard !shown.isEmpty else { return }
-        for name in Array(stores.keys) where !shown.contains(name) && !pendingWindows.contains(name) {
-            close(name)
-        }
-    }
 
     private func makeStore(for name: String) -> TabStore {
         let data = opened[name] ?? ProfileData(
             name: name, entry: registered.first { $0.name == name }, directory: directory, keepsSiteData: keepsSiteData)
         opened[name] = data
-        return Self.makeStore(
-            with: data, contentBlocker: contentBlocker, downloads: downloads, loginFields: loginFields,
-            capturesConsole: capturesConsole)
-    }
-
-    private static func makeStore(
-        with data: ProfileData, contentBlocker: ContentBlocker?, downloads: Downloads, loginFields: LoginFieldStore,
-        capturesConsole: Bool
-    ) -> TabStore {
-        TabStore(
+        return TabStore(
             factory: PageFactory(
                 dataStore: data.dataStore, contentBlocker: contentBlocker, downloads: downloads, capturesConsole: capturesConsole),
             bookmarks: data.bookmarks,
@@ -320,11 +322,12 @@ final class BrowserModel {
         )
     }
 
-    /// 次の起動で同じプロファイルの窓を開くために覚える。今のプロファイルの窓を最初に開く。
+    /// 次の起動で同じプロファイルの窓を開くために覚える。最後に前へ出ていたプロファイルの窓を最初に開く。
     /// 窓が一枚きりなら、窓の一覧は書かない。
     private func remember() {
         guard let registryURL else { return }
-        let lastOpened = current == BrowserProfile.defaultName ? nil : current
+        let first = activeWindow?.profile ?? lastProfile
+        let lastOpened = first == BrowserProfile.defaultName ? nil : first
         let shown = windows.compactMap(\.profile)
         let lastWindows = shown.count > 1 ? shown : nil
         do {
@@ -339,21 +342,33 @@ final class BrowserModel {
     }
 }
 
-/// 本体の窓一枚。どのプロファイルを出しているかと、その AppKit の窓。
+/// 本体の窓一枚。出しているプロファイルとそのタブ管理、AppKit の窓を持つ。
 ///
-/// ⌘N で開いてプロファイルを選ぶ前の窓は `profile` が `nil`。
+/// ⌘N で開いてプロファイルを選ぶ前の窓は、`profile` も `store` も `nil`。一度出したら、窓を閉じるまで変わらない。
 @MainActor
 @Observable
 final class BrowserWindowSlot {
-    fileprivate(set) var profile: String? {
-        didSet { rememberFrame() }
-    }
+    private(set) var profile: String?
+    private(set) var store: TabStore?
+    /// 窓が閉じた。閉じた最初の窓を開き直したときは、画面がこれを見て新しい窓の持ち物を作る。
+    @ObservationIgnored fileprivate(set) var isClosed = false
     /// 窓に置かれるまでは `nil`。テストでは窓を持たない。
     @ObservationIgnored weak var window: NSWindow? {
         didSet { rememberFrame() }
     }
 
     init() {}
+
+    /// プロファイルを出す。BrowserModel だけが呼ぶ。
+    fileprivate func show(_ name: String, _ store: TabStore) {
+        guard profile == nil else {
+            assertionFailure("窓の中でプロファイルを入れ替えない")
+            return
+        }
+        profile = name
+        self.store = store
+        rememberFrame()
+    }
 
     private func rememberFrame() {
         guard let window, let profile else { return }

@@ -24,6 +24,7 @@ struct HaneApp: App {
         let blocker = ContentBlocker.forInstance()
         Task { await blocker.prepare() }
         let model = BrowserModel.forInstance(contentBlocker: blocker)
+        model.reopenApp = ExternalLinks.reopen
         _model = State(initialValue: model)
         _settings = State(initialValue: settings)
         control = ControlService(model: model, settings: settings)
@@ -41,7 +42,7 @@ struct HaneApp: App {
     }
 
     var body: some Scene {
-        // 窓一枚にプロファイルを一つずつ出す。どの窓にどれを出すかは BrowserModel が決める。
+        // 窓一枚にプロファイルを一つずつ出す。どの窓にどれを出すかは BrowserModel が決め、窓を閉じるまで変えない。
         // 最初の窓は Window にする。WindowGroup は、hanectl のように裏で直に起こすと起動したときの窓を作らないため。
         Window("Hane", id: Self.windowID) {
             BrowserWindow(model: model)
@@ -79,10 +80,6 @@ enum WindowFrameMemory {
     static func remember(_ window: NSWindow, as profile: String) {
         let name = name(for: profile)
         guard window.frameAutosaveName != name else { return }
-        // 窓の中でプロファイルを切り替えたときは窓を動かさず、今の位置をそのプロファイルのものとして覚える。
-        if !window.frameAutosaveName.isEmpty {
-            window.saveFrame(usingName: name)
-        }
         _ = window.setFrameAutosaveName(name)
     }
 

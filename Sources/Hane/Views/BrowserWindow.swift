@@ -9,7 +9,7 @@ import WebKit
 struct BrowserWindow: View {
     @Bindable var model: BrowserModel
 
-    /// この窓。どのプロファイルを出すかは、窓が出たときに BrowserModel が決める。
+    /// この窓。どのプロファイルを出すかは、窓が出たとき（⌘N の窓ではプロファイルを選んだとき）に BrowserModel が決め、閉じるまで変えない。
     @State private var slot = BrowserWindowSlot()
     @Environment(\.dismissWindow) private var dismissWindow
     @Environment(\.openWindow) private var openWindow
@@ -22,19 +22,31 @@ struct BrowserWindow: View {
 
     var body: some View {
         Group {
-            if let store = model.store(in: slot) {
-                // プロファイルを切り替えるとタブ管理ごと入れ替わるので、中身も作り直し、アドレスバーの書きかけなどを持ち越さない。
+            if let store = slot.store {
                 content(store)
-                    .id(ObjectIdentifier(store))
             } else {
                 ProfilePicker(model: model, slot: slot)
             }
         }
         .navigationTitle(title)
-        .background { WindowSlotBinder(model: model, slot: slot) }
+        // 窓を結び直すときは、AppKit の窓への見張りも付け直す。
+        .background { WindowSlotBinder(model: model, slot: slot).id(ObjectIdentifier(slot)) }
         .onAppear {
+            // 閉じた最初の窓（Window）を開き直すと、SwiftUI は閉じる前の画面の状態のまま出すので、窓の持ち物を作り直す。
+            // 閉じた窓のタブ管理は閉じてあり、窓のプロファイルは入れ替えないため。
+            var window = slot
+            if window.isClosed {
+                window = BrowserWindowSlot()
+                slot = window
+            }
             // 起動して戻す窓が残っていれば、続けて開く。開いた窓が出たときにまた次を開く。
-            if model.attach(slot) {
+            if model.attach(window) {
+                openWindow(id: HaneApp.moreWindowsID)
+            }
+        }
+        .onChange(of: model.windowRequests) {
+            // ほかのプロファイルを新しい窓で開くよう頼まれた。開くのは窓のうち一枚だけが受け持つ。
+            if model.windows.first === slot {
                 openWindow(id: HaneApp.moreWindowsID)
             }
         }
@@ -51,7 +63,7 @@ struct BrowserWindow: View {
         } message: {
             Text(slot.profile == nil
                 ? "Cookie、ブックマーク、閲覧履歴、開いているタブをほかのプロファイルと分けて持ちます。このウインドウで開きます。"
-                : "Cookie、ブックマーク、閲覧履歴、開いているタブをほかのプロファイルと分けて持ちます。今開いているタブは閉じ、このウインドウで開きます。")
+                : "Cookie、ブックマーク、閲覧履歴、開いているタブをほかのプロファイルと分けて持ちます。新しいウインドウで開きます。")
         }
         .alert("プロファイル", isPresented: Binding(
             get: { model.failure != nil && model.isActive(slot) },
@@ -64,7 +76,7 @@ struct BrowserWindow: View {
     }
 
     private var title: String {
-        guard let store = model.store(in: slot) else { return "新しいウインドウ" + (BrowserInstance.name.map { " — \($0)" } ?? "") }
+        guard let store = slot.store else { return "新しいウインドウ" + (BrowserInstance.name.map { " — \($0)" } ?? "") }
         return (store.selected?.title ?? "Browser") + (windowLabel.map { " — \($0)" } ?? "")
     }
 

@@ -15,7 +15,7 @@ enum PopupWindows {
     /// 開いている小窓。閉じると外れる。
     private(set) static var windows: [PopupWindow] = []
 
-    /// そのタブ管理のページが開いた小窓を閉じる。プロファイルを切り替えるとき、前のプロファイルのサイトデータを使う窓を残さないため。
+    /// そのタブ管理のページが開いた小窓を閉じる。プロファイルの窓を閉じるとき、そのプロファイルのサイトデータを使う窓を残さないため。
     static func close(openedBy opener: any TabOpening) {
         // 閉じると `windows` から外れるので、写しを回す。
         for window in Array(windows) where window.opener === opener {

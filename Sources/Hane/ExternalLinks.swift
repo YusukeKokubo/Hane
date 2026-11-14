@@ -3,7 +3,7 @@ import ControlWire
 
 /// 外から渡されたリンク（既定のブラウザとして、ほかのアプリで踏まれたもの）を開く。
 ///
-/// メニューや外部操作と同じく、最後に前へ出たプロファイルの窓（`BrowserModel.current`）に新しいタブで開く。
+/// メニューや外部操作と同じく、最後に前へ出たプロファイルの窓（`BrowserModel.store`）に新しいタブで開く。
 @MainActor
 enum ExternalLinks {
     private static var receiver: Receiver?
@@ -31,40 +31,62 @@ enum ExternalLinks {
     }
 
     static func open(_ url: URL, in model: BrowserModel) {
-        place(url, in: model)
-        bringToFront(model)
+        if place(url, in: model) {
+            bringToFront(model)
+            return
+        }
+        // 窓をすべて閉じている。最後に前へ出ていたプロファイルの窓を開いてもらい、出てから置く。
+        model.openLastProfile()
+        NSApp.activate()
+        Task { @MainActor in
+            for _ in 0..<100 where model.store == nil {
+                try? await Task.sleep(for: .milliseconds(50))
+            }
+            guard place(url, in: model) else {
+                AppLog.logger.error("外から渡されたリンクを開けませんでした（窓が開かなかった）: \(url.absoluteString, privacy: .public)")
+                return
+            }
+            bringToFront(model)
+        }
     }
 
     /// 今のプロファイルのタブ管理にリンクを置く。窓を前に出すのは `open` の役目。
-    static func place(_ url: URL, in model: BrowserModel) {
-        // プロファイルを選ぶ前の窓しか残っていなければ、そこへ今のプロファイルを出す。
-        if !model.isShown(model.current), let empty = model.windows.last(where: { $0.profile == nil }) {
-            model.open(model.current, in: empty)
+    /// プロファイルを出している窓がひとつもなければ、置かずに `false` を返す。
+    @discardableResult
+    static func place(_ url: URL, in model: BrowserModel) -> Bool {
+        // プロファイルを選ぶ前の窓しか残っていなければ、そこへ最後に前へ出ていたプロファイルを出す。
+        if model.store == nil, model.windows.contains(where: { $0.profile == nil }) {
+            model.openLastProfile()
         }
+        guard let store = model.store else { return false }
         let request = URLRequest(url: url)
         // 開いたばかりの空のタブが選ばれていれば、そこで開く。並べると使わない空のタブが残る。
-        if let tab = model.store.selected, case .empty = tab.content {
+        if let tab = store.selected, case .empty = tab.content {
             tab.load(request)
         } else {
-            model.store.open(request)
+            store.open(request)
         }
+        return true
     }
 
-    /// 今のプロファイルの窓を前に出す。窓をすべて閉じていれば、Dock から開き直したときと同じく窓を開く。
+    /// 今のプロファイルの窓を前に出す。
     static func bringToFront(_ model: BrowserModel) {
         NSApp.unhide(nil)
         if let window = model.currentWindow ?? NSApp.windows.first(where: \.canBecomeMain) {
             window.deminiaturize(nil)
             window.makeKeyAndOrderFront(nil)
-        } else {
-            // 窓を開く手段は SwiftUI の画面の中にしかないので、Dock と同じ開き直しの頼みを自分に送る。
-            let reopen = NSAppleEventDescriptor(
-                eventClass: AEEventClass(kCoreEventClass), eventID: AEEventID(kAEReopenApplication),
-                targetDescriptor: .currentProcess(), returnID: AEReturnID(kAutoGenerateReturnID),
-                transactionID: AETransactionID(kAnyTransactionID))
-            _ = try? reopen.sendEvent(options: .noReply, timeout: TimeInterval(kAEDefaultTimeout))
         }
         NSApp.activate()
+    }
+
+    /// 窓をひとつも開いていないときに窓を出してもらう。窓を開く手段は SwiftUI の画面の中にしかないので、
+    /// Dock と同じ開き直しの頼みを自分に送る。
+    static func reopen() {
+        let reopen = NSAppleEventDescriptor(
+            eventClass: AEEventClass(kCoreEventClass), eventID: AEEventID(kAEReopenApplication),
+            targetDescriptor: .currentProcess(), returnID: AEReturnID(kAutoGenerateReturnID),
+            transactionID: AETransactionID(kAnyTransactionID))
+        _ = try? reopen.sendEvent(options: .noReply, timeout: TimeInterval(kAEDefaultTimeout))
     }
 
     @MainActor

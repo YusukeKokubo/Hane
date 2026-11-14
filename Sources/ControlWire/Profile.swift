@@ -2,7 +2,7 @@ import Foundation
 
 /// 環境変数 `HANE_INSTANCE` で選ぶ、アプリの実体（プロセス）の区別。
 ///
-/// 実体を分けるのは、開発や計測で持ち主の普段使いに触れないためだけ。プロファイルは一つの実体の中で切り替える（`BrowserProfile`）。
+/// 実体を分けるのは、開発や計測で持ち主の普段使いに触れないためだけ。プロファイルは一つの実体の中で窓ごとに開く（`BrowserProfile`）。
 /// 指定がなければ普段使いの実体で、持ち物を保存する。名前を付けた実体（dev、bench など）は何も保存しない使い捨てで、
 /// 操作用ソケットも別になる。
 public enum BrowserInstance {
@@ -27,7 +27,7 @@ public enum BrowserInstance {
         let environment = ProcessInfo.processInfo.environment
         if let retired = retiredKeys.first(where: { environment[$0] != nil }) {
             return "\(retired) は使えなくなった。開発用の実体は \(environmentKey)=<名前> で分ける"
-                + "（\(retired)=dev なら \(environmentKey)=dev）。プロファイルは実体の中で profile-open で切り替える。"
+                + "（\(retired)=dev なら \(environmentKey)=dev）。プロファイルは実体の中で profile-open で開く。"
         }
         if let name, let problem = problem(withName: name) { return "\(environmentKey) の名前が使えない: \(problem)" }
         return nil
@@ -57,7 +57,7 @@ public enum BrowserInstance {
     }
 }
 
-/// 一つの実体の中で切り替えるプロファイル。Cookie などのサイトデータ、ブックマーク、閲覧履歴、閲覧状態を分けて持つ。
+/// 一つの実体の中で窓ごとに開くプロファイル。Cookie などのサイトデータ、ブックマーク、閲覧履歴、閲覧状態を分けて持つ。
 ///
 /// 普段使いの実体では `default` と、一覧（`ProfileRegistry`）に登録した名前。使い捨ての実体では `default` と、
 /// その実体の中で作った名前で、どれも保存しない。
