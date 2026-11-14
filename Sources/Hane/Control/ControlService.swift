@@ -24,6 +24,8 @@ final class ControlService {
     private let windowElements: WindowElements
     /// アプリの起動とほぼ同時に作られるので、起動した時刻として使う。
     private let launchedAt = Date()
+    /// 操作用ソケットの待ち受け。`quit` で止める。
+    private var listener: ControlServer.Listener?
 
     private static let loadTimeout: Duration = .seconds(30)
     /// `hanectl` は 120 秒答えがないと落ちるので、条件を待つ上限はそれより短くする。
@@ -45,7 +47,7 @@ final class ControlService {
 
     func start() {
         do {
-            try ControlServer.start { [weak self] request in
+            listener = try ControlServer.start { [weak self] request in
                 await self?.respond(to: request) ?? ControlResponse(ok: false, output: "アプリが終了中")
             }
         } catch {
@@ -429,6 +431,10 @@ final class ControlService {
             return "switched: \(name)\n" + store.allTabs.map(describe).joined(separator: "\n")
 
         case "quit":
+            // 終わると決めたら、もう命令を受けない。終わるまでの間に届いた命令は、答える前に終わってしまい
+            // 「応答がなかった」になっていた。待ち受けをやめれば、次の hanectl は新しい実体を起こす。
+            listener?.stop()
+            listener = nil
             // 応答を返し終えてから終了する。
             Task {
                 try? await Task.sleep(for: .milliseconds(200))
@@ -437,6 +443,8 @@ final class ControlService {
                     if let sheet = window.attachedSheet { window.endSheet(sheet) }
                 }
                 NSApp.terminate(nil)
+                // ここへ戻るのは終了が取りやめになったときだけ。外から操作できない実体を残さないよう、待ち受けを戻す。
+                start()
             }
             // どの実体を止めたかを残す。同じプロファイルの古い実体が残っていて、思わぬ方を止めたことがあった。
             let executable = Bundle.main.executableURL?.path(percentEncoded: false) ?? "?"

@@ -3,11 +3,31 @@ import Foundation
 
 /// 操作用ソケットで待ち受け、届いた要求を1件ずつ `handler` に渡す。
 ///
-/// アプリが動いている間ずっと待ち受ける。ソケットの残骸は次回起動時に置き換える。
+/// アプリが動いている間、`stop()` されるまで待ち受ける。ソケットの残骸は次回起動時に置き換える。
 enum ControlServer {
     typealias Handler = @Sendable (ControlRequest) async -> ControlResponse
 
-    static func start(path: String = ControlSocket.path, handler: @escaping Handler) throws {
+    /// 待ち受けているソケット。止めると、そのパスへの接続は届かなくなる。
+    final class Listener: Sendable {
+        let fd: Int32
+        let path: String
+
+        fileprivate init(fd: Int32, path: String) {
+            self.fd = fd
+            self.path = path
+        }
+
+        /// パスを消して待ち受けをやめる。一度だけ呼ぶ（二度閉じると、使い回された別の記述子を閉じてしまう）。
+        ///
+        /// 先にパスを消すので、次の `hanectl` はつながらず、実体がいないとみなして新しい実体を起こす。
+        /// 待ち受けの糸は、閉じると `accept` が失敗して終わる。受け付け済みの要求には、そのまま答える。
+        func stop() {
+            unlink(path)
+            close(fd)
+        }
+    }
+
+    static func start(path: String = ControlSocket.path, handler: @escaping Handler) throws -> Listener {
         let listener = try ControlSocket.listen(at: path)
         let queue = DispatchQueue(label: "control.io", qos: .userInitiated, attributes: .concurrent)
 
@@ -24,6 +44,7 @@ enum ControlServer {
                 }
             }
         }
+        return Listener(fd: listener, path: path)
     }
 
     private static func serve(_ client: Int32, on queue: DispatchQueue, handler: @escaping Handler) {

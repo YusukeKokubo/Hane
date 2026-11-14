@@ -598,6 +598,19 @@ import WebKit
         try #require(store.tabs.count == count)
     }
 
+    /// 待ち受けをやめたら、そのパスにはつながらない（`quit` のあとの命令が、終わりかけの実体に吸われないため）。
+    @Test func stoppedServerRefusesConnections() async throws {
+        let path = FileManager.default.temporaryDirectory.appending(path: "c-\(UInt32.random(in: 0...UInt32.max)).sock").path(percentEncoded: false)
+        let listener = try ControlServer.start(path: path) { request in
+            ControlResponse(ok: true, output: request.args.joined(separator: " "))
+        }
+        let reply = await Task.detached { ControlSocket.send(["ping"], to: path) }.value
+        #expect(reply?.output == "ping")
+        listener.stop()
+        #expect(ControlSocket.connect(to: path) == nil)
+        #expect(!FileManager.default.fileExists(atPath: path))
+    }
+
     /// 読み込む前のタブのために Web ビューを作らせない。
     @Test func pageProcessIsNotCreatedForEmptyTabs() {
         let tab = store.newTab()
