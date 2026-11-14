@@ -105,6 +105,7 @@ public enum ControlHelp {
       hide <CSSセレクタ>       今のページで合う要素を隠し、このサイトで次から隠すよう覚える
                              ⌥右クリックで選んで「隠す」を押したのと同じ
       unhide                 今のサイトで隠した要素をすべて戻し、読み込み直す
+                             フィルタリストで止めた読み込みは requests の not loaded で見る
 
     開発と調査
       ui                     ウインドウの枠まわりの状態（窓の大きさと位置、アドレスバー、ボタン、
@@ -144,6 +145,17 @@ public enum ControlHelp {
       history [--limit N]    閲覧履歴を新しい順に。typed はアドレスバーで確定して訪れた回数
       logs [--limit N] [--clear]
                              console出力、未処理の例外、読み込み失敗の記録（新しい順ではなく時系列）
+      requests [--limit N] [--url <部分一致>] [--type <種類,…>] [--json]
+                             ページが読み込んだもの（ページ本体、スクリプト、画像、fetch など）を、フレームごとに始まった順で。
+                             列は、主フレームのページを開き始めてからの時刻、かかった時間、運んだ大きさ、種類、URL。
+                             大きさの cache はキャッシュから読んだもの、- は分からないもの（別のオリジンなど）
+                             iframe は見えていないものも辿り、snapshot と同じ番号（frame 1.2）か、見えていなければ frame h1 と出る。
+                             種類は script, img, link, css, fetch, xmlhttprequest, iframe, navigation など（--type script,img で絞る）
+                             最後の not loaded に、要素（script, img, link, iframe）が指しているのに読み込んだ記録がないものが出る。
+                             広告ブロックで止められたものはここに出る（つながらなかったもの、まだ読み込み中のものも混じる）。
+                             スクリプトが fetch などで頼んで止められたものは、どこにも出ない
+                             記録はページが自分で持っているもの（Resource Timing）を読むだけで、file: の資源は記録されない。
+                             一つの文書で 250 件を超えると、その後の読み込みは記録されない（そう書き添える）
       stats [--seconds N] [--json]
                              アプリと補助プロセスのメモリ、CPU、起床回数（wakeups/s）。
                              CPUと起床回数は N 秒間（既定 0.5、最大 60）の平均。何もしていない

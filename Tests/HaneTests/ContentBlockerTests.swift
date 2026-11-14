@@ -71,6 +71,68 @@ import WebKit
         #expect(await run("eval", "getComputedStyle(document.querySelector('.ad')).display").output == #""block""#)
     }
 
+    /// `requests` は、フレームごとの記録と、フィルタで止められた要素（記録がなく、要素の状態が失敗を示すもの）を出す。
+    /// file: の資源は WebKit が記録しないので、ここで記録として確かめられるのは各フレームのページ本体だけ。
+    @Test func requestsShowWhatTheFiltersStopped() async throws {
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let filters = directory.appending(path: "filters.txt")
+        try "/300x250b.\n".write(to: filters, atomically: true, encoding: .utf8)
+        let rules = try #require(WKContentRuleListStore(url: directory.appending(path: "rules")))
+        let blocker = ContentBlocker(store: rules, filterFiles: [filters], hidden: HiddenElementStore())
+        await blocker.prepare()
+        #expect(blocker.filterState == .ready(rules: 2, skipped: 0))
+
+        // 1画素の PNG。
+        let png = try #require(Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="))
+        for name in ["ok.png", "300x250b.png"] { try png.write(to: directory.appending(path: name)) }
+        try "body { color: red }".write(to: directory.appending(path: "300x250b.css"), atomically: true, encoding: .utf8)
+        try "<p>ad</p>".write(to: directory.appending(path: "300x250b.html"), atomically: true, encoding: .utf8)
+        try "<title>Child</title><p>child</p>".write(to: directory.appending(path: "child.html"), atomically: true, encoding: .utf8)
+        let page = directory.appending(path: "page.html")
+        try """
+        <title>Page</title><link rel="stylesheet" href="300x250b.css">
+        <img src="ok.png"><img src="300x250b.png">
+        <iframe src="300x250b.html" width="100" height="50"></iframe>
+        <iframe title="Child" src="child.html" width="100" height="50"></iframe>
+        <iframe id="hidden" src="child.html?hidden" style="display: none"></iframe>
+        """.write(to: page, atomically: true, encoding: .utf8)
+
+        let store = TabStore(factory: PageFactory(dataStore: .nonPersistent(), contentBlocker: blocker))
+        let service = ControlService(store: store)
+        func run(_ args: String...) async -> ControlResponse { await service.respond(to: ControlRequest(args: args)) }
+        #expect(await run("open", page.absoluteString).ok)
+
+        let response = await run("requests")
+        #expect(response.ok)
+        let output = response.output
+        let child = directory.appending(path: "child.html").absoluteString
+        #expect(output.contains("main — \(page.absoluteString)\n"), "\(output)")
+        #expect(output.contains("navigation    \(page.absoluteString)"), "\(output)")
+        // 止められたフレームは about:blank のまま、見えているので snapshot と同じ番号で出る。
+        #expect(output.contains("frame 1 (iframe) — about:blank\n  （記録なし）"), "\(output)")
+        #expect(output.contains("frame 2 (iframe \"Child\") — \(child)\n"), "\(output)")
+        #expect(output.contains("navigation    \(child)\n"), "\(output)")
+        // 見えていないフレームも辿る。
+        #expect(output.contains("frame h1 (iframe#hidden) — \(child)?hidden"), "\(output)")
+        #expect(output.contains("main  img    \(directory.appending(path: "300x250b.png").absoluteString) — 画像が出ていない"), "\(output)")
+        #expect(output.contains("main  link   \(directory.appending(path: "300x250b.css").absoluteString)"), "\(output)")
+        #expect(output.contains("main  iframe \(directory.appending(path: "300x250b.html").absoluteString) — 中身が空のまま"), "\(output)")
+        #expect(!output.contains("ok.png"), "\(output)")
+
+        let images = await run("requests", "--type", "img")
+        #expect(images.output.contains("300x250b.png") && !images.output.contains("300x250b.css"), "\(images.output)")
+        #expect(!images.output.contains("navigation"), "\(images.output)")
+
+        let json = await run("requests", "--json", "--url", "child")
+        let object = try #require(try JSONSerialization.jsonObject(with: Data(json.output.utf8)) as? [String: Any])
+        let frames = try #require(object["frames"] as? [[String: Any]])
+        #expect(frames.map { $0["frame"] as? String } == ["main", "frame 1", "frame 2", "frame h1"])
+        let requests = frames.flatMap { $0["requests"] as? [[String: Any]] ?? [] }
+        #expect(requests.map { $0["url"] as? String } == [child, child + "?hidden"], "\(json.output)")
+        #expect(frames.allSatisfy { ($0["notLoaded"] as? [Any])?.isEmpty ?? false })
+    }
+
     /// ページの設定が広告ブロックを掴んでも、閉じたタブのページは解放される。
     @Test func closedTabReleasesItsPageWithBlocker() async throws {
         let blocker = try makeBlocker()

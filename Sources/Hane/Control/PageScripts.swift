@@ -30,13 +30,18 @@ enum PageScripts {
     }
     """
 
+    /// 見えていないものも含めた子フレーム。広告のフレームは見えない大きさで置かれることが多く、通信を読むときはそれも辿るため。
+    private static let allFrames = """
+    const allFrames = () => Array.from(document.querySelectorAll('iframe, frame')).filter(f => f.contentWindow);
+    """
+
     /// 子フレームを一つ指して、その中で走らせるための手がかりを返す。
-    /// 引数: `index`（`childFrames` の順番）, `reveal`（表示している範囲の外ならスクロールして出す）。
+    /// 引数: `index`（`childFrames` の順番。`every` なら `allFrames` の順番）, `reveal`（表示している範囲の外ならスクロールして出す）。
     /// 返すのは、フレームの窓を表す `handle`（アプリが `WKFrameInfo` に引き直す）、フレームの中身の左上の位置
     /// （CSS の画素。このフレームの表示している範囲の左上から）、このフレームの表示している範囲の大きさ。
-    static let frame = childFrames + """
+    static let frame = childFrames + allFrames + """
     if (!window.webkit || !window.webkit.createJSHandle) return { error: 'この WebKit では子フレームを引けない（macOS 27 から）。' };
-    const f = childFrames()[index];
+    const f = (every ? allFrames() : childFrames())[index];
     if (!f) return { error: 'フレームが見つからない（ページが変わった）。snapshot を取り直すこと。' };
     if (reveal) {
       const r = f.getBoundingClientRect();
@@ -247,6 +252,72 @@ enum PageScripts {
     if (!found.length) return JSON.stringify({ error: '合う要素がない: ' + selector });
     for (const el of found) el.style.setProperty('display', 'none', 'important');
     return JSON.stringify({ count: found.length });
+    """
+
+    /// このフレームが読み込んだものと、ページの要素が指しているのに読み込んだ記録がないもの。引数なし。
+    ///
+    /// 読み込んだものは、ページが自分で持っている Resource Timing を読むだけにする。普段の閲覧の側で
+    /// リクエストを見張らずに済む。広告ブロックで止められた読み込みは WebKit が記録しない（つながらなかったものも）ので、
+    /// 要素の側から「指しているのに記録がない」ものを拾う。判定に使う要素の状態は、止められたときに試して確かめたもの。
+    /// 返すのは、時刻の起点（`performance.timeOrigin`）、フレームのアドレス、記録、資源の記録の件数、
+    /// 記録のないもの、子フレーム（`allFrames` の順。`visible` は `childFrames` での順番で、見えなければ -1）。
+    static let requests = childFrames + allFrames + """
+    const strip = u => String(u).split('#')[0];
+    const entries = performance.getEntriesByType('navigation').concat(performance.getEntriesByType('resource')).map(e => ({
+      type: e.entryType === 'navigation' ? 'navigation' : (e.initiatorType || 'other'),
+      url: e.name, start: e.startTime, duration: e.duration,
+      transfer: e.transferSize || 0, encoded: e.encodedBodySize || 0, decoded: e.decodedBodySize || 0,
+      protocol: e.nextHopProtocol || ''
+    }));
+    const seen = new Set(entries.map(e => strip(e.url)));
+    const missing = [];
+    const listed = new Set();
+    const note = (type, url, hint) => {
+      const key = type + ' ' + strip(url);
+      if (seen.has(strip(url)) || listed.has(key)) return;
+      listed.add(key);
+      missing.push({ type, url, hint });
+    };
+    const web = u => /^https?:/i.test(u);
+    // file: の資源は WebKit が記録しないので、状態で失敗が分かる要素だけ file: も見る。
+    const fetched = u => /^(https?|file):/i.test(u);
+    for (const el of document.querySelectorAll('script[src]')) {
+      const type = (el.getAttribute('type') || '').trim().toLowerCase();
+      if (el.noModule || (type && type !== 'module' && !/javascript|ecmascript/.test(type))) continue;
+      if (web(el.src)) note('script', el.src, '');
+    }
+    for (const el of document.querySelectorAll('img')) {
+      const url = el.currentSrc || el.src;
+      // 読み込み中や、遅延読み込みでまだ頼んでいないものは complete が false。
+      if (fetched(url) && el.complete && !el.naturalWidth) note('img', url, '画像が出ていない');
+    }
+    for (const el of document.querySelectorAll('link[href]')) {
+      if (!/(^|\\s)stylesheet(\\s|$)/i.test(el.rel) || el.disabled) continue;
+      if (fetched(el.href) && !el.sheet) note('link', el.href, 'スタイルが当たっていない');
+    }
+    for (const f of document.querySelectorAll('iframe[src], frame[src]')) {
+      if (!fetched(f.src)) continue;
+      // 止められたフレームは about:blank のまま残る。つながらなかったものはエラーのページになり、中を覗けない。
+      // 親の記録にはフレームの行がキャッシュから読んだとき出ないことがあるので、記録では決めない。
+      let href;
+      try { href = f.contentWindow && f.contentWindow.location.href; } catch { continue; }
+      if (href === 'about:blank') {
+        const key = f.localName + ' ' + strip(f.src);
+        if (!listed.has(key)) { listed.add(key); missing.push({ type: f.localName, url: f.src, hint: '中身が空のまま（about:blank）' }); }
+      }
+    }
+    const visible = childFrames();
+    const frames = allFrames().map(f => {
+      let label = f.localName;
+      if (f.id) label += '#' + f.id;
+      const name = (f.getAttribute('title') || f.getAttribute('aria-label') || f.getAttribute('name') || '').replace(/\\s+/g, ' ').trim();
+      if (name) label += ' "' + (name.length > 60 ? name.slice(0, 59) + '…' : name) + '"';
+      return { visible: visible.indexOf(f), label };
+    });
+    return {
+      origin: performance.timeOrigin, url: location.href, entries,
+      resources: performance.getEntriesByType('resource').length, missing, frames
+    };
     """
 
     /// 本文のテキスト。引数: `limit`（文字数の上限）。

@@ -535,4 +535,21 @@ import WebKit
         #expect(!response.output.contains("[3]"))
         #expect(response.output.contains("3 個の要素を省略"))
     }
+
+    /// `requests` はページが持っている記録を、フレームごとに読む。上限を超えた分は省いたと書く。
+    @Test func listsRequestsPerFrame() async throws {
+        #expect(await run("requests").output.contains("まだページがない"))
+        try await open(html: "<title>Req</title><iframe srcdoc='<p>inner</p>'></iframe>")
+
+        let response = await run("requests")
+        #expect(response.ok)
+        #expect(response.output.contains("main — file://"), "\(response.output)")
+        #expect(response.output.contains("navigation    file://"), "\(response.output)")
+        #expect(response.output.contains("frame 1 (iframe) — about:srcdoc"), "\(response.output)")
+        #expect(response.output.hasSuffix("not loaded: なし"), "\(response.output)")
+
+        let limited = await run("requests", "--limit", "0")
+        #expect(limited.output.contains("件を省略（requests --limit"), "\(limited.output)")
+        #expect(!limited.output.contains("navigation"), "\(limited.output)")
+    }
 }
