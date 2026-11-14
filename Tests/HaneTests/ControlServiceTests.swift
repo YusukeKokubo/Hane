@@ -197,6 +197,67 @@ import WebKit
         #expect(await run("help").output.contains("snapshot"))
     }
 
+    /// 読み込みのあとにスクリプトが描く画面を、条件を付けた wait で待てる。時間切れは失敗で、理由に最後の状態が出る。
+    @Test func waitsForConditions() async throws {
+        try await open(html: """
+        <title>Late</title><p id="box">first</p>
+        <script>
+        setTimeout(() => { document.getElementById('box').textContent = 'loaded body'; }, 400);
+        setTimeout(() => {
+          const el = document.createElement('button'); el.className = 'late'; el.textContent = 'Go';
+          document.body.append(el);
+          const hidden = document.createElement('i'); hidden.className = 'late-hidden'; hidden.style.display = 'none';
+          document.body.append(hidden);
+        }, 400);
+        setTimeout(() => { window.ready = 42; }, 400);
+        </script>
+        """)
+
+        var response = await run("wait", "--text", "loaded body")
+        #expect(response.ok, "\(response.output)")
+        #expect(response.output.contains("条件が成り立った"), "\(response.output)")
+        #expect(await run("wait", "--selector", "button.late", "--js", "window.ready === 42").ok)
+        #expect(await run("wait", "--js", "window.ready").ok, "await なしの式でも真偽で見る")
+
+        // 見えていない要素は数えない。
+        response = await run("wait", "--selector", ".late-hidden", "--timeout", "0.5")
+        #expect(!response.ok)
+        #expect(response.output.contains("最後に見えた状態"), "\(response.output)")
+        #expect(response.output.contains("見えている要素 0 個"), "\(response.output)")
+
+        response = await run("wait", "--text", "never appears", "--timeout", "0.5")
+        #expect(!response.ok)
+        #expect(response.output.contains(#"text "never appears": ない"#), "\(response.output)")
+
+        #expect(await !run("wait", "--timeout", "500", "--text", "x").ok, "上限を超える時間切れは断る")
+        #expect(await !run("wait", "--gone").ok, "条件なしの --gone は断る")
+        #expect(await !run("wait", "--selector", "[", "--timeout", "0.3").ok, "書き損じのセレクタは成り立たないまま時間切れ")
+    }
+
+    /// --gone は、条件が消えるまで待つ。
+    @Test func waitsForConditionsToGoAway() async throws {
+        try await open(html: """
+        <title>Spinner</title><div class="spinner">Loading…</div>
+        <script>setTimeout(() => document.querySelector('.spinner').remove(), 400);</script>
+        """)
+        let response = await run("wait", "--gone", "--selector", ".spinner")
+        #expect(response.ok, "\(response.output)")
+        #expect(await run("wait", "--gone", "--text", "Loading", "--timeout", "0.4").ok, "消えたあとは --gone がすぐ通る")
+    }
+
+    /// 待っている間にページが移ったら、移った先で待ち続ける。
+    @Test func waitFollowsNavigation() async throws {
+        let target = FileManager.default.temporaryDirectory.appending(path: "control-wait-\(UUID().uuidString).html")
+        try "<title>Next</title><p>arrived here</p>".write(to: target, atomically: true, encoding: .utf8)
+        try await open(html: """
+        <title>Start</title><p>before</p>
+        <script>setTimeout(() => { location.href = '\(target.absoluteString)'; }, 300);</script>
+        """)
+        let response = await run("wait", "--text", "arrived here", "--timeout", "10")
+        #expect(response.ok, "\(response.output)")
+        #expect(response.output.contains("Next"), "\(response.output)")
+    }
+
     @Test func readsAndOperatesPage() async throws {
         try await open(html: Self.form)
 

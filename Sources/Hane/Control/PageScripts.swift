@@ -324,4 +324,16 @@ enum PageScripts {
     const body = document.body ? document.body.innerText : '';
     return body.length > limit ? body.slice(0, limit) + '\\n… （以下省略。全' + body.length + '文字）' : body;
     """
+
+    /// `wait` の条件を一度確かめる。引数: `text`、`selector`（どちらも null なら見ない）。
+    /// 合う要素は、見えているものだけ数える。
+    static let waitCondition = """
+    const result = {};
+    if (text !== null) result.text = document.body ? document.body.innerText.includes(text) : false;
+    if (selector !== null) {
+      result.selector = Array.from(document.querySelectorAll(selector)).filter(el =>
+        el.getClientRects().length > 0 && el.checkVisibility({ visibilityProperty: true })).length;
+    }
+    return result;
+    """
 }

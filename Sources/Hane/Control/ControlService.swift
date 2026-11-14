@@ -25,6 +25,8 @@ final class ControlService {
     private let launchedAt = Date()
 
     private static let loadTimeout: Duration = .seconds(30)
+    /// `hanectl` は 120 秒答えがないと落ちるので、条件を待つ上限はそれより短くする。
+    private static let waitTimeoutLimit: Double = 100
 
     init(model: BrowserModel, settings: SettingsStore = SettingsStore()) {
         self.model = model
@@ -125,7 +127,24 @@ final class ControlService {
             return try await settled(tab)
 
         case "wait":
-            return try await settled(try target())
+            let text = try takeOption("--text", from: &args)
+            let selector = try takeOption("--selector", from: &args)
+            let script = try takeOption("--js", from: &args)
+            let gone = takeFlag("--gone", from: &args)
+            let timeout = try takeOption("--timeout", from: &args).map { text in
+                guard let value = Double(text), (0.1...Self.waitTimeoutLimit).contains(value) else {
+                    throw ControlError("--timeout は 0.1〜\(Int(Self.waitTimeoutLimit)) 秒の数で指定すること: \(text)")
+                }
+                return value
+            } ?? 10
+            let path = try takeOption("--frame", from: &args).map(Self.framePath)
+            if let extra = args.first { throw ControlError("wait に余分な引数がある: \(extra)") }
+            let conditions = WaitConditions(text: text, selector: selector, script: script, gone: gone)
+            guard !conditions.isEmpty else {
+                if gone || path != nil { throw ControlError("--gone と --frame には、--text、--selector、--js のどれかが要る。") }
+                return try await settled(try target())
+            }
+            return try await waitFor(conditions, in: path, timeout: timeout, on: try target())
 
         case "sleep":
             let number = try args.first.map { try integer($0, "タブ番号") } ?? tabNumber
@@ -996,6 +1015,110 @@ final class ControlService {
             throw ControlError("読み込みに失敗: \(failure)\n" + describe(tab))
         }
         return describe(tab) + (tab.isLoading ? "\n（まだ読み込み中。`wait` で続きを待てる）" : "")
+    }
+
+    // MARK: 条件を待つ
+
+    /// `wait` で待つ条件。決めたものすべてが成り立つまで（`gone` ならどれも成り立たなくなるまで）待つ。
+    private struct WaitConditions {
+        let text: String?
+        let selector: String?
+        let script: String?
+        let gone: Bool
+
+        var isEmpty: Bool { text == nil && selector == nil && script == nil }
+    }
+
+    /// 確かめの結果。`detail` は、足りなかったものを理由に書くための今の様子。
+    private struct WaitReport {
+        let met: Bool
+        let detail: String
+    }
+
+    /// 確かめを別の仕事として走らせている間の結果の置き場。
+    ///
+    /// アラートのシートが出るとページのスクリプトは返らなくなるので、待つ側は確かめの返りを待たずに
+    /// シートと時間切れを見張る。返らないまま置き去りにした確かめは、シートに答えれば自然に終わる。
+    @MainActor
+    private final class WaitPoll {
+        var running = false
+        var report: WaitReport?
+    }
+
+    /// 命令の間だけ、短い間隔でページに尋ねて、条件が成り立つまで待つ。
+    ///
+    /// 常駐の見張りを足さないよう、普段の閲覧には何も掛けず、尋ねるのはこの命令の間だけにしている。
+    /// 読み込みが始まったら（ページが移ったら）終わるまで待ち、移った先で確かめ続ける。
+    private func waitFor(_ conditions: WaitConditions, in path: [Int]?, timeout: Double, on tab: Tab) async throws -> String {
+        guard tab.page != nil else { throw ControlError("このタブにはまだページがない。先に `open <URL>` を行うこと。") }
+        let clock = ContinuousClock()
+        let started = clock.now
+        let deadline = started + .seconds(timeout)
+        let poll = WaitPoll()
+        var last = "（まだ確かめられていない）"
+        while true {
+            if let sheet = model.currentWindow?.attachedSheet, sheet.isVisible {
+                throw ControlError("アラートのシートが出ていて、ページのスクリプトが止まっている。"
+                    + "先に ui-snapshot と ui-click か key return で答えること。\n最後に見えた状態: \(last)")
+            }
+            // 確かめている間に読み込みが始まっていたら、移る前のページの結果なので捨てる。
+            if let report = poll.report {
+                poll.report = nil
+                if !tab.isLoading {
+                    last = report.detail
+                    if report.met {
+                        let elapsed = clock.now - started
+                        return describe(tab) + "\nwait: 条件が成り立った（\(elapsed.formatted(.units(allowed: [.seconds], fractionalPart: .show(length: 1)))) 後）\n" + last
+                    }
+                }
+            }
+            if !tab.isLoading, let failure = tab.failure {
+                throw ControlError("読み込みに失敗: \(failure)\n" + describe(tab))
+            }
+            if clock.now >= deadline {
+                throw ControlError("条件が成り立たないまま \(timeout) 秒たった。\n最後に見えた状態: \(last)"
+                    + (poll.running ? "（確かめのスクリプトが返っていない）" : "")
+                    + (tab.isLoading ? "\n（まだ読み込み中）" : "") + "\n" + describe(tab))
+            }
+            if !tab.isLoading, !poll.running {
+                poll.running = true
+                Task { @MainActor in
+                    poll.report = await checkWait(conditions, in: path, on: tab)
+                    poll.running = false
+                }
+            }
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+    }
+
+    /// 条件をページで一度確かめる。ページが移っている最中などで尋ねられなければ、成り立っていないものとする。
+    private func checkWait(_ conditions: WaitConditions, in path: [Int]?, on tab: Tab) async -> WaitReport {
+        var results: [(present: Bool, label: String)] = []
+        do {
+            let frame = try await frame(at: path ?? [], on: tab)
+            if conditions.text != nil || conditions.selector != nil {
+                let value = try await scriptValue(
+                    PageScripts.waitCondition,
+                    ["text": conditions.text ?? NSNull(), "selector": conditions.selector ?? NSNull()],
+                    on: tab, in: frame.info) as? [String: Any]
+                if let text = conditions.text, let present = value?["text"] as? Bool {
+                    results.append((present, "text \"\(text)\": " + (present ? "ある" : "ない")))
+                }
+                if let selector = conditions.selector, let count = value?["selector"] as? Int {
+                    results.append((count > 0, "selector \(selector): 見えている要素 \(count) 個"))
+                }
+            }
+            if let code = conditions.script {
+                let json = try await evaluate(code, on: tab, in: frame.info)
+                let truthy = !["null", "false", "0", "\"\""].contains(json)
+                results.append((truthy, "js: \(json)"))
+            }
+        } catch {
+            return WaitReport(met: false, detail: "（尋ねられなかった: \(Self.describe(error))）")
+        }
+        let met = conditions.gone ? results.allSatisfy { !$0.present } : results.allSatisfy(\.present)
+        let label = conditions.gone ? "消えるのを待っている: " : ""
+        return WaitReport(met: met, detail: label + results.map(\.label).joined(separator: "; "))
     }
 
     // MARK: 広告ブロック
