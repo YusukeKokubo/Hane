@@ -179,6 +179,16 @@ import WebKit
         try #require(tab.page?.url == url && !tab.isLoading, "\(String(describing: tab.page?.url))")
     }
 
+    /// 戻る・進むを試すテストのページ。プロセスプールをほかのテストと分ける。
+    ///
+    /// 戻るときに使う「戻る」用の控え（back-forward cache）はプールごとに2つしかなく、並んで走るほかのテストのページが
+    /// 移るたびに古いものから追い出される。戻り始めてから決まるまでの間に追い出されると、WebKit は読み込みを
+    /// 確定させないまま止まり（`isLoading` が下りない）、テストが落ちていた。アプリはプールを全タブで共有するが、
+    /// ここで見たいのは眠らせ方と履歴の戻し方なので、プールは分ける（docs/pitfalls.md の「タブとページ」）。
+    private func isolatedFactory() -> PageFactory {
+        PageFactory(dataStore: .nonPersistent(), base: WKWebViewConfiguration())
+    }
+
     /// 二つ移ってから一つ戻ったタブ。戻る先と進む先が一つずつある。
     private func browsedTab(in store: TabStore) async throws -> (tab: Tab, pages: [URL]) {
         let pages = try ["one", "two", "three"].map(write)
@@ -194,7 +204,7 @@ import WebKit
     }
 
     @Test func sleepingReleasesThePageAndWakingRestoresHistory() async throws {
-        let store = TabStore(factory: PageFactory(dataStore: .nonPersistent()))
+        let store = TabStore(factory: isolatedFactory())
         let (tab, pages) = try await browsedTab(in: store)
         store.selectedID = store.tabs[0].id
 
@@ -220,14 +230,14 @@ import WebKit
 
     /// 再起動しても、戻る・進むの履歴が残る。
     @Test func sessionKeepsHistoryAcrossLaunches() async throws {
-        let first = TabStore(factory: PageFactory(dataStore: .nonPersistent()))
+        let first = TabStore(factory: isolatedFactory())
         let (_, pages) = try await browsedTab(in: first)
         let saved = first.sessionSnapshot()
         #expect(saved.pages.last?.state != nil)
 
         let session = SessionStore()
         session.save(saved)
-        let next = TabStore(factory: PageFactory(dataStore: .nonPersistent()), session: session)
+        let next = TabStore(factory: isolatedFactory(), session: session)
         let tab = try #require(next.selected)
         #expect(tab.url == pages[1])
         try await arrive(tab, at: pages[1])

@@ -18,15 +18,18 @@ final class PageFactory {
     /// テストのダウンロードは一時フォルダに置く。
     /// `capturesConsole` は、`hanectl logs` 用に console 出力と例外を拾うか。ページ全部に処理が乗るので、
     /// 開発用の実体だけが付ける。既定はテスト向けに付ける。
+    /// `base` は設定の元。省くと全ページで共有する元（`SharedConfiguration`）を写す。
+    /// テストで、ほかのテストのページとプロセスプールを分けたいときだけ渡す。
     init(
         dataStore: WKWebsiteDataStore = .nonPersistent(),
         contentBlocker: ContentBlocker? = nil,
         downloads: Downloads = Downloads(directory: Downloads.temporaryDirectory(for: "test-\(UUID().uuidString)")),
-        capturesConsole: Bool = true
+        capturesConsole: Bool = true,
+        base: WKWebViewConfiguration? = nil
     ) {
         self.contentBlocker = contentBlocker
         self.downloads = downloads
-        let configuration = SharedConfiguration.copy()
+        let configuration = base ?? SharedConfiguration.copy()
         configuration.websiteDataStore = dataStore
 
         // 受け口は全ページで一つ。ページからの知らせは、どの Web ビューから来たかで振り分ける。

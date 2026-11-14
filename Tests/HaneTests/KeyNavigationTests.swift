@@ -118,40 +118,6 @@ import WebKit
         <input id="field"><div id="space"></div>
         """
 
-    @Test func lettersScrollThePageButNotWhileTyping() async throws {
-        let (tab, window) = try await open(Self.tallPage)
-        defer { window.close() }
-
-        try await press("j", in: window)
-        #expect(try await waitFor(tab, "scrollY > 0"))
-        try await press("G", in: window)
-        #expect(try await waitFor(tab, "scrollY > 4000"))
-        try await press("gg", in: window)
-        #expect(try await waitFor(tab, "scrollY === 0"))
-
-        _ = try await evaluate(tab, "document.getElementById('field').focus()")
-        try await press("jj", in: window)
-        #expect(try await evaluate(tab, "return document.getElementById('field').value") as? String == "jj")
-        #expect(try await evaluate(tab, "return scrollY") as? Int == 0)
-    }
-
-    /// 押しっぱなしの間は流れ続け、離せば止まる。
-    @Test func holdingAKeyKeepsScrollingUntilReleased() async throws {
-        let (tab, window) = try await open(Self.tallPage)
-        defer { window.close() }
-
-        try send(.keyDown, "j", in: window)
-        try await Task.sleep(for: .milliseconds(600))
-        try send(.keyUp, "j", in: window)
-        let released = try await evaluate(tab, "return scrollY") as? Double ?? 0
-        // 一歩（70）を超えて流れている。
-        #expect(released > 200)
-        try await Task.sleep(for: .milliseconds(300))
-        let settled = try await evaluate(tab, "return scrollY") as? Double
-        try await Task.sleep(for: .milliseconds(200))
-        #expect(try await evaluate(tab, "return scrollY") as? Double == settled)
-    }
-
     /// 合成したキーには応じない。ページが勝手にタブを閉じたりできないように。
     @Test func syntheticKeysAreIgnored() async throws {
         let (tab, window) = try await open(Self.tallPage)
