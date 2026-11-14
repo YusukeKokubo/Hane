@@ -577,6 +577,13 @@ import WebKit
         #expect(store.tabs.count == 1)
         #expect(await run("eval", "String(window.login.opener === window)").output == "\"true\"")
 
+        // 小窓が読み終えてから閉じる。読み込みの途中で開いた側から close() すると、WebKit はその場で
+        // window.closed を true にするが、あとから確定した読み込みで窓が生き返り、閉じた知らせ（webViewDidClose）も
+        // 来ないことがあった。本物のログインの小窓は読み終えてから閉じるので、その順で確かめる。
+        let popup = try #require(PopupWindows.windows.first { $0.opener === store })
+        for _ in 0..<100 where popup.page.isLoading || popup.page.title != "Login" {
+            try await Task.sleep(for: .milliseconds(20))
+        }
         _ = await run("eval", "window.login.close(); 1")
         for _ in 0..<50 where popups > 0 {
             try await Task.sleep(for: .milliseconds(50))

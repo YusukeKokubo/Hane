@@ -1023,10 +1023,40 @@ final class ControlService {
         while tab.isLoading, clock.now < deadline {
             try? await Task.sleep(for: .milliseconds(100))
         }
+        if !tab.isLoading { await awaitTitle(of: tab) }
         if let failure = tab.failure {
             throw ControlError("読み込みに失敗: \(failure)\n" + describe(tab))
         }
         return describe(tab) + (tab.isLoading ? "\n（まだ読み込み中。`wait` で続きを待てる）" : "")
+    }
+
+    /// 尋ねたページの題名の置き場。返りを待たずにシートを見張るため、別の仕事から書き込む。
+    @MainActor
+    private final class TitleProbe {
+        var done = false
+        var title: String?
+    }
+
+    /// 読み終えたページの題名が、アプリ（`Page.title`）に届くまで待つ。
+    ///
+    /// WebKit は読み終えた知らせ（`isLoading` が偽になる）の数ミリ秒後に題名を知らせることがあり、
+    /// その間に返ると題名の欠けた状態を返してしまう。題名のないページもあるので、題名が届くのを待つだけでは
+    /// 終わりが分からない。そこでページに `document.title` を尋ね、それがアプリに届くまで待つ。
+    /// アラートのシートが出るとスクリプトが返らないので、返りを直に待たずにシートを見張る（`waitFor` と同じ）。
+    private func awaitTitle(of tab: Tab) async {
+        guard let page = tab.page else { return }
+        let probe = TitleProbe()
+        Task { @MainActor [world] in
+            probe.title = try? await page.callJavaScript("return document.title", arguments: [:], contentWorld: world) as? String
+            probe.done = true
+        }
+        let clock = ContinuousClock()
+        let deadline = clock.now + .seconds(1)
+        while clock.now < deadline, !tab.isLoading, tab.page === page {
+            if let sheet = model.currentWindow?.attachedSheet, sheet.isVisible { return }
+            if probe.done, (probe.title ?? "").isEmpty || page.title == probe.title { return }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
     }
 
     // MARK: アプリ自身の記録
