@@ -36,10 +36,15 @@ public enum ControlHelp {
 
     ページを読む
       snapshot [--limit N]   操作できる要素を番号つきで一覧する。見出しも併せて出る
-      text [--limit N]       本文のテキスト
+                             iframe の中も（別のオリジンや入れ子も）、そのフレームの行（frame 1、frame 1.2 など。
+                             iframe の名札とアドレス）の下に字下げして続く。番号はページ全体の通しで、どの命令でもそのまま使える。
+                             フレームは主フレームの要素の後ろに、ページに並んだ順で出る
+      text [--limit N] [--frame <フレーム>]
+                             本文のテキスト。--frame 1.2 のように snapshot のフレームを指すと、その中の本文
       screenshot [保存先]     見えている範囲をPNGで保存し、パスを返す（選択中のタブのみ）
                              --full を付けるとページ全体を撮る
-      eval <JavaScript>      式の値、または return した値をJSONで返す
+      eval [--frame <フレーム>] <JavaScript>
+                             式の値、または return した値をJSONで返す。--frame で snapshot のフレームの中で走らせる
 
     ページを操作する（番号は直前の snapshot のもの）
       click <番号>            クリックする
@@ -50,12 +55,14 @@ public enum ControlHelp {
                              ui に overlay: sheet と出たままになったら quit で閉じる
       fill <番号> <文字列>     入力欄に文字列を入れる。select要素なら選択肢を選ぶ
       press <キー> [番号]      キーを送る（Enter, Escape, Tab, ArrowDown など）。Enter はフォームを送信する
+                             番号を省くとフォーカスのある要素へ（iframe の中にフォーカスがあれば、その中の要素へ）
                              click / fill / press はページの中で作った事象で、ページからは isTrusted が false に見える
 
     ページへ本物の入力を渡す（利用者が操作したのと同じく isTrusted が true。選択中のタブのページだけ）
       page-click [--right] [--with <修飾>] <番号|x,y>
                              要素（snapshot の番号）の真ん中か、位置 x,y（CSS の画素。表示している範囲の左上から）を
                              押して離す。番号の要素が画面の外なら真ん中へスクロールしてから押す。
+                             iframe の中の要素は、iframe の位置を足した位置で押す（結果に in frame 1 などと付く）
                              押した位置で事象を受ける要素を返す（ほかの要素に覆われていれば、手前のものを書く）
                              --right で右クリック、--with opt や --with cmd+shift で修飾キーを押しながら
                              例: page-click --right --with opt 5（⌥右クリックで、隠す要素を選び始める）
@@ -161,7 +168,9 @@ public enum ControlHelp {
 
     注意
       ・ページが変わったら番号は無効になる。操作の前に snapshot を取り直すこと。
-      ・iframe の中の要素は snapshot に出ない。
+      ・iframe の中を読めるのは macOS 27 から。中を読めないフレームは、snapshot のフレームの行にわけが付く。
+        読み込めず中身のない iframe（つながらなかったものなど）と、見えていない iframe は出ない。
+      ・iframe を x,y の位置で page-click すると、押すことはできるが、返す要素は iframe そのものになる。
       ・窓まわりのドラッグ（タブやブックマークの並べ替え）はできない。作ったマウスの事象ではドラッグが始まらない。
       ・失敗したときは終了コード1で、理由を標準エラーに出す。
     """

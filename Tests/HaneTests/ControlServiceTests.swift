@@ -274,6 +274,78 @@ import WebKit
         #expect(await !run("page-key").ok)
     }
 
+    /// iframe の中の要素も snapshot に出て、番号は通しで振られ、その番号で操作できる。
+    /// `file://` のページは互いに別のオリジンなので、ページのスクリプトからは中に触れない場合を兼ねている。
+    @Test func readsAndOperatesInsideFrames() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: "control-frames-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let child = directory.appending(path: "child.html")
+        try """
+            <title>Child</title><style>body { margin: 0 }</style>
+            <label>Card <input id="card"></label>
+            <button onclick="document.getElementById('out').textContent = 'paid ' + document.getElementById('card').value + ' ' + event.isTrusted">Pay</button>
+            <p id="out">not yet</p>
+            <iframe srcdoc="<button onclick=&quot;this.textContent = 'nested ok'&quot;>Nested</button>" width="200" height="60"></iframe>
+            """.write(to: child, atomically: true, encoding: .utf8)
+        let top = directory.appending(path: "top.html")
+        try """
+            <title>Top</title><style>body { margin: 0 } iframe { border: 0; display: block }</style>
+            <button>Top</button>
+            <iframe id="pay" title="Payment" src="child.html" width="400" height="200"></iframe>
+            <button>After</button>
+            """.write(to: top, atomically: true, encoding: .utf8)
+        let opened = await run("open", top.absoluteString)
+        try #require(opened.ok, "\(opened.output)")
+        // 子フレームの読み込みは主フレームの完了の知らせより遅れることがある。
+        for _ in 0..<50 {
+            if await run("eval", "--frame", "1", "document.title").output == #""Child""# { break }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+
+        var response = await run("snapshot")
+        #expect(response.output.contains("""
+            [1] button "Top"
+            [2] button "After"
+            frame 1: iframe#pay "Payment" — \(child.absoluteString)
+              [3] textbox "Card"
+              [4] button "Pay"
+              frame 1.1: iframe — about:srcdoc
+                [5] button "Nested"
+            """), "\(response.output)")
+
+        #expect(await run("fill", "3", "4242").ok)
+        response = await run("click", "4")
+        #expect(response.ok, "\(response.output)")
+        #expect(await run("eval", "--frame", "1", "document.getElementById('out').textContent").output == #""paid 4242 false""#)
+        #expect(await run("text", "--frame", "1").output.contains("paid 4242"))
+        #expect(await !run("text").output.contains("paid 4242"), "主フレームの本文には子フレームの中身は入らない")
+        _ = await run("click", "5")
+        #expect(await run("eval", "--frame", "1.1", "document.body.innerText").output == #""nested ok""#)
+        #expect(await run("eval", "--frame", "2", "1").output.contains("snapshot を取り直す"))
+        #expect(await !run("eval", "--frame", "0", "1").ok)
+
+        // あとから足された iframe も、snapshot を取り直せば出る。
+        _ = await run("eval", "document.body.append(Object.assign(document.createElement('iframe'), { srcdoc: '<button>Late</button>' })); 1")
+        for _ in 0..<50 {
+            if await run("snapshot").output.contains("Late") { break }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        response = await run("snapshot")
+        #expect(response.output.contains("frame 2: iframe — about:srcdoc\n  [6] button \"Late\""), "\(response.output)")
+
+        // 本物の入力は、iframe の位置を足した位置で押す。
+        let page = try #require(store.selected?.page)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 400), styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        page.webView.frame = window.contentLayoutRect
+        window.contentView = page.webView
+        response = await run("page-click", "4")
+        #expect(response.output.hasPrefix(#"clicked button "Pay" in frame 1 at "#), "\(response.output)")
+        #expect(await run("eval", "--frame", "1", "document.getElementById('out').textContent").output == #""paid 4242 true""#)
+    }
+
     @Test func evaluatesExpressionsAndStatements() async throws {
         try await open(html: "<title>T</title><p>x</p>")
 

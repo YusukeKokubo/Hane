@@ -117,8 +117,9 @@ final class Page {
         return await webView.requestMediaPlaybackState() == .playing
     }
 
-    func callJavaScript(_ body: String, arguments: [String: Any], contentWorld: WKContentWorld) async throws -> Any? {
-        try await webView.callAsyncJavaScript(body, arguments: arguments, in: nil, contentWorld: contentWorld)
+    /// `frame` を省くと主フレームで走らせる。
+    func callJavaScript(_ body: String, arguments: [String: Any], in frame: WKFrameInfo? = nil, contentWorld: WKContentWorld) async throws -> Any? {
+        try await webView.callAsyncJavaScript(body, arguments: arguments, in: frame, contentWorld: contentWorld)
     }
 
     /// ページの中の位置（CSS の画素。表示している範囲の左上から）にメニューを出す。選ぶか閉じるまで戻らない。

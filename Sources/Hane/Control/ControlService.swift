@@ -11,7 +11,10 @@ final class ControlService {
     private let model: BrowserModel
     private let settings: SettingsStore
     /// 要素の控えを置く実行環境。ページ自身のスクリプトからは見えない。
-    private let world = WKContentWorld.world(name: "hanectl")
+    /// 子フレームの窓をアプリへ渡せる（`createJSHandle`）ようにして、iframe の中でも走らせられるようにしてある。
+    /// 設定から作った実行環境は名前で引き直せないので、持ち続ける（`FrameHandles`）。
+    /// ページへの命令が初めて来たときに作る。外から操作しない普段の起動では、この口に触れない。
+    private lazy var world = FrameHandles.makeWorld() ?? WKContentWorld.world(name: "hanectl")
     /// `ui-snapshot` で振った番号と、窓まわりの部品の対応。
     private let windowElements: WindowElements
     /// アプリの起動とほぼ同時に作られるので、起動した時刻として使う。
@@ -129,13 +132,14 @@ final class ControlService {
 
         case "snapshot":
             let tab = try target()
-            let listing = try await script(PageScripts.snapshot, ["limit": limit ?? 300], on: tab)
-            return describe(tab) + "\n" + listing
+            return describe(tab) + "\n" + (try await snapshot(of: tab, limit: limit ?? 300))
 
         case "text":
             let tab = try target()
-            let body = try await script(PageScripts.text, ["limit": limit ?? 50_000], on: tab)
-            return describe(tab) + "\n\n" + body
+            let path = try takeOption("--frame", from: &args).map(Self.framePath)
+            let frame = try await frame(at: path ?? [], on: tab)
+            let body = try await script(PageScripts.text, ["limit": limit ?? 50_000], on: tab, in: frame.info)
+            return describe(tab) + (path.map { "\n" + Self.describeFrame(path: $0, frame.info) } ?? "") + "\n\n" + body
 
         case "click":
             let ref = try integer(try argument(args, 0, "要素の番号"), "要素の番号")
@@ -164,8 +168,11 @@ final class ControlService {
             return try await pageKeys(args, on: try target())
 
         case "eval":
+            let path = try takeOption("--frame", from: &args).map(Self.framePath)
             guard !args.isEmpty else { throw ControlError("JavaScriptがない。例: eval \"document.title\"") }
-            return try await evaluate(args.joined(separator: " "), on: try target())
+            let tab = try target()
+            let frame = try await frame(at: path ?? [], on: tab)
+            return try await evaluate(args.joined(separator: " "), on: tab, in: frame.info)
 
         case "ui":
             return describeUI()
@@ -405,14 +412,134 @@ final class ControlService {
     private func act(_ action: String, ref: Int, text: String, on tab: Tab) async throws -> String {
         // 以前の読み込み失敗が残っていると、この操作の結果と取り違える。
         tab.dismissFailure()
-        let reply = try await script(PageScripts.act, ["ref": ref, "action": action, "text": text], on: tab)
-        if let data = reply.data(using: .utf8),
-           let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-           let message = object["error"] as? String {
+        let (reply, _) = try await scriptFollowingFrames(PageScripts.act, ["ref": ref, "action": action, "text": text], on: tab)
+        if let message = reply["error"] as? String {
             throw ControlError(message)
         }
         // クリックや送信でページが切り替わることがあるので、落ち着くまで待つ。
         return try await settled(tab)
+    }
+
+    // MARK: iframe の中
+
+    /// 子フレームの中を読んだり操作したりするための、フレームとその位置。`info` が nil なら主フレーム。
+    private struct Frame {
+        var info: WKFrameInfo?
+        /// フレームの中身の左上の位置（CSS の画素。主フレームの表示している範囲の左上から）。
+        var offset = CGPoint.zero
+        /// たどった各段で、外側のフレームの表示している範囲と、その中での子フレームの中身の左上。
+        /// 押す位置が途中で切れていないかを確かめるため。
+        var levels: [(viewport: CGSize, origin: CGPoint)] = []
+    }
+
+    /// 主フレーム（`from` が nil）か子フレームから、子フレームの順番（0から）をたどって、そのフレームを引く。
+    ///
+    /// 子フレームの窓をスクリプトから `WKJSHandle` として受け取り、WebKit にそのフレームを引き直させる。
+    /// 命令が来たときだけ引くので、普段の閲覧ではフレームの一覧を持ち続けず、フレームごとの知らせも要らない。
+    /// 別のオリジンのフレームも、ページのスクリプトからは触れないがアプリからは引ける。
+    private func frame(at path: [Int], from start: Frame = Frame(), on tab: Tab, reveal: Bool = false) async throws -> Frame {
+        var frame = start
+        for index in path {
+            let value = try await scriptValue(PageScripts.frame, ["index": index, "reveal": reveal], on: tab, in: frame.info)
+            guard let object = value as? [String: Any] else { throw ControlError("フレームを引けなかった。") }
+            if let message = object["error"] as? String { throw ControlError(message) }
+            guard let info = await FrameHandles.frame(of: object["handle"]) else {
+                throw ControlError("フレームを引けなかった（読み込み中か、ページが変わった）。snapshot を取り直すこと。")
+            }
+            let origin = CGPoint(x: object["left"] as? Double ?? 0, y: object["top"] as? Double ?? 0)
+            let viewport = CGSize(width: object["width"] as? Double ?? 0, height: object["height"] as? Double ?? 0)
+            frame.info = info
+            frame.offset.x += origin.x
+            frame.offset.y += origin.y
+            frame.levels.append((viewport, origin))
+        }
+        return frame
+    }
+
+    /// スクリプトを主フレームで走らせ、子フレームへ下りるよう返ってきたら（`descend`）そのフレームで走らせ直す。
+    /// 返事（JSON）と、下りた道筋（主フレームからの子フレームの順番）を返す。
+    private func scriptFollowingFrames(
+        _ body: String, _ arguments: [String: Any], on tab: Tab, reveal: Bool = false
+    ) async throws -> (reply: [String: Any], path: [Int]) {
+        var frame = Frame()
+        var path: [Int] = []
+        // 入れ子が深すぎるものや、下りた先でまた同じ所を指すおかしなページで回り続けないよう区切る。
+        for _ in 0..<16 {
+            let text = try await script(body, arguments, on: tab, in: frame.info)
+            let reply = text.data(using: .utf8).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
+            guard let descend = reply["descend"] as? [Int] else { return (reply, path) }
+            frame = try await self.frame(at: descend, from: frame, on: tab, reveal: reveal)
+            path += descend
+        }
+        throw ControlError("フレームの入れ子が深すぎる。")
+    }
+
+    /// 操作できる要素の一覧。iframe の中も、フレームごとに見出しを付けて、その iframe の行の後ろに続ける。
+    /// 番号はページ全体で通しにし、子フレームの番号の範囲は主フレームに控える（`act` と `locate` が引く）。
+    private func snapshot(of tab: Tab, limit: Int) async throws -> String {
+        var listing = SnapshotListing(limit: limit)
+        try await collect(into: &listing, frame: Frame(), path: [], on: tab)
+        if !listing.ranges.isEmpty {
+            _ = try await script("window.__frameRefs = ranges; return '';", ["ranges": listing.ranges], on: tab)
+        }
+        if listing.skipped > 0 { listing.lines.append("… ほか \(listing.skipped) 個の要素を省略（snapshot --limit <数> で増やせる）") }
+        if listing.next == 1 { listing.lines.append("（操作できる要素は見つからなかった）") }
+        return listing.lines.joined(separator: "\n")
+    }
+
+    private struct SnapshotListing {
+        let limit: Int
+        var lines: [String] = []
+        var next = 1
+        var skipped = 0
+        /// 子フレームの番号の範囲と、そのフレームへの道筋。
+        var ranges: [[String: Any]] = []
+    }
+
+    private func collect(into listing: inout SnapshotListing, frame: Frame, path: [Int], on tab: Tab) async throws {
+        let value = try await scriptValue(
+            PageScripts.snapshot, ["start": listing.next, "limit": max(0, listing.limit - listing.next + 1)], on: tab, in: frame.info)
+        guard let object = value as? [String: Any] else { throw ControlError("一覧を読めなかった。") }
+        let indent = String(repeating: "  ", count: path.count)
+        listing.lines += (object["lines"] as? [String] ?? []).map { indent + $0 }
+        let count = object["count"] as? Int ?? 0
+        if !path.isEmpty, count > 0 {
+            listing.ranges.append(["from": listing.next, "to": listing.next + count - 1, "path": path])
+        }
+        listing.next += count
+        listing.skipped += object["skipped"] as? Int ?? 0
+
+        for (index, label) in (object["frames"] as? [String] ?? []).enumerated() {
+            let childPath = path + [index]
+            let header = indent + Self.frameLabel(childPath) + ": " + label
+            do {
+                let child = try await self.frame(at: [index], from: frame, on: tab)
+                listing.lines.append(header + (child.info?.request.url.map { " — " + $0.absoluteString } ?? ""))
+                try await collect(into: &listing, frame: child, path: childPath, on: tab)
+            } catch {
+                // 読めないフレーム（読み込み中や、中身のない埋め込み）があっても、ほかは出す。
+                let reason = (error as? ControlError)?.message ?? Self.describe(error)
+                listing.lines.append(header + "（中を読めなかった: \(reason)）")
+            }
+        }
+    }
+
+    /// `snapshot` に出るフレームの名前（frame 1、frame 1.2 など）。
+    private static func frameLabel(_ path: [Int]) -> String {
+        "frame " + path.map { String($0 + 1) }.joined(separator: ".")
+    }
+
+    private static func describeFrame(path: [Int], _ info: WKFrameInfo?) -> String {
+        frameLabel(path) + (info?.request.url.map { " — " + $0.absoluteString } ?? "")
+    }
+
+    /// `--frame 1.2` を子フレームの順番の並びにする。
+    private static func framePath(_ text: String) throws -> [Int] {
+        let numbers = text.split(separator: ".", omittingEmptySubsequences: false).map { Int($0) }
+        guard !numbers.isEmpty, numbers.allSatisfy({ ($0 ?? 0) > 0 }) else {
+            throw ControlError("--frame は snapshot に出るフレームの番号（1 や 1.2）で指すこと: \(text)")
+        }
+        return numbers.map { $0! - 1 }
     }
 
     // MARK: ページへの本物の入力
@@ -441,13 +568,25 @@ final class ControlService {
             arguments["x"] = x
             arguments["y"] = y
         }
-        let reply = try await script(PageScripts.locate, arguments, on: tab)
-        guard let object = reply.data(using: .utf8).flatMap({ try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }) else {
-            throw ControlError("位置を測れなかった: \(reply)")
-        }
+        // 子フレームの要素なら、外側のフレームで iframe を表示している範囲へ出してから、中で要素を測る。
+        let (object, path) = try await scriptFollowingFrames(PageScripts.locate, arguments, on: tab, reveal: true)
         if let message = object["error"] as? String { throw ControlError(message) }
-        let point = CGPoint(x: object["x"] as? Double ?? 0, y: object["y"] as? Double ?? 0)
-        return (point, object["target"] as? String ?? "")
+        guard let x = object["x"] as? Double, let y = object["y"] as? Double else { throw ControlError("位置を測れなかった。") }
+        let point = CGPoint(x: x, y: y)
+        let target = object["target"] as? String ?? ""
+        guard !path.isEmpty else { return (point, target) }
+
+        // 中で要素をスクロールすると外側も動くことがあるので、測り終えてから iframe の位置を測り直す。
+        let frame = try await frame(at: path, on: tab)
+        var inner = point
+        for level in frame.levels.reversed() {
+            inner.x += level.origin.x
+            inner.y += level.origin.y
+            guard inner.x >= 0, inner.y >= 0, inner.x < level.viewport.width, inner.y < level.viewport.height else {
+                throw ControlError("番号 \(reference) の要素は \(Self.frameLabel(path)) の中にあるが、外側のフレームの表示している範囲から外れていて押せない。")
+            }
+        }
+        return (inner, target + " in " + Self.frameLabel(path))
     }
 
     private func pageClick(_ reference: String, right: Bool, modifiers: NSEvent.ModifierFlags, on tab: Tab) async throws -> String {
@@ -528,15 +667,15 @@ final class ControlService {
         return flags
     }
 
-    /// 式ならその値を、文の並びなら `return` した値を、JSONにして返す。
-    private func evaluate(_ code: String, on tab: Tab) async throws -> String {
+    /// 式ならその値を、文の並びなら `return` した値を、JSONにして返す。`frame` が nil なら主フレームで走らせる。
+    private func evaluate(_ code: String, on tab: Tab, in frame: WKFrameInfo?) async throws -> String {
         let finish = "return JSON.stringify(__value === undefined ? null : __value);"
         let asExpression = "const __value = await (\(code)\n); \(finish)"
         let asStatements = "const __value = await (async () => {\(code)\n})(); \(finish)"
         do {
-            return try await script(asExpression, on: tab, world: .page)
+            return try await script(asExpression, on: tab, in: frame, world: .page)
         } catch where Self.describe(error).contains("SyntaxError") {
-            return try await script(asStatements, on: tab, world: .page)
+            return try await script(asStatements, on: tab, in: frame, world: .page)
         }
     }
 
@@ -597,11 +736,22 @@ final class ControlService {
         _ body: String,
         _ arguments: [String: Any] = [:],
         on tab: Tab,
+        in frame: WKFrameInfo? = nil,
         world: WKContentWorld? = nil
     ) async throws -> String {
+        try await scriptValue(body, arguments, on: tab, in: frame, world: world) as? String ?? ""
+    }
+
+    /// スクリプトが返した値をそのまま返す。`frame` が nil なら主フレームで走らせる。
+    private func scriptValue(
+        _ body: String,
+        _ arguments: [String: Any] = [:],
+        on tab: Tab,
+        in frame: WKFrameInfo? = nil,
+        world: WKContentWorld? = nil
+    ) async throws -> Any? {
         guard let page = tab.page else { throw ControlError("このタブにはまだページがない。先に `open <URL>` を行うこと。") }
-        let value = try await page.callJavaScript(body, arguments: arguments, contentWorld: world ?? self.world)
-        return value as? String ?? ""
+        return try await page.callJavaScript(body, arguments: arguments, in: frame, contentWorld: world ?? self.world)
     }
 
     /// 読み込みが終わるのを待ってから、タブの状態を返す。

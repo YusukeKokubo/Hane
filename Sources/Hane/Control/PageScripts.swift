@@ -1,10 +1,62 @@
-/// ページの中で走らせるJavaScript。いずれも関数本体で、文字列を返す。
+/// ページの中で走らせるJavaScript。いずれも関数本体で、文字列を返す（`snapshot` と `frame` は値の組を返す）。
 ///
 /// `snapshot` が要素に番号を振って控え、`act` がその番号で要素を操作する。
 /// 控えはページのスクリプトから見えない専用の実行環境に置く。
+/// iframe の中はフレームごとに同じスクリプトを走らせる。番号はページ全体の通しで、
+/// 控えはその要素のあるフレームが持ち、主フレームはどの番号がどのフレームにあるか（`__frameRefs`）を持つ。
 enum PageScripts {
-    /// 操作できる要素と見出しを、番号つきの一覧にする。引数: `limit`。
-    static let snapshot = """
+    /// 中を読む子フレーム（iframe と frame）。番号の振り方を `snapshot` と `frame` でそろえるため一か所に置く。
+    private static let childFrames = """
+    const childFrames = () => Array.from(document.querySelectorAll('iframe, frame')).filter(f => {
+      if (!f.contentWindow || !f.getClientRects().length) return false;
+      const style = getComputedStyle(f);
+      return style.visibility !== 'hidden' && style.display !== 'none';
+    });
+    """
+
+    /// 主フレームで、番号が子フレームの要素なら、そのフレームへの道筋（子フレームの順番の並び）を返す。引数: `ref`。
+    private static let route = """
+    if (ref > 0 && window === window.top) {
+      const routed = (window.__frameRefs || []).find(r => ref >= r.from && ref <= r.to);
+      if (routed) return JSON.stringify({ descend: routed.path });
+    }
+    """
+
+    /// 番号がなく（0）フォーカスが子フレームにあれば、そのフレームへ一段下りる。キーはフォーカスのある所へ送るため。
+    private static let routeFocus = """
+    if (ref === 0 && document.activeElement && /^(iframe|frame)$/i.test(document.activeElement.localName)) {
+      const index = childFrames().indexOf(document.activeElement);
+      if (index >= 0) return JSON.stringify({ descend: [index] });
+    }
+    """
+
+    /// 子フレームを一つ指して、その中で走らせるための手がかりを返す。
+    /// 引数: `index`（`childFrames` の順番）, `reveal`（表示している範囲の外ならスクロールして出す）。
+    /// 返すのは、フレームの窓を表す `handle`（アプリが `WKFrameInfo` に引き直す）、フレームの中身の左上の位置
+    /// （CSS の画素。このフレームの表示している範囲の左上から）、このフレームの表示している範囲の大きさ。
+    static let frame = childFrames + """
+    if (!window.webkit || !window.webkit.createJSHandle) return { error: 'この WebKit では子フレームを引けない（macOS 27 から）。' };
+    const f = childFrames()[index];
+    if (!f) return { error: 'フレームが見つからない（ページが変わった）。snapshot を取り直すこと。' };
+    if (reveal) {
+      const r = f.getBoundingClientRect();
+      if (r.left < 0 || r.top < 0 || r.right > innerWidth || r.bottom > innerHeight) {
+        f.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
+      }
+    }
+    const r = f.getBoundingClientRect();
+    const style = getComputedStyle(f);
+    return {
+      handle: window.webkit.createJSHandle(f.contentWindow),
+      left: r.left + f.clientLeft + parseFloat(style.paddingLeft || 0),
+      top: r.top + f.clientTop + parseFloat(style.paddingTop || 0),
+      width: innerWidth, height: innerHeight
+    };
+    """
+
+    /// 操作できる要素と見出しを、番号つきの一覧にする。引数: `start`（最初の番号）, `limit`（まだ出せる要素の数）。
+    /// 一覧の行、出した要素の数、上限で省いた数、子フレームの名札を返す。
+    static let snapshot = childFrames + """
     const selector = 'a[href],button,input,textarea,select,summary,[role=button],[role=link],[role=tab],' +
       '[role=menuitem],[role=checkbox],[role=radio],[role=switch],[role=textbox],[role=searchbox],' +
       '[role=combobox],[role=option],[contenteditable=""],[contenteditable=true],[onclick],h1,h2,h3';
@@ -46,22 +98,26 @@ enum PageScripts {
         clean(el.getAttribute('name')) || clean(el.id);
     };
 
+    // 番号は通しなので、控えは番号の位置に置く（子フレームの控えは手前が空いた並びになる）。
     const refs = [];
     const lines = [];
+    let count = 0;
     let skipped = 0;
     for (const el of document.querySelectorAll(selector)) {
       if (!visible(el)) continue;
       const tag = el.tagName.toLowerCase();
       if (/^h[1-3]$/.test(tag)) {
         const heading = clean(el.innerText);
-        if (heading && refs.length < limit) lines.push('#'.repeat(Number(tag[1])) + ' ' + clip(heading, 100));
+        if (heading && count < limit) lines.push('#'.repeat(Number(tag[1])) + ' ' + clip(heading, 100));
         continue;
       }
       if (tag === 'input' && el.type === 'hidden') continue;
-      if (refs.length >= limit) { skipped++; continue; }
+      if (count >= limit) { skipped++; continue; }
 
-      refs.push(el);
-      let line = '[' + refs.length + '] ' + roleOf(el) + ' "' + clip(nameOf(el), 80) + '"';
+      const number = start + count;
+      refs[number - 1] = el;
+      count++;
+      let line = '[' + number + '] ' + roleOf(el) + ' "' + clip(nameOf(el), 80) + '"';
       if (tag === 'a') line += ' -> ' + clip(el.href, 120);
       if (tag === 'input' || tag === 'textarea') {
         if (el.type === 'checkbox' || el.type === 'radio') line += el.checked ? ' (checked)' : ' (unchecked)';
@@ -79,13 +135,20 @@ enum PageScripts {
       lines.push(line);
     }
     window.__refs = refs;
-    if (skipped) lines.push('… ほか ' + skipped + ' 個の要素を省略（snapshot --limit <数> で増やせる）');
-    if (!refs.length) lines.push('（操作できる要素は見つからなかった）');
-    return lines.join('\\n');
+    if (window === window.top) window.__frameRefs = [];
+    const frames = childFrames().map(f => {
+      let label = f.localName;
+      if (f.id) label += '#' + f.id;
+      const name = clean(f.getAttribute('title') || f.getAttribute('aria-label') || f.getAttribute('name'));
+      if (name) label += ' "' + clip(name, 60) + '"';
+      return label;
+    });
+    return { lines, count, skipped, frames };
     """
 
     /// 番号で指した要素を操作する。引数: `ref`（0なら今フォーカスのある要素）, `action`, `text`。
-    static let act = """
+    /// 番号の要素が子フレームにあれば、そこへの道筋（`descend`）を返す。アプリはそのフレームで同じスクリプトを走らせ直す。
+    static let act = childFrames + route + routeFocus + """
     const fail = message => JSON.stringify({ error: message });
     let el;
     if (ref > 0) {
@@ -140,7 +203,8 @@ enum PageScripts {
 
     /// 本物の入力を渡す位置を測る。引数: `ref`（0なら `x`, `y` の位置をそのまま使う）, `x`, `y`。
     /// 位置（CSS の画素。表示している範囲の左上から）と、その位置で事象を受ける要素をJSONで返す。
-    static let locate = """
+    /// 番号の要素が子フレームにあれば、`act` と同じくそこへの道筋を返す。位置はそのフレームの表示している範囲から測る。
+    static let locate = childFrames + route + """
     const fail = message => JSON.stringify({ error: message });
     const describe = el => {
       if (!el) return '(なにもない)';

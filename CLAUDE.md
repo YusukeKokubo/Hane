@@ -65,7 +65,7 @@ build/hanectl quit               # 終わったら止める（pkill は普段使
 - `Sources/Hane/Views` — 画面。`BrowserWindow`（上からタブバー、ナビゲーションの段、ページ。ページの Web ビューは中の `PageView` が置く。⌘N で開いてプロファイルを選ぶ前の窓では、選ぶ画面を出す）、`AddressBar`、`TabBar`（左にブックマーク、右に普通のタブを一列に並べる）、`BookmarkBar`（ブックマークとフォルダの項目、追加・編集のポップオーバー）、`SettingsView`（設定の窓。⌘,）、`PopupWindow`（大きさを指定して開かれた小窓。中身はタブと同じ `Page` で、AppKit の窓に置く）、`PageDialogs`（ページの `alert` などとファイルの選択を窓のシートで出す）、`DownloadsButton`（ダウンロードの一覧）、`PasswordFillButton`（1Password で入れるボタンと、候補を選ぶ一覧）。
 - `Sources/Hane/Model` の広告ブロック — `ContentBlocker`（ルールリストのコンパイルと全ページへの配布）、`FilterList`（Adblock Plus 形式をWebKitのルールに訳す）、`ContentRule`（WebKitのルールのJSON）、`HiddenElementStore`（⌥右クリックで隠した要素の保存）、`ElementPicker`（⌥右クリックで要素を選ぶページ内スクリプト）。フィルタリストの本体は `Support/Filters`。
 - `Sources/Hane/Model/KeyNavigation` — 文字のキーでの操作（Vimium と同じ考え方）。ページ内スクリプトがスクロールとリンクの印を受け持ち、タブの移動などは `KeyCommand` としてタブ管理へ頼む。使わないサイトの一覧は `SettingsStore` が持つ。
-- `Sources/Hane/Control` — 外部操作。`ControlServer`（ソケット）、`ControlService`（命令の解釈）、`PageScripts`（ページ内で走らせるJavaScript）、`WindowElements`（窓まわりの部品の一覧とマウス操作）、`ProcessStats`、`PageProcess`（タブとページのプロセスの対応）。
+- `Sources/Hane/Control` — 外部操作。`ControlServer`（ソケット）、`ControlService`（命令の解釈）、`PageScripts`（ページ内で走らせるJavaScript）、`WindowElements`（窓まわりの部品の一覧とマウス操作）、`ProcessStats`、`PageProcess`（タブとページのプロセスの対応）、`FrameHandles`（iframe の中で走らせるために、スクリプトが渡した子フレームの窓をフレームに引き直す）。
 - `Sources/ControlWire` — アプリと `hanectl` が共有する通信の取り決めと、命令の説明文（`ControlHelp`。これが仕様の正本）、実体とプロファイルの決まり（`Profile`。`HANE_INSTANCE` の実体、プロファイルの名前と置き場、登録した一覧）。
 - `Sources/hanectl` — コマンド本体。引数をそのまま送るだけで、命令の意味は知らない。
 
