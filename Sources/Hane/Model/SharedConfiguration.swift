@@ -21,6 +21,10 @@ enum SharedConfiguration {
     private static let root: WKWebViewConfiguration = {
         let configuration = WKWebViewConfiguration()
         configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
+        // プールは初めて読まれたときに作られる。写す前に元で作っておかないと、写した先でめいめいが別のプールを作り、
+        // プロファイルの窓が増えるごとにページのプロセスが3つずつ余計に溜まる（macOS 27 で確かめた）。
+        // 読み口（processPool）は非推奨で警告になるので、名前で読む。
+        _ = configuration.value(forKey: "processPool")
         return configuration
     }()
 }
