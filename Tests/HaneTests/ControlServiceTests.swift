@@ -326,7 +326,8 @@ import WebKit
         let views = store.allTabs.compactMap { $0.page?.webView }
         try #require(views.count == 2)
         let pools = views.map { $0.configuration.value(forKey: "processPool") as AnyObject }
-        #expect(pools[0] === pools[1])
+        // AnyObject 同士を #expect の中で === で比べると、Swift 6.3.2 のコンパイラが落ちる。
+        #expect(ObjectIdentifier(pools[0]) == ObjectIdentifier(pools[1]))
         // 設定画面で変えた値を開いているタブにもその場で効かせるため、環境設定も共有している。
         #expect(views.allSatisfy { $0.configuration.preferences === SharedConfiguration.preferences })
         // 別のプロファイルのページとも共有する。

@@ -166,17 +166,91 @@ enum KeyNavigation {
         return root();
       };
       const viewHeight = el => el === root() ? innerHeight : el.clientHeight;
+      // 動きは自分でフレームごとに刻む。押せば一歩ぶんを滑らかに進め、押しっぱなしの間は一定の速さで流し、離せば止める。
+      // OS のキーの繰り返しに合わせて一歩ずつ動かすと、繰り返しの間隔（既定で0.09秒）ごとに飛んでカクつく。
+      // ブラウザの smooth に任せると、続けて頼んだとき前の動きを打ち消して進まなくなる。
+      // フレームを回すのは動いている間だけ。窓が隠れているとフレームの合図が止まるので、来なければタイマーで代わりに進める。
       const step = 70;
-      // 押しっぱなしの繰り返しで滑らかに動かすと、前の動きを打ち消して進まなくなる。
+      const easing = 60;      // 残りの道のりを詰める速さ（ミリ秒）。小さいほどきびきび止まる。
+      const holdSpeed = 1.0;  // 押しっぱなしの間の速さ（ピクセル/ミリ秒）。
+      const holdDelay = 90;   // 押してから流し始めるまで。軽く叩いたときは一歩だけ進めるため。
+      const holdRamp = 150;   // 流す速さまで上げきる時間。一歩の動きから途切れずにつなぐため。
+      const glide = { el: null, x: 0, y: 0, carryX: 0, carryY: 0, hold: null, last: 0, frame: 0, timer: 0 };
+
+      const unschedule = () => {
+        cancelAnimationFrame(glide.frame);
+        clearTimeout(glide.timer);
+        glide.frame = glide.timer = 0;
+      };
+      const schedule = () => {
+        glide.frame = requestAnimationFrame(tick);
+        glide.timer = setTimeout(() => tick(performance.now()), 50);
+      };
+      const stopGlide = () => {
+        unschedule();
+        Object.assign(glide, { el: null, x: 0, y: 0, carryX: 0, carryY: 0, hold: null });
+      };
+      const tick = now => {
+        unschedule();
+        const el = glide.el;
+        if (!el || !el.isConnected) { stopGlide(); return; }
+        const dt = Math.max(0, Math.min(now - glide.last, 50));
+        glide.last = now;
+        const f = 1 - Math.exp(-dt / easing);
+        const take = rest => Math.abs(rest) < 1 ? rest : rest * f;
+        const mx = take(glide.x), my = take(glide.y);
+        glide.x -= mx;
+        glide.y -= my;
+        let vx = 0, vy = 0;
+        const hold = glide.hold;
+        if (hold && now > hold.start) {
+          const speed = holdSpeed * Math.min(1, (now - hold.start) / holdRamp) * dt;
+          vx = hold.x * speed;
+          vy = hold.y * speed;
+        }
+        // 1ピクセルに満たない分は持ち越す。小刻みに頼むと端数が丸められて消えるため。動きの終わりには丸めて片付ける。
+        glide.carryX += mx + vx;
+        glide.carryY += my + vy;
+        const settle = (rest, carry, held) => rest === 0 && !held ? Math.round(carry) : Math.trunc(carry);
+        const ix = settle(glide.x, glide.carryX, hold && hold.x), iy = settle(glide.y, glide.carryY, hold && hold.y);
+        glide.carryX -= ix;
+        glide.carryY -= iy;
+        if (ix || iy) {
+          const bx = el.scrollLeft, by = el.scrollTop;
+          // 'instant' を明示する。ページの CSS が smooth にしていると、刻んだ動きがさらに遅れて重なるため。
+          el.scrollBy({ left: ix, top: iy, behavior: 'instant' });
+          // 端に着いたらその向きの動きをやめる。押しっぱなしのまま空回りさせないため。
+          if (ix && el.scrollLeft === bx) { glide.x = glide.carryX = 0; if (hold && hold.x) glide.hold = null; }
+          if (iy && el.scrollTop === by) { glide.y = glide.carryY = 0; if (hold && hold.y) glide.hold = null; }
+        }
+        if (glide.x || glide.y || glide.hold) schedule();
+        else stopGlide();
+      };
+      const glideBy = (el, dx, dy) => {
+        if (glide.el !== el) { stopGlide(); glide.el = el; }
+        glide.x += dx;
+        glide.y += dy;
+        if (!glide.timer) { glide.last = performance.now(); schedule(); }
+      };
+      const releaseHold = code => { if (glide.hold && (code === undefined || glide.hold.code === code)) glide.hold = null; };
+      // キーを離した知らせを取りこぼしても流れ続けないよう、窓から外れたら止める。
+      addEventListener('blur', () => releaseHold());
+      document.addEventListener('visibilitychange', () => releaseHold());
+
       const scrollBy = (dx, dy, event) => {
-        scroller(dy !== 0).scrollBy({ left: dx, top: dy, behavior: event.repeat ? 'instant' : 'smooth' });
+        // 押しっぱなしの繰り返しは流れのほうが受け持つ。
+        if (event.repeat) return;
+        glideBy(scroller(dy !== 0), dx, dy);
+        glide.hold = { code: event.code, x: Math.sign(dx), y: Math.sign(dy), start: performance.now() + holdDelay };
       };
-      const scrollPage = (fraction, event) => {
+      const scrollPage = fraction => {
         const el = scroller(true);
-        el.scrollBy({ top: viewHeight(el) * fraction, behavior: event.repeat ? 'instant' : 'smooth' });
+        glideBy(el, 0, viewHeight(el) * fraction);
       };
+      // 端までの一息の動きはブラウザに任せる。長い道のりを刻むと、窓が隠れてタイマーが間引かれたとき着くのが遅れるため。
       const scrollToEdge = bottom => {
         const el = scroller(true);
+        stopGlide();
         el.scrollTo({ top: bottom ? el.scrollHeight : 0, behavior: 'smooth' });
       };
 
@@ -339,7 +413,7 @@ enum KeyNavigation {
       const commands = {
         j: e => scrollBy(0, step, e), k: e => scrollBy(0, -step, e),
         h: e => scrollBy(-step, 0, e), l: e => scrollBy(step, 0, e),
-        d: e => scrollPage(0.5, e), u: e => scrollPage(-0.5, e),
+        d: () => scrollPage(0.5), u: () => scrollPage(-0.5),
         gg: () => scrollToEdge(false), G: () => scrollToEdge(true),
         f: () => startHints(false), F: () => startHints(true),
         gi: focusFirstInput,
@@ -408,7 +482,9 @@ enum KeyNavigation {
 
       for (const type of ['keypress', 'keyup']) {
         addEventListener(type, event => {
-          if (!event.isTrusted || !swallowed.has(event.code)) return;
+          if (!event.isTrusted) return;
+          if (type === 'keyup') releaseHold(event.code);
+          if (!swallowed.has(event.code)) return;
           event.preventDefault();
           event.stopImmediatePropagation();
           if (type === 'keyup') swallowed.delete(event.code);

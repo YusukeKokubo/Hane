@@ -80,16 +80,20 @@ import WebKit
 
     private func press(_ characters: String, in window: NSWindow, shift: Bool = false) async throws {
         for character in characters {
-            let text = String(character)
             for type in [NSEvent.EventType.keyDown, .keyUp] {
-                let event = try #require(NSEvent.keyEvent(
-                    with: type, location: .zero, modifierFlags: shift || character.isUppercase ? .shift : [],
-                    timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
-                    characters: text, charactersIgnoringModifiers: text, isARepeat: false, keyCode: Self.keyCodes[character.lowercased()] ?? 0))
-                window.sendEvent(event)
+                try send(type, character, in: window, shift: shift)
             }
             try await Task.sleep(for: .milliseconds(30))
         }
+    }
+
+    private func send(_ type: NSEvent.EventType, _ character: Character, in window: NSWindow, shift: Bool = false) throws {
+        let text = String(character)
+        let event = try #require(NSEvent.keyEvent(
+            with: type, location: .zero, modifierFlags: shift || character.isUppercase ? .shift : [],
+            timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
+            characters: text, charactersIgnoringModifiers: text, isARepeat: false, keyCode: Self.keyCodes[character.lowercased()] ?? 0))
+        window.sendEvent(event)
     }
 
     private static let keyCodes: [String: UInt16] = [
@@ -128,6 +132,23 @@ import WebKit
         try await press("jj", in: window)
         #expect(try await evaluate(tab, "return document.getElementById('field').value") as? String == "jj")
         #expect(try await evaluate(tab, "return scrollY") as? Int == 0)
+    }
+
+    /// 押しっぱなしの間は流れ続け、離せば止まる。
+    @Test func holdingAKeyKeepsScrollingUntilReleased() async throws {
+        let (tab, window) = try await open(Self.tallPage)
+        defer { window.close() }
+
+        try send(.keyDown, "j", in: window)
+        try await Task.sleep(for: .milliseconds(600))
+        try send(.keyUp, "j", in: window)
+        let released = try await evaluate(tab, "return scrollY") as? Double ?? 0
+        // 一歩（70）を超えて流れている。
+        #expect(released > 200)
+        try await Task.sleep(for: .milliseconds(300))
+        let settled = try await evaluate(tab, "return scrollY") as? Double
+        try await Task.sleep(for: .milliseconds(200))
+        #expect(try await evaluate(tab, "return scrollY") as? Double == settled)
     }
 
     /// 合成したキーには応じない。ページが勝手にタブを閉じたりできないように。
