@@ -35,13 +35,14 @@ echo "== 通し確認（実体: ${HANE_INSTANCE}）"
 stop_all() {
     "$CTL" quit >/dev/null 2>&1 || true
 }
-stop_all
-sleep 1
+# 前の回の実体が残っていたときだけ、終わるのを待つ。
+if [ "$("$CTL" quit 2>&1 || true)" != "起動していない" ]; then
+    sleep 1
+fi
 # hanectl に起こさせる。自分で直に起こすと、端末から起こした別の実体と補助プロセスの持ち主が
 # 同じになり、stats がそちらのプロセスまで数えてしまう。
 "$CTL" ui >/dev/null
 trap stop_all EXIT
-sleep 2
 
 failures=0
 # expect <説明> <含まれるはずの文字列> <命令…>
@@ -59,6 +60,21 @@ expect() {
     fi
 }
 
+# eventually <説明> <含まれるはずの文字列> <命令…>
+# 少し遅れて成り立つものを、決め打ちで寝ずに、成り立つまで（3秒まで）読み直す。状態を読むだけの命令に使う。
+eventually() {
+    wanted="$2"
+    tries=0
+    while [ "$tries" -lt 30 ]; do
+        if (shift 2; "$CTL" "$@" 2>&1 || true) | grep -qF -- "$wanted"; then
+            break
+        fi
+        tries=$((tries + 1))
+        sleep 0.1
+    done
+    expect "$@"
+}
+
 # reject <説明> <含まれてはいけない文字列> <命令…>
 reject() {
     label="$1"; unwanted="$2"; shift 2
@@ -74,7 +90,7 @@ reject() {
     fi
 }
 
-expect "起動直後はアドレスバーにフォーカス" '(focused)' ui
+eventually "起動直後はアドレスバーにフォーカス" '(focused)' ui
 expect "ページを開く" 'Smoke' open "$FIXTURES/smoke.html"
 expect "アドレスバーにURLが出る" 'smoke.html"' ui
 expect "要素の一覧" '[1] textbox "Name"' snapshot
@@ -91,32 +107,29 @@ expect "JavaScriptの実行" '"Second"' eval document.title
 "$CTL" back >/dev/null
 "$CTL" snapshot >/dev/null
 "$CTL" click 4 >/dev/null
-sleep 1
-expect "新しいウインドウ宛てのリンクは新規タブで開く" '* tab 2: Second' tabs
+eventually "新しいウインドウ宛てのリンクは新規タブで開く" '* tab 2: Second' tabs
 expect "タブを閉じる" 'closed tab 2' close 2
 # ポップアップ。止めているときは操作の中から開いたものだけ、許すと操作なしのものも新しいタブで開く。
 expect "ポップアップは既定で止める" 'popups: block' settings
 "$CTL" open "$FIXTURES/popup.html" >/dev/null
-sleep 1
+# 開かないことを見るので、ページが開こうとする時（0.1秒後）を過ぎるまで待つ。
+sleep 0.5
 expect "操作なしのポップアップは開かない" '* tab 1: Popup' tabs
 "$CTL" snapshot >/dev/null
 "$CTL" click 1 >/dev/null
-sleep 1
-expect "クリックから開くポップアップは新しいタブで開く" 'second.html#click' tabs
+eventually "クリックから開くポップアップは新しいタブで開く" 'second.html#click' tabs
 "$CTL" close >/dev/null
 expect "ポップアップを許す" 'popups: allow' settings popups allow
 "$CTL" select 1 >/dev/null
 "$CTL" reload >/dev/null
-sleep 1
-expect "許すと操作なしのポップアップも開く" 'second.html#auto' tabs
+eventually "許すと操作なしのポップアップも開く" 'second.html#auto' tabs
 "$CTL" close >/dev/null
 "$CTL" settings popups block >/dev/null
 # 大きさを指定したもの（ログインの小窓など）は別の窓で開き、開いた側へ窓を返す。
 "$CTL" select 1 >/dev/null
 "$CTL" snapshot >/dev/null
 "$CTL" click 2 >/dev/null
-sleep 1
-expect "大きさを指定したポップアップは別の窓で開く" 'overlay: window "Second"' ui
+eventually "大きさを指定したポップアップは別の窓で開く" 'overlay: window "Second"' ui
 expect "開いた側は小窓とつながる" '"true"' eval 'String(window.login.opener === window)'
 expect "大きさを指定したポップアップはタブを増やさない" '* tab 1: Popup' tabs
 expect "⌘Wで手前の小窓を閉じる" '* tab 1: Popup' key cmd+w

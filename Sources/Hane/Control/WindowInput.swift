@@ -103,7 +103,7 @@ final class WindowInput {
                 throw ControlError("文字を受け付ける入力欄にフォーカスがない。")
             }
             editor.insertText(String(character), replacementRange: NSRange(location: NSNotFound, length: 0))
-            try? await Task.sleep(for: .milliseconds(30))
+            try? await Task.sleep(for: .milliseconds(10))
         }
     }
 
