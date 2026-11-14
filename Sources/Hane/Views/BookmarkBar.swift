@@ -42,22 +42,16 @@ private struct BookmarkChip: View {
         let tab = store.bookmarkTabs[bookmark.id]
         let awayTitle = store.awayTitle(for: bookmark)
 
-        HStack(spacing: 6) {
-            Favicon(image: store.favicons.image(for: bookmark.url))
-            Text(bookmark.title)
-            if let awayTitle {
-                Text("/").foregroundStyle(.tertiary)
-                Text(awayTitle)
-                    .truncationMode(.tail)
-                    .frame(maxWidth: 170, alignment: .leading)
-                ReturnButton(store: store, bookmark: bookmark)
+        // Chrome や Arc の固定タブと同じく、アイコンだけで場所を取らない。名前は指したときの説明に回す。
+        Favicon(image: store.favicons.image(for: bookmark.url))
+            .overlay(alignment: .topTrailing) {
+                // ブックマークのアドレスから離れていることだけは、アイコンの上で分かるようにする。
+                if awayTitle != nil {
+                    Circle().fill(.tint).frame(width: 5, height: 5).offset(x: 3, y: -2)
+                }
             }
-        }
-        .lineLimit(1)
-        .font(.callout)
-        .padding(.leading, 8)
-        .padding(.trailing, awayTitle == nil ? 10 : 4)
-        .frame(height: 26)
+            .padding(.horizontal, 7)
+            .frame(height: 26)
         .barItemBackground(state(of: tab), isHovered: isHovered)
         .overlay(alignment: .bottom) {
             if let tab, tab.isLoading { LoadingLine(progress: tab.estimatedProgress) }
@@ -65,7 +59,7 @@ private struct BookmarkChip: View {
         .contentShape(.rect)
         .onTapGesture { store.activate(bookmark: bookmark.id) }
         .onHover { isHovered = $0 }
-        .help(bookmark.url.absoluteString)
+        .help(awayTitle.map { "\(bookmark.title) / \($0)" } ?? bookmark.title)
         .contextMenu { BookmarkActions(store: store, bookmark: bookmark) { isEditing = true } }
         .popover(isPresented: $isEditing, arrowEdge: .bottom) {
             BookmarkEditor(store: store, target: .bookmark(bookmark.id))
@@ -107,14 +101,19 @@ private struct BookmarkActions: View {
 
     var body: some View {
         let tab = store.bookmarkTabs[bookmark.id]
+        let isAway = store.awayTitle(for: bookmark) != nil
         Button("名前とフォルダを編集…", action: edit)
+        // 一段目はアイコンだけで戻すボタンを置かないので、戻す手はここに出す。
+        Button("\(bookmark.url.host() ?? bookmark.title) に戻す") { store.returnToBookmark(bookmark.id) }
+            .disabled(!isAway)
         Button("アドレスを今のページにする") { store.updateBookmarkToCurrentPage(bookmark.id) }
-            .disabled(store.awayTitle(for: bookmark) == nil)
+            .disabled(!isAway)
         Divider()
         Button("ページを閉じる") { if let tab { store.close(tab.id) } }
             .disabled(tab == nil)
         Divider()
-        Button("削除") { store.removeBookmark(bookmark.id) }
+        // 開いているページは消さずに普通のタブへ戻る（`removeBookmark`）ので、そのときは固定を外すと言う。
+        Button(tab == nil ? "削除" : "固定を外す") { store.removeBookmark(bookmark.id) }
     }
 }
 

@@ -65,6 +65,13 @@ struct TabBar: View {
                     onSelect: { store.selectedID = tab.id },
                     onClose: { onClose(tab.id) }
                 )
+                .contextMenu {
+                    // 行き先のないまっさらなタブは固定できない（`pin` が断る）。
+                    Button("タブを固定") { store.pin(tab.id) }
+                        .disabled(tab.url == nil)
+                    Divider()
+                    Button("タブを閉じる") { onClose(tab.id) }
+                }
             }
         }
     }
