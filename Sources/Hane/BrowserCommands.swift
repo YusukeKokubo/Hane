@@ -14,10 +14,11 @@ struct BrowserCommands: Commands {
 
     var body: some Commands {
         // 標準の「閉じる」（Cmd+W）より前に置くことで、Cmd+W をタブ側で受ける。
+        // タブ管理がない（窓がない）ときも項目は無効にしない。起動した時点では窓がまだなく、SwiftUI はメニューを
+        // 開くまで作り直さないので、無効のまま残ってキーが効かなくなる。窓がなければ押しても何も起きない。
         CommandGroup(replacing: .newItem) {
             Button("新規タブ") { store?.newTab() }
                 .keyboardShortcut("t")
-                .disabled(store == nil)
             // 開いた窓でプロファイルを選ぶ（BrowserModel.attach）。
             Button("新規ウインドウ") { openWindow(id: HaneApp.moreWindowsID) }
                 .keyboardShortcut("n")
@@ -26,7 +27,6 @@ struct BrowserCommands: Commands {
             Divider()
             Button("場所を開く…") { store?.focusAddressBar() }
                 .keyboardShortcut("l")
-                .disabled(store == nil)
         }
 
         CommandGroup(after: .pasteboard) {
@@ -63,16 +63,13 @@ struct BrowserCommands: Commands {
             // ⌃Tab / ⌃⇧Tab でも移れる（LocalShortcuts が拾う）。
             Button("次のタブ") { store?.select(offset: 1) }
                 .keyboardShortcut("]", modifiers: [.command, .shift])
-                .disabled(store == nil)
             Button("前のタブ") { store?.select(offset: -1) }
                 .keyboardShortcut("[", modifiers: [.command, .shift])
-                .disabled(store == nil)
             Divider()
             // バーに見えている並びのまま、左から数える。ブックマークとフォルダもタブと同じ一列の項目として扱う。
             ForEach(1...9, id: \.self) { number in
                 Button(number == 9 ? "最後のタブ" : "バーの左から \(number) 番目") { store?.activateBarItem(number: number) }
                     .keyboardShortcut(KeyEquivalent(Character("\(number)")))
-                    .disabled(store == nil)
             }
             Divider()
             // ページ自身が文字のキーで操作するサイトで、その場で外せるように。一覧は設定の窓で見る。
