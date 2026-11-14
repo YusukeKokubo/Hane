@@ -323,7 +323,7 @@ final class BrowserModel {
             registry.lastWindows = lastWindows
             try registry.save(to: registryURL)
         } catch {
-            NSLog("開いていたプロファイルを覚えられませんでした: \(error)")
+            AppLog.logger.error("開いていたプロファイルを覚えられませんでした: \(String(describing: error), privacy: .public)")
         }
     }
 }

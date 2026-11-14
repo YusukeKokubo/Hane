@@ -180,7 +180,7 @@ final class FaviconStore {
                 try? FileManager.default.removeItem(at: file)
             }
         } catch {
-            NSLog("アイコンを保存できませんでした: \(error)")
+            AppLog.logger.error("アイコンを保存できませんでした: \(String(describing: error), privacy: .public)")
         }
     }
 

@@ -70,7 +70,7 @@ final class BookmarkStore {
             // 読めないファイルをそのまま上書きすると中身を失うので、横へ退避してから空で始める。
             let aside = fileURL.deletingPathExtension().appendingPathExtension("broken-\(Int(Date().timeIntervalSince1970)).json")
             try? FileManager.default.moveItem(at: fileURL, to: aside)
-            NSLog("ブックマークを読めなかったため \(aside.path(percentEncoded: false)) に退避しました: \(error)")
+            AppLog.logger.error("ブックマークを読めなかったため \(aside.path(percentEncoded: false), privacy: .public) に退避しました: \(String(describing: error), privacy: .public)")
         }
     }
 
@@ -252,7 +252,7 @@ final class BookmarkStore {
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
             try encoder.encode(SavedFile(items: items)).write(to: fileURL, options: .atomic)
         } catch {
-            NSLog("ブックマークを保存できませんでした: \(error)")
+            AppLog.logger.error("ブックマークを保存できませんでした: \(String(describing: error), privacy: .public)")
         }
     }
 }

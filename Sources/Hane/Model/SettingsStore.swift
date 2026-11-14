@@ -91,7 +91,7 @@ final class SettingsStore {
                 values = try JSONDecoder().decode(UserSettings.self, from: data)
             } catch {
                 // 壊れたファイルは既定の値で上書きされるまで残しておく（設定を一つ変えると書き直す）。
-                NSLog("設定を読めなかったため既定の値で始めます: \(error)")
+                AppLog.logger.error("設定を読めなかったため既定の値で始めます: \(String(describing: error), privacy: .public)")
             }
         }
         // 共有の環境設定は最初から既定の値になっている。既定のままなら触らない
@@ -116,7 +116,7 @@ final class SettingsStore {
             try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
             try encoder.encode(values).write(to: fileURL, options: .atomic)
         } catch {
-            NSLog("設定を保存できませんでした: \(error)")
+            AppLog.logger.error("設定を保存できませんでした: \(String(describing: error), privacy: .public)")
         }
     }
 }

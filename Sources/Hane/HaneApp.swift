@@ -15,7 +15,7 @@ struct HaneApp: App {
     init() {
         if let problem = BrowserInstance.startupProblem {
             FileHandle.standardError.write(Data((problem + "\n").utf8))
-            NSLog("起動をやめました: \(problem)")
+            AppLog.logger.error("起動をやめました: \(problem, privacy: .public)")
             exit(1)
         }
         RunningInstance.handOffIfAlreadyRunning()

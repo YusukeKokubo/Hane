@@ -147,7 +147,7 @@ final class ContentBlocker: NSObject, WKScriptMessageHandler {
             filterList = list
             filterState = .ready(rules: counts?.rules, skipped: counts?.skipped)
         } catch {
-            NSLog("フィルタリストを準備できませんでした: \(error)")
+            AppLog.logger.error("フィルタリストを準備できませんでした: \(String(describing: error), privacy: .public)")
             filterState = .failed(String(describing: error))
         }
     }
@@ -208,7 +208,7 @@ final class ContentBlocker: NSObject, WKScriptMessageHandler {
                     forIdentifier: Self.hiddenIdentifier, encodedContentRuleList: try ContentRule.encode(rules))
             }
         } catch {
-            NSLog("隠した要素のルールを作れませんでした: \(error)")
+            AppLog.logger.error("隠した要素のルールを作れませんでした: \(String(describing: error), privacy: .public)")
             return
         }
         replace(hiddenList, with: list)

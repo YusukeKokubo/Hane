@@ -32,7 +32,7 @@ final class HiddenElementStore {
             // 読めないファイルをそのまま上書きすると中身を失うので、横へ退避してから空で始める。
             let aside = fileURL.deletingPathExtension().appendingPathExtension("broken-\(Int(Date().timeIntervalSince1970)).json")
             try? FileManager.default.moveItem(at: fileURL, to: aside)
-            NSLog("隠した要素の一覧を読めなかったため \(aside.path(percentEncoded: false)) に退避しました: \(error)")
+            AppLog.logger.error("隠した要素の一覧を読めなかったため \(aside.path(percentEncoded: false), privacy: .public) に退避しました: \(String(describing: error), privacy: .public)")
         }
     }
 
@@ -104,7 +104,7 @@ final class HiddenElementStore {
             encoder.dateEncodingStrategy = .iso8601
             try encoder.encode(elements).write(to: fileURL, options: .atomic)
         } catch {
-            NSLog("隠した要素の一覧を保存できませんでした: \(error)")
+            AppLog.logger.error("隠した要素の一覧を保存できませんでした: \(String(describing: error), privacy: .public)")
         }
     }
 }

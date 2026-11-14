@@ -82,7 +82,7 @@ enum ExternalLinks {
             // 開発用の実体も同じバンドルIDなので、動いているとリンクが届くことがある。
             // 使い捨ての窓に開くと閉じたときに失うので、受けずに知らせるだけにする。
             guard BrowserInstance.isDefault else {
-                NSLog("外から渡されたリンクを開きませんでした（開発用の実体のため）: \(url.absoluteString)")
+                AppLog.logger.notice("外から渡されたリンクを開きませんでした（開発用の実体のため）: \(url.absoluteString, privacy: .public)")
                 return
             }
             ExternalLinks.open(url, in: model)

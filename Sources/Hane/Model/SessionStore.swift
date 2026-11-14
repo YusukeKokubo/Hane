@@ -50,7 +50,7 @@ final class SessionStore {
             // 読めないファイルを次の保存で上書きすると手がかりも消えるので、横へ退避しておく。
             let aside = fileURL.deletingPathExtension().appendingPathExtension("broken-\(Int(Date().timeIntervalSince1970)).json")
             try? FileManager.default.moveItem(at: fileURL, to: aside)
-            NSLog("閲覧状態を読めなかったため \(aside.path(percentEncoded: false)) に退避しました: \(error)")
+            AppLog.logger.error("閲覧状態を読めなかったため \(aside.path(percentEncoded: false), privacy: .public) に退避しました: \(String(describing: error), privacy: .public)")
             return nil
         }
     }
@@ -71,7 +71,7 @@ final class SessionStore {
             }
             lastSaved = session
         } catch {
-            NSLog("閲覧状態を保存できませんでした: \(error)")
+            AppLog.logger.error("閲覧状態を保存できませんでした: \(String(describing: error), privacy: .public)")
         }
     }
 }

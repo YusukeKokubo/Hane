@@ -258,6 +258,20 @@ import WebKit
         #expect(response.output.contains("Next"), "\(response.output)")
     }
 
+    /// アプリ自身の記録（AppLog）を、このプロセスの分だけ読める。ページの console 出力は混ざらない。
+    @Test func readsAppLogs() async throws {
+        let marker = "app-log-test-\(UUID().uuidString.prefix(8))"
+        AppLog.logger.error("保存できませんでした: \(marker, privacy: .public)")
+        try await open(html: "<title>Console</title><script>console.log('page-only-message')</script>")
+
+        let response = await run("app-logs", "--seconds", "60")
+        #expect(response.ok, "\(response.output)")
+        #expect(response.output.contains("[error] 保存できませんでした: \(marker)"), "\(response.output)")
+        #expect(!response.output.contains("page-only-message"))
+        #expect(await run("app-logs", "--limit", "1").output.split(separator: "\n").count == 2, "app: の行と記録1件")
+        #expect(await !run("app-logs", "--seconds", "0").ok)
+    }
+
     @Test func readsAndOperatesPage() async throws {
         try await open(html: Self.form)
 

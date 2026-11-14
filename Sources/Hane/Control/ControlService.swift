@@ -1,6 +1,7 @@
 import AppKit
 import ControlWire
 import Foundation
+import OSLog
 import WebKit
 
 /// 外部からの操作要求を、タブとページへの操作に置き換える。
@@ -48,7 +49,7 @@ final class ControlService {
                 await self?.respond(to: request) ?? ControlResponse(ok: false, output: "アプリが終了中")
             }
         } catch {
-            NSLog("操作用ソケットを開けませんでした: \(error)")
+            AppLog.logger.error("操作用ソケットを開けませんでした: \(String(describing: error), privacy: .public)")
         }
     }
 
@@ -352,6 +353,17 @@ final class ControlService {
                 : entries.map { "\(Self.clock.string(from: $0.date)) [\($0.level)] \($0.message)" }.joined(separator: "\n")
             if clear { tab.log.clear() }
             return describe(tab) + "\n" + listing
+
+        case "app-logs":
+            let seconds = try takeOption("--seconds", from: &args).map { text in
+                guard let value = Double(text), value > 0 else { throw ControlError("--seconds は正の数で指定すること: \(text)") }
+                return value
+            }
+            // 読むのは命令のときだけ。`OSLogStore` は一度に 1 秒近くかかり、メインスレッドで読むと窓が止まる。
+            let since = seconds.map { Date().addingTimeInterval(-$0) } ?? launchedAt.addingTimeInterval(-1)
+            let lines = try await Task.detached { try Self.readAppLog(since: since) }.value.suffix(limit ?? 50)
+                .map { "\(Self.clock.string(from: $0.date)) \($0.text)" }
+            return "app: pid \(getpid())\n" + (lines.isEmpty ? "（記録なし）" : lines.joined(separator: "\n"))
 
         case "requests":
             let json = takeFlag("--json", from: &args)
@@ -1015,6 +1027,30 @@ final class ControlService {
             throw ControlError("読み込みに失敗: \(failure)\n" + describe(tab))
         }
         return describe(tab) + (tab.isLoading ? "\n（まだ読み込み中。`wait` で続きを待てる）" : "")
+    }
+
+    // MARK: アプリ自身の記録
+
+    /// このプロセスが `AppLog` で出した記録を、古い順に。
+    ///
+    /// 記録を別に溜めず、統一ログからこのプロセスの分を読む。`subsystem` で絞るのは、WebKit など
+    /// システムの枠組みが同じプロセスの名で大量に出す記録に埋もれないため。
+    nonisolated private static func readAppLog(since: Date) throws -> [(date: Date, text: String)] {
+        let store = try OSLogStore(scope: .currentProcessIdentifier)
+        let predicate = NSPredicate(format: "subsystem == %@", AppLog.subsystem)
+        let entries = try store.getEntries(at: store.position(date: since), matching: predicate)
+        return entries.compactMap { entry in
+            guard let entry = entry as? OSLogEntryLog else { return nil }
+            let level = switch entry.level {
+            case .debug: "debug"
+            case .info: "info"
+            case .notice: "notice"
+            case .error: "error"
+            case .fault: "fault"
+            default: "log"
+            }
+            return (entry.date, "[\(level)] \(entry.composedMessage)")
+        }
     }
 
     // MARK: 条件を待つ
