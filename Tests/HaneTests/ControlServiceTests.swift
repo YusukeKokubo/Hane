@@ -220,18 +220,18 @@ import WebKit
         #expect(await run("wait", "--js", "window.ready").ok, "await なしの式でも真偽で見る")
 
         // 見えていない要素は数えない。
-        response = await run("wait", "--selector", ".late-hidden", "--timeout", "0.5")
+        response = await run("wait", "--selector", ".late-hidden", "--timeout", "0.2")
         #expect(!response.ok)
         #expect(response.output.contains("最後に見えた状態"), "\(response.output)")
         #expect(response.output.contains("見えている要素 0 個"), "\(response.output)")
 
-        response = await run("wait", "--text", "never appears", "--timeout", "0.5")
+        response = await run("wait", "--text", "never appears", "--timeout", "0.2")
         #expect(!response.ok)
         #expect(response.output.contains(#"text "never appears": ない"#), "\(response.output)")
 
         #expect(await !run("wait", "--timeout", "500", "--text", "x").ok, "上限を超える時間切れは断る")
         #expect(await !run("wait", "--gone").ok, "条件なしの --gone は断る")
-        #expect(await !run("wait", "--selector", "[", "--timeout", "0.3").ok, "書き損じのセレクタは成り立たないまま時間切れ")
+        #expect(await !run("wait", "--selector", "[", "--timeout", "0.1").ok, "書き損じのセレクタは成り立たないまま時間切れ")
     }
 
     /// --gone は、条件が消えるまで待つ。

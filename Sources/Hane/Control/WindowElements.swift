@@ -58,9 +58,11 @@ final class WindowElements {
 
     func snapshot() async throws -> String {
         Self.wakeAccessibility()
-        // 起動の直後は窓がまだないので、出るまで少し待つ。
+        // 窓が出た直後は中の部品がまだ揃っていないことがあるので、揃うまで少し待つ。
+        // 窓そのものがないときは待っても出ないので、すぐ断る（起動の間の窓待ちは `ControlService` が済ませている）。
         for _ in 0..<30 {
             if let lines = try? collectAll(), !elements.isEmpty { return lines }
+            if Self.windows(main: mainWindow()).isEmpty { break }
             try? await Task.sleep(for: .milliseconds(100))
         }
         return try collectAll()

@@ -119,8 +119,10 @@ import WebKit
         let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
             .filter { $0.pathExtension == "txt" }
         try #require(!files.isEmpty)
-        let lists = try files.map { try String(contentsOf: $0, encoding: .utf8) }
-        let conversion = FilterList.convert(lists)
+        // 訳すのに数秒かかる。メインスレッドでやると、並んで走るほかのテストがその間まるごと止まる。
+        let conversion = try await Task.detached {
+            FilterList.convert(try files.map { try String(contentsOf: $0, encoding: .utf8) })
+        }.value
         print("rules: \(conversion.rules.count) skipped: \(conversion.skipped)")
         #expect(conversion.rules.count < 150_000)
         _ = try await Self.compile(conversion.rules)
@@ -131,7 +133,8 @@ import WebKit
         let directory = FileManager.default.temporaryDirectory.appending(path: "rules-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: directory) }
         let store = try #require(WKContentRuleListStore(url: directory))
-        return try await store.compileContentRuleList(forIdentifier: "test", encodedContentRuleList: try ContentRule.encode(rules))
+        let json = try await Task.detached { try ContentRule.encode(rules) }.value
+        return try await store.compileContentRuleList(forIdentifier: "test", encodedContentRuleList: json)
     }
 }
 
