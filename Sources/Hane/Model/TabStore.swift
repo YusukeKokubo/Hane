@@ -33,7 +33,7 @@ final class TabStore: TabOpening {
     let history: HistoryStore
     let favicons: FaviconStore
     /// 1Password のログインを選んでいるページに入れる（⌘\）。
-    let passwordFill = PasswordFill()
+    let passwordFill: PasswordFill
 
     /// アドレスバーにフォーカスを移してほしいときに増やす合図。
     private(set) var addressFocusRequest = 0
@@ -61,9 +61,11 @@ final class TabStore: TabOpening {
         bookmarks: BookmarkStore = BookmarkStore(),
         history: HistoryStore = HistoryStore(),
         favicons: FaviconStore = FaviconStore(),
-        session: SessionStore = SessionStore()
+        session: SessionStore = SessionStore(),
+        loginFields: LoginFieldStore = LoginFieldStore()
     ) {
         self.factory = factory
+        passwordFill = PasswordFill(places: loginFields)
         self.bookmarks = bookmarks
         self.history = history
         self.favicons = favicons

@@ -31,6 +31,15 @@ struct BrowserCommands: Commands {
             Button("1Password で入力") { store.passwordFill.start(on: store.selected) }
                 .keyboardShortcut("\\")
                 .disabled(store.selected?.hasContent != true)
+            Button("1Password で入れる場所を教える…") { store.passwordFill.start(on: store.selected, teaching: true) }
+                .keyboardShortcut("\\", modifiers: [.command, .option])
+                .disabled(store.selected?.hasContent != true)
+            let site = store.selected?.url.flatMap(HiddenElementStore.site(for:))
+            let count = site.map { store.passwordFill.places.places(on: $0).count } ?? 0
+            Button(count > 0 ? "このサイトで教えた入れる場所を忘れる（\(count)件）" : "このサイトで教えた入れる場所を忘れる") {
+                if let site { store.passwordFill.places.removeAll(on: site) }
+            }
+            .disabled(count == 0)
         }
 
         CommandMenu("移動") {

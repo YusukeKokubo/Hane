@@ -121,6 +121,14 @@ final class Page {
         try await webView.callAsyncJavaScript(body, arguments: arguments, in: nil, contentWorld: contentWorld)
     }
 
+    /// ページの中の位置（CSS の画素。表示している範囲の左上から）にメニューを出す。選ぶか閉じるまで戻らない。
+    func popUp(_ menu: NSMenu, at point: CGPoint) {
+        let scale = webView.pageZoom * webView.magnification
+        var location = CGPoint(x: point.x * scale, y: point.y * scale)
+        if !webView.isFlipped { location.y = webView.bounds.height - location.y }
+        menu.popUp(positioning: nil, at: location, in: webView)
+    }
+
     /// 画面に出ている範囲を PNG にする。`fullPage` なら、画面の外も含めたページ全体を撮る。
     func snapshot(fullPage: Bool) async throws -> Data {
         guard fullPage else {

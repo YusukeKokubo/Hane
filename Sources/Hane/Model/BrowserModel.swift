@@ -29,6 +29,8 @@ final class BrowserModel {
     @ObservationIgnored let contentBlocker: ContentBlocker?
     /// ダウンロードの一覧。プロファイルを切り替えても続く。
     let downloads: Downloads
+    /// 1Password で入れる場所として教わったもの。プロファイルによらずアプリ全体で一つ。
+    @ObservationIgnored let loginFields: LoginFieldStore
     /// 開いているプロファイルのタブ管理。窓に出ているものと、窓がひとつもなくなったときの `current`。
     private var stores: [String: TabStore]
     /// 起動したとき、続けて窓を開いて戻すプロファイル。
@@ -52,6 +54,8 @@ final class BrowserModel {
         self.keepsSiteData = keepsSiteData
         let downloads = Downloads.forInstance(persistent: directory != nil && keepsSiteData, instance: BrowserInstance.name)
         self.downloads = downloads
+        let loginFields = LoginFieldStore(fileURL: keepsSiteData ? directory?.appending(path: "login-fields.json") : nil)
+        self.loginFields = loginFields
         let registry = directory.flatMap { try? ProfileRegistry.load(from: ProfileRegistry.fileURL(in: $0)) } ?? ProfileRegistry()
         let names = [BrowserProfile.defaultName] + registry.profiles.map(\.name)
         let start = registry.lastOpened.flatMap { names.contains($0) ? $0 : nil } ?? BrowserProfile.defaultName
@@ -61,7 +65,7 @@ final class BrowserModel {
         let data = ProfileData(
             name: start, entry: registry.profiles.first { $0.name == start }, directory: directory, keepsSiteData: keepsSiteData)
         opened = [start: data]
-        let store = Self.makeStore(with: data, contentBlocker: contentBlocker, downloads: downloads)
+        let store = Self.makeStore(with: data, contentBlocker: contentBlocker, downloads: downloads, loginFields: loginFields)
         self.store = store
         stores = [start: store]
         // 最初の窓に最後に開いていたプロファイルを出し、ほかは続けて開く窓に出す。
@@ -78,6 +82,7 @@ final class BrowserModel {
         keepsSiteData = false
         contentBlocker = store.contentBlocker
         downloads = store.downloads
+        loginFields = store.passwordFill.places
         registered = []
         names = [BrowserProfile.defaultName]
         current = BrowserProfile.defaultName
@@ -288,16 +293,19 @@ final class BrowserModel {
         let data = opened[name] ?? ProfileData(
             name: name, entry: registered.first { $0.name == name }, directory: directory, keepsSiteData: keepsSiteData)
         opened[name] = data
-        return Self.makeStore(with: data, contentBlocker: contentBlocker, downloads: downloads)
+        return Self.makeStore(with: data, contentBlocker: contentBlocker, downloads: downloads, loginFields: loginFields)
     }
 
-    private static func makeStore(with data: ProfileData, contentBlocker: ContentBlocker?, downloads: Downloads) -> TabStore {
+    private static func makeStore(
+        with data: ProfileData, contentBlocker: ContentBlocker?, downloads: Downloads, loginFields: LoginFieldStore
+    ) -> TabStore {
         TabStore(
             factory: PageFactory(dataStore: data.dataStore, contentBlocker: contentBlocker, downloads: downloads),
             bookmarks: data.bookmarks,
             history: data.history,
             favicons: data.favicons,
-            session: data.session
+            session: data.session,
+            loginFields: loginFields
         )
     }
 

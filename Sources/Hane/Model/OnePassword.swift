@@ -73,27 +73,76 @@ extension LoginItem: Decodable {
 
 /// 入れる中身。使い終えたら捨て、どこにも書かない。
 struct Credentials: Sendable {
-    var username = ""
-    var password = ""
+    /// 入れられる項目一つ。
+    struct Field: Equatable, Sendable {
+        /// どの欄に入れるかを覚えるときの名前。ユーザー名・パスワード・ワンタイムコードは決まった名前で、
+        /// 自分で足した項目は見出しで呼ぶ（項目の ID はログインごとに違い、同じサイトの別のログインで使い回せないため）。
+        let key: String
+        /// メニューに出す名前。
+        let label: String
+        let value: String
+    }
+
+    static let usernameKey = "username"
+    static let passwordKey = "password"
+    static let oneTimeCodeKey = "one-time-code"
+
+    var fields: [Field]
+
+    init(fields: [Field] = []) {
+        self.fields = fields
+    }
+
+    /// テストで手早く作るため。
+    init(username: String, password: String, oneTimeCode: String? = nil) {
+        fields = [
+            Field(key: Self.usernameKey, label: "ユーザー名", value: username),
+            Field(key: Self.passwordKey, label: "パスワード", value: password),
+        ]
+        if let oneTimeCode { fields.append(Field(key: Self.oneTimeCodeKey, label: "ワンタイムコード", value: oneTimeCode)) }
+    }
+
+    func value(for key: String) -> String? {
+        fields.first { $0.key == key }?.value
+    }
+
+    var username: String { value(for: Self.usernameKey) ?? "" }
+    var password: String { value(for: Self.passwordKey) ?? "" }
     /// 今のワンタイムコード。登録していなければ `nil`。
-    var oneTimeCode: String?
+    var oneTimeCode: String? { value(for: Self.oneTimeCodeKey) }
 }
 
 extension Credentials: Decodable {
     private enum Keys: String, CodingKey { case fields }
 
-    private struct Field: Decodable {
+    private struct Raw: Decodable {
+        let id: String?
         let type: String?
         let purpose: String?
+        let label: String?
         let value: String?
         let totp: String?
     }
 
     init(from decoder: any Decoder) throws {
-        let fields = try decoder.container(keyedBy: Keys.self).decodeIfPresent([Field].self, forKey: .fields) ?? []
-        username = fields.first { $0.purpose == "USERNAME" }?.value ?? ""
-        password = fields.first { $0.purpose == "PASSWORD" }?.value ?? ""
-        oneTimeCode = fields.first { $0.type == "OTP" && $0.totp != nil }?.totp
+        let raws = try decoder.container(keyedBy: Keys.self).decodeIfPresent([Raw].self, forKey: .fields) ?? []
+        var fields: [Field] = []
+        for raw in raws {
+            let field: Field? = switch (raw.purpose, raw.type) {
+            case ("USERNAME", _): raw.value.map { Field(key: Self.usernameKey, label: "ユーザー名", value: $0) }
+            case ("PASSWORD", _): raw.value.map { Field(key: Self.passwordKey, label: "パスワード", value: $0) }
+            case ("NOTES", _): nil
+            // 値は otpauth の URI なので、今のコード（totp）を使う。
+            case (_, "OTP"): raw.totp.map { Field(key: Self.oneTimeCodeKey, label: "ワンタイムコード", value: $0) }
+            default:
+                (raw.label ?? raw.id).flatMap { label in raw.value.map { Field(key: "label:" + label, label: label, value: $0) } }
+            }
+            // 同じ名前の項目が二つあれば、先のものを使う。
+            if let field, !field.value.isEmpty, !fields.contains(where: { $0.key == field.key }) {
+                fields.append(field)
+            }
+        }
+        self.fields = fields
     }
 }
 

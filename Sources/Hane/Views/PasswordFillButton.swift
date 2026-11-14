@@ -1,40 +1,48 @@
 import SwiftUI
 
 /// 1Password のログインを入れるボタン。合うログインがいくつもあるときと、入れられなかったときは、ここから一覧や文言を出す。
+/// 入れる場所を教わっているあいだは、押すと教わるのを終える。
 struct PasswordFillButton: View {
     let fill: PasswordFill
     let tab: Tab
 
     var body: some View {
         Group {
-            if fill.state == .working {
+            switch fill.state {
+            case .working:
                 ProgressView()
                     .controlSize(.small)
                     .frame(width: 16)
-            } else {
+            case .teaching:
+                Button("入れる場所を教えるのを終える", systemImage: "key.fill") { fill.stopTeaching() }
+                    .foregroundStyle(.tint)
+                    .help("入れる場所を教えるのを終える（Esc）")
+            case .idle, .choosing, .failed:
                 Button("1Password で入力", systemImage: "key") { fill.start(on: tab) }
                     .disabled(!tab.hasContent)
-                    .help("1Password のログインを入れる（⌘\\）")
+                    .help("1Password のログインを入れる（⌘\\）。⌥⌘\\ で入れる場所を教える")
             }
         }
         .popover(isPresented: Binding(
             get: { showsPanel },
             set: { if !$0 { fill.dismiss() } }
         ), arrowEdge: .bottom) {
-            PasswordFillPanel(fill: fill)
+            PasswordFillPanel(fill: fill) { fill.start(on: tab, teaching: true) }
         }
     }
 
     private var showsPanel: Bool {
         switch fill.state {
         case .choosing, .failed: true
-        case .idle, .working: false
+        case .idle, .working, .teaching: false
         }
     }
 }
 
 private struct PasswordFillPanel: View {
     let fill: PasswordFill
+    /// 入れられなかったとき、そのまま入れる場所を教え始める。
+    let teach: () -> Void
     @State private var selection: LoginItem.ID?
 
     var body: some View {
@@ -64,12 +72,18 @@ private struct PasswordFillPanel: View {
                 Text(message)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .fixedSize(horizontal: false, vertical: true)
-                Button("OK") { fill.dismiss() }
-                    .keyboardShortcut(.defaultAction)
+                HStack {
+                    Button("入れる場所を教える…") {
+                        fill.dismiss()
+                        teach()
+                    }
+                    Button("OK") { fill.dismiss() }
+                        .keyboardShortcut(.defaultAction)
+                }
             }
             .padding()
-            .frame(width: 300)
-        case .idle, .working:
+            .frame(width: 320)
+        case .idle, .working, .teaching:
             EmptyView()
         }
     }
