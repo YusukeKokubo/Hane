@@ -26,13 +26,11 @@
 
 ## iframe の中
 
-`snapshot`、`click`、`fill`、`press`、`page-click`、`page-hover` と、`--frame` を付けた `text` と `eval` は、iframe の中でも走る。スクリプトを特定のフレームで走らせる公開の口は `callAsyncJavaScript` の `in:` に渡す `WKFrameInfo` だけで、これは自分では作れず、WebKit から受け取るしかない。受け取る道は、ページからの知らせ（`WKScriptMessage.frameInfo`）や読み込みの案内役に付いてくるものが前からあったが、どれも普段の閲覧の側でフレームごとに知らせを送らせるか、フレームの一覧を持ち続ける必要があった。そこで macOS 27 の WebKit に入った `WKJSHandle` を使う。`hanectl` の実行環境を `createJSHandle` を許した設定で作っておき、命令が来たときだけ、親のフレームで `window.webkit.createJSHandle(iframe.contentWindow)` を返させ、アプリでそれをフレーム（`windowProxyFrame`）に引き直してから、そのフレームで同じスクリプトを走らせる。別のオリジンのフレームでも、ページのスクリプトからは中に触れないが、アプリからはこの道で引ける。普段の閲覧には何も足していない（全フレームへのスクリプトも、フレームごとの知らせもない）。
+`snapshot`、`click`、`fill`、`press`、`page-click`、`page-hover` と、`--frame` を付けた `text` と `eval` は、iframe の中でも走る。スクリプトを特定のフレームで走らせる公開の口は `callAsyncJavaScript` の `in:` に渡す `WKFrameInfo` だけで、これは自分では作れず、WebKit から受け取るしかない。受け取る道は、ページからの知らせ（`WKScriptMessage.frameInfo`）や読み込みの案内役に付いてくるものが前からあったが、どれも普段の閲覧の側でフレームごとに知らせを送らせるか、フレームの一覧を持ち続ける必要があった。そこで macOS 27 の WebKit に入った `WKJSHandle` を使う。`hanectl` の実行環境（`ControlService` の `world`）を `createJSHandle` を許した設定で作っておき、命令が来たときだけ、親のフレームで `window.webkit.createJSHandle(iframe.contentWindow)` を返させ、アプリでそれをフレーム（`windowProxyFrame`）に引き直してから、そのフレームで同じスクリプトを走らせる。別のオリジンのフレームでも、ページのスクリプトからは中に触れないが、アプリからはこの道で引ける。普段の閲覧には何も足していない（全フレームへのスクリプトも、フレームごとの知らせもない）。
 
 フレームは毎回たどり直す。`snapshot` は主フレームから順に、見えている iframe を並んだ順に下りて、フレームの行（`frame 1`、`frame 1.2` のように親からの順番をつないだ名前）の下に中身を字下げして並べる。番号はページ全体の通しにし、控え（`__refs`）は要素のあるフレームが番号の位置に持つ。主フレームはどの番号の範囲がどのフレームにあるか（`__frameRefs`）だけを持ち、`act` と `locate` は主フレームで走ってその番号が子フレームのものなら道筋を返し、アプリがそのフレームで走らせ直す。道筋は iframe の並びの順番なので、`snapshot` のあとに iframe が増えたり減ったりすると別のフレームに着くことがあるが、そのフレームの控えにはその番号がないので「取り直すこと」と断る。番号を付けない `press` は、主フレームでフォーカスが iframe にあればその中へ下りる。
 
 `page-click` の位置は、子フレームの中で要素の真ん中を測り、外側へ向かって各段の iframe の中身の左上（枠と内側の余白を足したもの）を足して主フレームの位置に直す。中でスクロールすると外側も動くことがあるので、測り終えてから iframe の位置を測り直す。途中のフレームの表示している範囲から外れていれば押さない。iframe に CSS の変形（`transform`）が掛かっていると位置がずれる。
-
-ビルドに使っている SDK（Xcode 26.5）にはまだ `WKJSHandle` と `WKContentWorldConfiguration` の定義がないので、`FrameHandles` が公開されている名前で呼んでいる。SDK が 27 になったら直に使う形に戻す。動いている WebKit に口がなければ、フレームの行に「macOS 27 から」と出て中は読まない。
 
 ## 通信の記録
 

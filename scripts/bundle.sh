@@ -36,7 +36,7 @@ cp Support/Filters/*.txt "$APP/Contents/Resources/Filters/"
 # actool は手元の作業場所でなく前回の場所を基準に相対パスを解くことがあるので、絶対パスで渡す。
 actool "$PWD/Support/AppIcon.icon" --compile "$PWD/$APP/Contents/Resources" \
     --app-icon AppIcon --enable-on-demand-resources NO --development-region ja \
-    --target-device mac --platform macosx --minimum-deployment-target 26.0 \
+    --target-device mac --platform macosx --minimum-deployment-target 27.0 \
     --output-partial-info-plist "$PWD/build/AppIcon-partial.plist" >/dev/null
 rm -f build/AppIcon-partial.plist
 # actool は失敗しても終了コードが 0 なので、できたものを見て確かめる。

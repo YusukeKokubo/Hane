@@ -12,9 +12,13 @@ final class ControlService {
     private let settings: SettingsStore
     /// 要素の控えを置く実行環境。ページ自身のスクリプトからは見えない。
     /// 子フレームの窓をアプリへ渡せる（`createJSHandle`）ようにして、iframe の中でも走らせられるようにしてある。
-    /// 設定から作った実行環境は名前で引き直せないので、持ち続ける（`FrameHandles`）。
+    /// 設定から作った実行環境は名前で引き直せないので、持ち続ける。
     /// ページへの命令が初めて来たときに作る。外から操作しない普段の起動では、この口に触れない。
-    private lazy var world = FrameHandles.makeWorld() ?? WKContentWorld.world(name: "hanectl")
+    private lazy var world = {
+        let configuration = WKContentWorld.Configuration()
+        configuration.jsHandleCreationEnabled = true
+        return WKContentWorld(configuration: configuration)
+    }()
     /// `ui-snapshot` で振った番号と、窓まわりの部品の対応。
     private let windowElements: WindowElements
     /// アプリの起動とほぼ同時に作られるので、起動した時刻として使う。
@@ -455,7 +459,7 @@ final class ControlService {
             let value = try await scriptValue(PageScripts.frame, ["index": index, "reveal": reveal, "every": every], on: tab, in: frame.info)
             guard let object = value as? [String: Any] else { throw ControlError("フレームを引けなかった。") }
             if let message = object["error"] as? String { throw ControlError(message) }
-            guard let info = await FrameHandles.frame(of: object["handle"]) else {
+            guard let handle = object["handle"] as? WKJSHandle, let info = await handle.windowProxyFrame else {
                 throw ControlError("フレームを引けなかった（読み込み中か、ページが変わった）。snapshot を取り直すこと。")
             }
             let origin = CGPoint(x: object["left"] as? Double ?? 0, y: object["top"] as? Double ?? 0)

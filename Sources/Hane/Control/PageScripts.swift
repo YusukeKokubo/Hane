@@ -40,7 +40,6 @@ enum PageScripts {
     /// 返すのは、フレームの窓を表す `handle`（アプリが `WKFrameInfo` に引き直す）、フレームの中身の左上の位置
     /// （CSS の画素。このフレームの表示している範囲の左上から）、このフレームの表示している範囲の大きさ。
     static let frame = childFrames + allFrames + """
-    if (!window.webkit || !window.webkit.createJSHandle) return { error: 'この WebKit では子フレームを引けない（macOS 27 から）。' };
     const f = (every ? allFrames() : childFrames())[index];
     if (!f) return { error: 'フレームが見つからない（ページが変わった）。snapshot を取り直すこと。' };
     if (reveal) {
