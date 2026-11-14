@@ -39,6 +39,8 @@ final class BrowserModel {
     @ObservationIgnored private let directory: URL?
     /// サイトデータを保存するか。テストでは保存する置き場を試しても、WebKit の置き場は作らない。
     @ObservationIgnored private let keepsSiteData: Bool
+    /// ページの console 出力と例外を記録するか。`hanectl logs` のためだけの仕掛けなので、開発用の実体だけが付ける。
+    @ObservationIgnored private let capturesConsole: Bool
     @ObservationIgnored private var registered: [ProfileRegistry.Entry]
     @ObservationIgnored private var temporaryNames: [String] = []
     /// 一度開いたプロファイルの持ち物。離れても捨てずに、戻ったときに同じものを使う。
@@ -48,8 +50,9 @@ final class BrowserModel {
     @ObservationIgnored private var isQuitting = false
 
     /// `directory` は持ち物の根元（`default` の持ち物と一覧をここに、ほかは `profiles/<名前>/` に置く）。
-    init(directory: URL?, contentBlocker: ContentBlocker?, keepsSiteData: Bool = true) {
+    init(directory: URL?, contentBlocker: ContentBlocker?, keepsSiteData: Bool = true, capturesConsole: Bool = true) {
         self.directory = directory
+        self.capturesConsole = capturesConsole
         self.contentBlocker = contentBlocker
         self.keepsSiteData = keepsSiteData
         let downloads = Downloads.forInstance(persistent: directory != nil && keepsSiteData, instance: BrowserInstance.name)
@@ -65,7 +68,9 @@ final class BrowserModel {
         let data = ProfileData(
             name: start, entry: registry.profiles.first { $0.name == start }, directory: directory, keepsSiteData: keepsSiteData)
         opened = [start: data]
-        let store = Self.makeStore(with: data, contentBlocker: contentBlocker, downloads: downloads, loginFields: loginFields)
+        let store = Self.makeStore(
+            with: data, contentBlocker: contentBlocker, downloads: downloads, loginFields: loginFields,
+            capturesConsole: capturesConsole)
         self.store = store
         stores = [start: store]
         // 最初の窓に最後に開いていたプロファイルを出し、ほかは続けて開く窓に出す。
@@ -80,6 +85,7 @@ final class BrowserModel {
     init(store: TabStore) {
         directory = nil
         keepsSiteData = false
+        capturesConsole = true
         contentBlocker = store.contentBlocker
         downloads = store.downloads
         loginFields = store.passwordFill.places
@@ -92,7 +98,8 @@ final class BrowserModel {
 
     /// 普段使いの実体は登録した一覧を使い、使い捨ての実体は見せない（そこから持ち主のデータに触れないため）。
     static func forInstance(contentBlocker: ContentBlocker?) -> BrowserModel {
-        BrowserModel(directory: BrowserInstance.dataDirectory, contentBlocker: contentBlocker)
+        BrowserModel(
+            directory: BrowserInstance.dataDirectory, contentBlocker: contentBlocker, capturesConsole: BrowserInstance.name != nil)
     }
 
     var isPersistent: Bool { directory != nil }
@@ -293,14 +300,18 @@ final class BrowserModel {
         let data = opened[name] ?? ProfileData(
             name: name, entry: registered.first { $0.name == name }, directory: directory, keepsSiteData: keepsSiteData)
         opened[name] = data
-        return Self.makeStore(with: data, contentBlocker: contentBlocker, downloads: downloads, loginFields: loginFields)
+        return Self.makeStore(
+            with: data, contentBlocker: contentBlocker, downloads: downloads, loginFields: loginFields,
+            capturesConsole: capturesConsole)
     }
 
     private static func makeStore(
-        with data: ProfileData, contentBlocker: ContentBlocker?, downloads: Downloads, loginFields: LoginFieldStore
+        with data: ProfileData, contentBlocker: ContentBlocker?, downloads: Downloads, loginFields: LoginFieldStore,
+        capturesConsole: Bool
     ) -> TabStore {
         TabStore(
-            factory: PageFactory(dataStore: data.dataStore, contentBlocker: contentBlocker, downloads: downloads),
+            factory: PageFactory(
+                dataStore: data.dataStore, contentBlocker: contentBlocker, downloads: downloads, capturesConsole: capturesConsole),
             bookmarks: data.bookmarks,
             history: data.history,
             favicons: data.favicons,

@@ -471,6 +471,23 @@ import WebKit
         #expect(await run("logs").output.contains("記録なし"))
     }
 
+    /// 付けない設定のページには、ユーザースクリプトも受け口も入らず、`console` は包まれない。
+    @Test func consoleIsNotCapturedWhenDisabled() async throws {
+        let file = FileManager.default.temporaryDirectory.appending(path: "control-console-\(UUID().uuidString).html")
+        try "<title>Quiet</title><script>console.log('hidden')</script>".write(to: file, atomically: true, encoding: .utf8)
+        let quiet = TabStore(factory: PageFactory(dataStore: .nonPersistent(), capturesConsole: false))
+        let selected = quiet.open(URLRequest(url: file))
+        for _ in 0..<100 where selected.title != "Quiet" {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let page = try #require(selected.page)
+        let controller = page.webView.configuration.userContentController
+        #expect(controller.userScripts.allSatisfy { !$0.source.contains(PageLog.handlerName) })
+        let wrapped = try await page.webView.evaluateJavaScript("console.log.toString().includes('native code')")
+        #expect(wrapped as? Bool == true)
+        #expect(selected.log.entries.isEmpty)
+    }
+
     @Test func logKeepsOnlyRecentEntries() {
         let log = PageLog()
         for index in 0..<(PageLog.capacity + 10) {

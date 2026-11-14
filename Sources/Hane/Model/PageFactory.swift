@@ -16,10 +16,13 @@ final class PageFactory {
     /// `dataStore` はプロファイルのすべてのページで共有するサイトデータ（Cookieやキャッシュ）の保存先。
     /// 置き場はプロファイルが決める（`ProfileData`）。テストでは終了時に消えるもの。
     /// テストのダウンロードは一時フォルダに置く。
+    /// `capturesConsole` は、`hanectl logs` 用に console 出力と例外を拾うか。ページ全部に処理が乗るので、
+    /// 開発用の実体だけが付ける。既定はテスト向けに付ける。
     init(
         dataStore: WKWebsiteDataStore = .nonPersistent(),
         contentBlocker: ContentBlocker? = nil,
-        downloads: Downloads = Downloads(directory: Downloads.temporaryDirectory(for: "test-\(UUID().uuidString)"))
+        downloads: Downloads = Downloads(directory: Downloads.temporaryDirectory(for: "test-\(UUID().uuidString)")),
+        capturesConsole: Bool = true
     ) {
         self.contentBlocker = contentBlocker
         self.downloads = downloads
@@ -28,7 +31,7 @@ final class PageFactory {
 
         // 受け口は全ページで一つ。ページからの知らせは、どの Web ビューから来たかで振り分ける。
         let userContent = WKUserContentController()
-        PageLog.attach(to: userContent)
+        if capturesConsole { PageLog.attach(to: userContent) }
         KeyNavigation.attach(to: userContent)
         contentBlocker?.attach(to: userContent)
         configuration.userContentController = userContent
