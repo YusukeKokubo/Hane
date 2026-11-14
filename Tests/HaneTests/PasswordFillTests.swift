@@ -169,6 +169,20 @@ import WebKit
                 == ["username", "password"])
     }
 
+    /// 取り違えて覚えた場所（パスワード欄にユーザー名など）には入れず、推して入れる。
+    @Test func skipsTaughtPlacesOfTheWrongKind() async throws {
+        let page = try await open(#"<input id="name" name="text"><input id="pw" type="password" name="password">"#)
+        let url = try #require(page.url)
+        let site = try #require(HiddenElementStore.site(for: url))
+        let wrong = [
+            LoginFieldPlace(site: site, selector: "input[name=\"password\"]", field: Credentials.usernameKey, added: Date()),
+            LoginFieldPlace(site: site, selector: "input[name=\"text\"]", field: Credentials.passwordKey, added: Date()),
+        ]
+        #expect(try await PasswordFill.fill(credentials, into: page, at: url, places: wrong) == ["username", "password"])
+        #expect(try await value("name", in: page) == "alice@example.com")
+        #expect(try await value("pw", in: page) == "s3cret")
+    }
+
     /// 教わっているあいだ、クリックした欄にメニューで選んだ項目を入れて覚える。Esc で終わる。
     @Test func teachesPlacesByClicking() async throws {
         let page = try await open("""
@@ -182,9 +196,11 @@ import WebKit
             .init(key: Credentials.passwordKey, label: "パスワード", value: "s3cret"),
         ])
         var asked: [String?] = []
+        var offered: [[String]] = []
         var answers: [PasswordFill.FieldChoice?] = [.field(bank.fields[0]), .field(bank.fields[1]), .unassign]
         let fill = PasswordFill(source: FixedLogins(), places: LoginFieldStore()) { fields, current, _, _ in
             asked.append(current)
+            offered.append(fields.map(\.key))
             return answers.removeFirst()
         }
         let teaching = Task { await fill.teach(bank, title: "銀行", on: page, at: url) }
@@ -201,6 +217,7 @@ import WebKit
         try await click("branch", on: page)
         try await waitFor { fill.places.places(on: site).count == 1 }
         #expect(asked == [nil, nil, "label:店番号"], "教わった欄では今の項目を見せる")
+        #expect(offered[0] == ["label:店番号"] && offered[1] == ["label:店番号", "password"], "パスワードはパスワード欄にだけ出す")
 
         _ = try await page.callJavaScript(
             #"document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))"#,
@@ -209,6 +226,23 @@ import WebKit
         #expect(fill.state == .idle)
         #expect(try await page.callJavaScript("return window.leaked ?? false", arguments: [:], contentWorld: .page) as? Bool == false,
                 "選んでいるあいだのクリックはページへ渡さない")
+    }
+
+    /// パスワードの無いログインでパスワード欄を選んだら、空のメニューを出さずに、パスワードが無いと言って終える。
+    @Test func tellsWhenTheLoginHasNoPassword() async throws {
+        let page = try await open(#"<input id="pw" type="password">"#)
+        let url = try #require(page.url)
+        var asked = false
+        let fill = PasswordFill(source: FixedLogins(), places: LoginFieldStore()) { _, _, _, _ in
+            asked = true
+            return nil
+        }
+        let nameOnly = Credentials(fields: [.init(key: Credentials.usernameKey, label: "ユーザー名", value: "alice")])
+        let teaching = Task { await fill.teach(nameOnly, title: "X", on: page, at: url) }
+        try await click("pw", on: page)
+        await teaching.value
+        #expect(!asked)
+        #expect(fill.state == .failed(PasswordFill.noPassword("X")))
     }
 
     @Test func doesNothingAfterThePageMoved() async throws {

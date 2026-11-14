@@ -124,7 +124,14 @@ final class PasswordFill {
             }
             let site = HiddenElementStore.site(for: url)
             let filled = try await Self.fill(credentials, into: page, at: url, places: site.map(places.places(on:)) ?? [])
-            state = filled.isEmpty ? .failed("このページにログインの入力欄が見つかりません。入れる場所を教えてください。") : .idle
+            if !filled.isEmpty {
+                state = .idle
+            } else if credentials.password.isEmpty {
+                // 選んだログインが思っていたものと違うことがある（ホストが合う別のログインが一件だけあった、など）。
+                state = .failed(Self.noPassword(item.title))
+            } else {
+                state = .failed("このページにログインの入力欄が見つかりません。入れる場所を教えてください。")
+            }
         } catch {
             state = .failed(error.localizedDescription)
         }
@@ -156,7 +163,14 @@ final class PasswordFill {
                 state == .teaching(title)
             else { break }
             let current = places.field(at: selector, on: site)
-            switch menu(credentials.fields, current, CGPoint(x: x, y: y), page) {
+            let isPassword = picked["password"] as? Bool ?? false
+            let fitting = credentials.fields.filter { Self.fits($0.key, passwordField: isPassword) }
+            if fitting.isEmpty, current == nil {
+                // 選べるものが一つもないメニューは出さない。パスワード欄でしか起きない。
+                state = .failed(Self.noPassword(title))
+                break
+            }
+            switch menu(fitting, current, CGPoint(x: x, y: y), page) {
             case .field(let field)?:
                 places.set(field.key, at: selector, on: site)
                 _ = try? await page.callJavaScript(Self.placeScript, arguments: [
@@ -199,6 +213,20 @@ final class PasswordFill {
         return result as? [String] ?? []
     }
 
+    static func noPassword(_ title: String) -> String {
+        "1Password の「\(title)」にはパスワードが登録されていません。"
+    }
+
+    /// その項目をその欄に入れてよいか。ユーザー名をパスワード欄に入れたり、パスワードを伏せない欄に入れて画面に出したりしない。
+    /// 教わるときのメニューと、教わった場所に入れるときの両方で守る（取り違えて覚えたものも入れない）。
+    static func fits(_ field: String, passwordField: Bool) -> Bool {
+        switch field {
+        case Credentials.usernameKey: !passwordField
+        case Credentials.passwordKey: passwordField
+        default: true
+        }
+    }
+
     /// ページの `location.host` と同じ形（ポートがあれば付ける）。
     private static func host(of url: URL) -> String {
         (url.host() ?? "") + (url.port.map { ":\($0)" } ?? "")
@@ -218,12 +246,15 @@ final class PasswordFill {
         };
         """
 
-    /// 教わった場所に入れる。見つかった欄だけに、ページの上から順に入れる（フォーカスが最後の欄に残る）。
+    /// 教わった場所に入れる。見つかって、項目に合う欄（`fits` と同じ決まり）だけに、ページの上から順に入れる（フォーカスが最後の欄に残る）。
     private static let placeScript = """
         if (location.host !== host) return [];
         \(helpers)
         const find = selector => { try { return document.querySelector(selector); } catch { return null; } };
-        const found = pairs.map(pair => ({ ...pair, el: find(pair.selector) })).filter(pair => pair.el && shown(pair.el));
+        const fits = (field, el) => field === "\(Credentials.usernameKey)" ? el.type !== "password"
+            : field === "\(Credentials.passwordKey)" ? el.type === "password" : true;
+        const found = pairs.map(pair => ({ ...pair, el: find(pair.selector) }))
+            .filter(pair => pair.el && shown(pair.el) && fits(pair.field, pair.el));
         found.sort((a, b) => a.el.compareDocumentPosition(b.el) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1);
         for (const pair of found) put(pair.el, pair.value);
         return found.map(pair => pair.field);
@@ -361,7 +392,7 @@ final class PasswordFill {
                 if (!isField(event.target)) return;
                 swallow(event);
                 const r = event.target.getBoundingClientRect();
-                finish({ selector: selectorFor(event.target), x: r.left, y: r.bottom });
+                finish({ selector: selectorFor(event.target), x: r.left, y: r.bottom, password: event.target.type === "password" });
             };
             const onKey = event => {
                 if (event.key !== "Escape") return;
