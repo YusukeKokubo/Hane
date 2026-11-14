@@ -123,10 +123,79 @@ final class Page {
 
     /// ページの中の位置（CSS の画素。表示している範囲の左上から）にメニューを出す。選ぶか閉じるまで戻らない。
     func popUp(_ menu: NSMenu, at point: CGPoint) {
+        menu.popUp(positioning: nil, at: viewLocation(of: point), in: webView)
+    }
+
+    /// ページの中の位置（CSS の画素）を、Web ビューの座標に直す。
+    private func viewLocation(of point: CGPoint) -> CGPoint {
         let scale = webView.pageZoom * webView.magnification
         var location = CGPoint(x: point.x * scale, y: point.y * scale)
         if !webView.isFlipped { location.y = webView.bounds.height - location.y }
-        menu.popUp(positioning: nil, at: location, in: webView)
+        return location
+    }
+
+    // MARK: 外からの入力（hanectl）
+
+    /// 窓に載って見えているか。見えていないページには入力を渡せない。
+    var canReceiveInput: Bool {
+        webView.window != nil && !webView.isHidden
+    }
+
+    /// ページの中の位置（CSS の画素）を押して離す。ページには利用者が押したのと同じ本物の事象（`isTrusted`）として届く。
+    ///
+    /// 窓（`NSWindow.sendEvent`）を通さず Web ビューへ直に渡す。窓を通すと、アプリが裏にいるときページまで届かなかった。
+    func click(at point: CGPoint, right: Bool, modifiers: NSEvent.ModifierFlags) -> Bool {
+        guard canReceiveInput, let window = webView.window else { return false }
+        window.makeFirstResponder(webView)
+        let location = webView.convert(viewLocation(of: point), to: nil)
+        let types: [NSEvent.EventType] = right ? [.rightMouseDown, .rightMouseUp] : [.leftMouseDown, .leftMouseUp]
+        for type in types {
+            guard let event = Self.mouseEvent(type, at: location, modifiers: modifiers, in: window) else { return false }
+            switch type {
+            case .leftMouseDown: webView.mouseDown(with: event)
+            case .leftMouseUp: webView.mouseUp(with: event)
+            case .rightMouseDown: webView.rightMouseDown(with: event)
+            default: webView.rightMouseUp(with: event)
+            }
+        }
+        return true
+    }
+
+    /// ポインタをページの中の位置（CSS の画素）へ動かす。アプリが裏にいるとき WebKit はポインタの動きを捨てるので、
+    /// 前面にいるときしか効かない。
+    func moveMouse(to point: CGPoint) -> Bool {
+        guard canReceiveInput, let window = webView.window else { return false }
+        let location = webView.convert(viewLocation(of: point), to: nil)
+        guard let event = Self.mouseEvent(.mouseMoved, at: location, modifiers: [], in: window) else { return false }
+        // Web ビューの mouseMoved を直に呼んでもページに届かなかった。窓を通すと届く。
+        window.sendEvent(event)
+        return true
+    }
+
+    /// キーを押して離す。ページには本物のキー（`isTrusted`）として届く。
+    func press(keyCode: UInt16, characters: String, ignoringModifiers: String, modifiers: NSEvent.ModifierFlags) -> Bool {
+        guard canReceiveInput, let window = webView.window else { return false }
+        if window.firstResponder !== webView { window.makeFirstResponder(webView) }
+        for type in [NSEvent.EventType.keyDown, .keyUp] {
+            guard let event = NSEvent.keyEvent(
+                with: type, location: .zero, modifierFlags: modifiers,
+                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                context: nil, characters: characters, charactersIgnoringModifiers: ignoringModifiers,
+                isARepeat: false, keyCode: keyCode
+            ) else { return false }
+            if type == .keyDown { webView.keyDown(with: event) } else { webView.keyUp(with: event) }
+        }
+        return true
+    }
+
+    private static func mouseEvent(
+        _ type: NSEvent.EventType, at location: NSPoint, modifiers: NSEvent.ModifierFlags, in window: NSWindow
+    ) -> NSEvent? {
+        let pressing = type == .leftMouseDown || type == .rightMouseDown
+        return NSEvent.mouseEvent(
+            with: type, location: location, modifierFlags: modifiers, timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: window.windowNumber, context: nil, eventNumber: 0,
+            clickCount: type == .mouseMoved ? 0 : 1, pressure: pressing ? 1 : 0)
     }
 
     /// 画面に出ている範囲を PNG にする。`fullPage` なら、画面の外も含めたページ全体を撮る。

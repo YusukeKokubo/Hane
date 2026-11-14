@@ -223,6 +223,55 @@ import WebKit
         #expect(await run("text").output.contains("Sign in"))
     }
 
+    /// page-click / page-key は、ページに本物の事象（isTrusted）として届く。
+    @Test func realInputReachesThePageAsTrusted() async throws {
+        try await open(html: """
+            <title>Input</title><style>body { margin: 0 }</style>
+            <button id="go">Go</button><select id="color"><option>Red</option><option>Blue</option></select>
+            <script>
+            window.seen = [];
+            for (const type of ['mousedown', 'click', 'keydown'])
+              addEventListener(type, e => seen.push([type, e.isTrusted, e.button ?? '', e.key ?? '', e.altKey].join(':')), true);
+            </script>
+            """)
+        #expect(await run("page-click", "1").output.contains("窓に出ていない"), "窓に載っていないページには渡せない")
+
+        // 本物の入力は窓に載って見えている Web ビューにしか届かない。
+        let page = try #require(store.selected?.page)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 400), styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        page.webView.frame = window.contentLayoutRect
+        window.contentView = page.webView
+        _ = await run("snapshot")
+
+        var response = await run("page-click", "1")
+        #expect(response.ok, "\(response.output)")
+        #expect(response.output.hasPrefix("clicked button#go"), "\(response.output)")
+        response = await run("page-click", "--right", "--with", "opt", "5,5")
+        #expect(response.ok, "\(response.output)")
+        response = await run("page-key", "z", "shift+q")
+        #expect(response.ok, "\(response.output)")
+
+        let seen = await run("eval", "seen").output
+        #expect(seen.contains("mousedown:true:0::false"), "\(seen)")
+        #expect(seen.contains("click:true:0::false"), "\(seen)")
+        #expect(seen.contains("mousedown:true:2::true"), "⌥右クリック: \(seen)")
+        #expect(seen.contains("keydown:true::z:false"), "\(seen)")
+        #expect(seen.contains("keydown:true::Q:false"), "\(seen)")
+
+        // 選択欄を押すと出るメニューは、出たそばから閉じて項目を返す。出たままだとメインスレッドがメニューの中を回り続ける。
+        response = await run("page-click", "2")
+        #expect(response.output.contains("menu (出たのですぐ閉じた。項目は選べない): Red / Blue"), "\(response.output)")
+
+        #expect(await run("page-click", "9999,5").output.contains("範囲"))
+        #expect(await run("page-click", "1,2,3").output.contains("x,y"))
+        #expect(await run("page-click", "42").output.contains("snapshot を取り直す"))
+        #expect(await !run("page-key", "hyper+j").ok)
+        #expect(await !run("page-key", "f13").ok)
+        #expect(await !run("page-key").ok)
+    }
+
     @Test func evaluatesExpressionsAndStatements() async throws {
         try await open(html: "<title>T</title><p>x</p>")
 

@@ -151,6 +151,18 @@ final class ControlService {
             let ref = try args.count >= 2 ? integer(args[1], "要素の番号") : 0
             return try await act("press", ref: ref, text: key, on: try target())
 
+        case "page-click":
+            let right = takeFlag("--right", from: &args)
+            let modifiers = try takeOption("--with", from: &args).map { try Self.modifiers(from: $0.lowercased().split(separator: "+").map(String.init)) } ?? []
+            return try await pageClick(try argument(args, 0, "要素の番号か位置"), right: right, modifiers: modifiers, on: try target())
+
+        case "page-hover":
+            return try await pageHover(try argument(args, 0, "要素の番号か位置"), on: try target())
+
+        case "page-key":
+            guard !args.isEmpty else { throw ControlError("キーがない。例: page-key j、page-key g g、page-key shift+g") }
+            return try await pageKeys(args, on: try target())
+
         case "eval":
             guard !args.isEmpty else { throw ControlError("JavaScriptがない。例: eval \"document.title\"") }
             return try await evaluate(args.joined(separator: " "), on: try target())
@@ -403,6 +415,119 @@ final class ControlService {
         return try await settled(tab)
     }
 
+    // MARK: ページへの本物の入力
+
+    /// 本物の入力を渡せるページ。画面に出ているタブのページでなければ断る（隠れた Web ビューは入力を受けない）。
+    private func inputPage(of tab: Tab) throws -> Page {
+        guard let page = tab.page else { throw ControlError("このタブにはまだページがない。先に `open <URL>` を行うこと。") }
+        guard tab.id == store.selectedID else {
+            throw ControlError("画面に出ているタブにしか入力を渡せない。先に `select \(tab.number)` を行うこと。")
+        }
+        guard page.canReceiveInput else { throw ControlError("ページが窓に出ていない。") }
+        return page
+    }
+
+    /// `snapshot` の番号か `x,y`（CSS の画素。表示している範囲の左上から）で指された位置と、そこで事象を受ける要素。
+    /// 番号の要素が画面の外なら、真ん中へスクロールしてから位置を測る。
+    private func locate(_ reference: String, on tab: Tab) async throws -> (point: CGPoint, target: String) {
+        var arguments: [String: Any] = ["ref": 0, "x": 0, "y": 0]
+        if let ref = Int(reference) {
+            arguments["ref"] = ref
+        } else {
+            let parts = reference.split(separator: ",").map { Double($0.trimmingCharacters(in: .whitespaces)) }
+            guard parts.count == 2, let x = parts[0], let y = parts[1] else {
+                throw ControlError("要素の番号か、x,y の位置で指すこと: \(reference)")
+            }
+            arguments["x"] = x
+            arguments["y"] = y
+        }
+        let reply = try await script(PageScripts.locate, arguments, on: tab)
+        guard let object = reply.data(using: .utf8).flatMap({ try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }) else {
+            throw ControlError("位置を測れなかった: \(reply)")
+        }
+        if let message = object["error"] as? String { throw ControlError(message) }
+        let point = CGPoint(x: object["x"] as? Double ?? 0, y: object["y"] as? Double ?? 0)
+        return (point, object["target"] as? String ?? "")
+    }
+
+    private func pageClick(_ reference: String, right: Bool, modifiers: NSEvent.ModifierFlags, on tab: Tab) async throws -> String {
+        let page = try inputPage(of: tab)
+        let (point, target) = try await locate(reference, on: tab)
+        tab.dismissFailure()
+        let menus = MenuCatcher()
+        defer { menus.stop() }
+        guard page.click(at: point, right: right, modifiers: modifiers) else { throw ControlError("ページへマウスの事象を渡せなかった。") }
+        var lines = [(right ? "right-clicked " : "clicked ") + target + " at \(Int(point.x)),\(Int(point.y))"]
+        let state = try await settled(tab)
+        // メニューはページの返事を待ってから出るので、少し遅れて来る（試したときは20ミリ秒以内）。
+        // 出ないことも多い（⌥右クリックの要素選びなど）ので、待ちすぎないよう区切る。右クリックは出やすいので長めに待つ。
+        let clock = ContinuousClock()
+        let deadline = clock.now + .milliseconds(right ? 500 : 100)
+        while menus.items == nil, clock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+        if let items = menus.items {
+            lines.append("menu (出たのですぐ閉じた。項目は選べない): " + (items.isEmpty ? "(項目なし)" : items.joined(separator: " / ")))
+        }
+        return (lines + [state]).joined(separator: "\n")
+    }
+
+    private func pageHover(_ reference: String, on tab: Tab) async throws -> String {
+        let page = try inputPage(of: tab)
+        let (point, target) = try await locate(reference, on: tab)
+        guard page.moveMouse(to: point) else { throw ControlError("ページへマウスの事象を渡せなかった。") }
+        try? await Task.sleep(for: .milliseconds(200))
+        return "hovering \(target) at \(Int(point.x)),\(Int(point.y))"
+            + (NSApp.isActive ? "" : "\n（アプリが裏にいるので、WebKit がポインタの動きを捨てて、ページには届かない。HANE_LAUNCH=front で起こして試すこと）")
+    }
+
+    private func pageKeys(_ specs: [String], on tab: Tab) async throws -> String {
+        let page = try inputPage(of: tab)
+        // 先に全部読んでから送る。途中で書き損じが見つかって半端に送らないため。
+        let keys = try specs.map(Self.pageKey(from:))
+        for key in keys {
+            guard page.press(keyCode: key.code, characters: key.characters, ignoringModifiers: key.ignoringModifiers, modifiers: key.modifiers) else {
+                throw ControlError("ページへキーを渡せなかった。")
+            }
+            try? await Task.sleep(for: .milliseconds(30))
+        }
+        // スクロールやタブの移動が画面に出るのを待つ。
+        try? await Task.sleep(for: .milliseconds(300))
+        return "sent \(specs.joined(separator: " "))\n" + store.allTabs.map(describe).joined(separator: "\n")
+    }
+
+    /// `page-key` のキー。`key` と同じ書き方に、大文字（Shift つきの英字）を加える。
+    private static func pageKey(from spec: String) throws -> (code: UInt16, characters: String, ignoringModifiers: String, modifiers: NSEvent.ModifierFlags) {
+        var parts = spec.split(separator: "+", omittingEmptySubsequences: false).map(String.init)
+        guard var name = parts.popLast(), !name.isEmpty else { throw ControlError("キーがない: \(spec)") }
+        var modifiers = try Self.modifiers(from: parts.map { $0.lowercased() })
+        if name.count == 1, let letter = name.first, letter.isUppercase, letter.isASCII {
+            modifiers.insert(.shift)
+            name = name.lowercased()
+        }
+        name = name.lowercased()
+        guard let (code, base) = keys[name] else {
+            let named = keys.keys.filter { letterKeys[$0] == nil }.sorted()
+            throw ControlError("知らないキー: \(name)（a〜z、A〜Z, \(named.joined(separator: ", "))）")
+        }
+        let characters = modifiers.contains(.shift) && letterKeys[name] != nil ? base.uppercased() : base
+        return (code, characters, base, modifiers)
+    }
+
+    private static func modifiers(from names: [String]) throws -> NSEvent.ModifierFlags {
+        var flags: NSEvent.ModifierFlags = []
+        for name in names {
+            switch name {
+            case "cmd": flags.insert(.command)
+            case "ctrl": flags.insert(.control)
+            case "opt", "alt": flags.insert(.option)
+            case "shift": flags.insert(.shift)
+            default: throw ControlError("知らない修飾キー: \(name)（cmd, ctrl, opt, shift）")
+            }
+        }
+        return flags
+    }
+
     /// 式ならその値を、文の並びなら `return` した値を、JSONにして返す。
     private func evaluate(_ code: String, on tab: Tab) async throws -> String {
         let finish = "return JSON.stringify(__value === undefined ? null : __value);"
@@ -650,16 +775,7 @@ final class ControlService {
     private func sendKey(_ spec: String) throws {
         var parts = spec.lowercased().split(separator: "+").map(String.init)
         guard let name = parts.popLast() else { throw ControlError("キーがない。") }
-        var flags: NSEvent.ModifierFlags = []
-        for modifier in parts {
-            switch modifier {
-            case "cmd": flags.insert(.command)
-            case "ctrl": flags.insert(.control)
-            case "opt", "alt": flags.insert(.option)
-            case "shift": flags.insert(.shift)
-            default: throw ControlError("知らない修飾キー: \(modifier)（cmd, ctrl, opt, shift）")
-            }
-        }
+        let flags = try Self.modifiers(from: parts)
         guard let (keyCode, characters) = Self.keys[name] else {
             let named = Self.keys.keys.filter { Self.letterKeys[$0] == nil }.sorted()
             throw ControlError("知らないキー: \(name)（a〜z, \(named.joined(separator: ", "))）")
@@ -730,6 +846,7 @@ final class ControlService {
         "escape": (53, "\u{1b}"),
         "delete": (51, "\u{7f}"),
         "tab": (48, "\t"),
+        "space": (49, " "),
         ",": (43, ","),
     ].merging(letterKeys) { $1 }
 
@@ -850,6 +967,33 @@ final class ControlService {
             return "JavaScriptエラー: \(message)"
         }
         return nsError.localizedDescription
+    }
+}
+
+/// ページが出したメニュー（右クリックのメニューや選択欄の選択肢）を、出たそばから閉じて項目を控える。
+///
+/// 出たままだと持ち主の画面に残り、閉じるまでメインスレッドがメニューの中を回り続ける。
+/// メニューの項目を選ぶ道は持たない（選択欄は fill で選べる）。
+@MainActor
+private final class MenuCatcher: NSObject {
+    /// 出たメニューの項目。出なければ nil。
+    private(set) var items: [String]?
+
+    override init() {
+        super.init()
+        NotificationCenter.default.addObserver(self, selector: #selector(began), name: NSMenu.didBeginTrackingNotification, object: nil)
+    }
+
+    /// メニューが回り始めたときに、メインスレッドで呼ばれる。
+    @objc private func began(_ notification: Notification) {
+        guard let menu = notification.object as? NSMenu else { return }
+        items = menu.items.filter { !$0.isSeparatorItem && !$0.isHidden }.map(\.title)
+        // 回り始めの知らせの中で閉じても効かず、メニューは出たままになった。一拍おいてから閉じる。
+        Task { @MainActor in menu.cancelTrackingWithoutAnimation() }
+    }
+
+    func stop() {
+        NotificationCenter.default.removeObserver(self)
     }
 }
 

@@ -138,6 +138,43 @@ enum PageScripts {
     return fail('未知の操作: ' + action);
     """
 
+    /// 本物の入力を渡す位置を測る。引数: `ref`（0なら `x`, `y` の位置をそのまま使う）, `x`, `y`。
+    /// 位置（CSS の画素。表示している範囲の左上から）と、その位置で事象を受ける要素をJSONで返す。
+    static let locate = """
+    const fail = message => JSON.stringify({ error: message });
+    const describe = el => {
+      if (!el) return '(なにもない)';
+      let text = el.localName;
+      if (el.id) text += '#' + el.id;
+      const words = (el.innerText || el.value || el.getAttribute('aria-label') || '').replace(/\\s+/g, ' ').trim();
+      if (words) text += ' "' + (words.length > 40 ? words.slice(0, 39) + '…' : words) + '"';
+      return text;
+    };
+    let px = x, py = y, el = null;
+    if (ref > 0) {
+      el = (window.__refs || [])[ref - 1];
+      if (!el || !el.isConnected) return fail('番号 ' + ref + ' の要素が見つからない。snapshot を取り直すこと。');
+      let r = el.getBoundingClientRect();
+      const inside = r.left >= 0 && r.top >= 0 && r.right <= innerWidth && r.bottom <= innerHeight;
+      if (!inside) {
+        // ページの CSS が smooth にしていても、測る前に動き終えるよう instant にする。
+        el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
+        r = el.getBoundingClientRect();
+      }
+      if (!r.width || !r.height) return fail('番号 ' + ref + ' の要素は大きさがなく、押せない。');
+      px = r.left + r.width / 2;
+      py = r.top + r.height / 2;
+    }
+    if (px < 0 || py < 0 || px >= innerWidth || py >= innerHeight) {
+      return fail('位置 ' + Math.round(px) + ',' + Math.round(py) + ' は表示している範囲（' + innerWidth + 'x' + innerHeight + '）の外。');
+    }
+    const hit = document.elementFromPoint(px, py);
+    let target = describe(hit);
+    // 番号の要素がほかの要素に覆われていれば、事象は手前の要素が受ける。
+    if (el && hit && hit !== el && !el.contains(hit)) target = describe(el) + '（手前の ' + describe(hit) + ' が受ける）';
+    return JSON.stringify({ x: px, y: py, target });
+    """
+
     /// セレクタに合う要素を隠す。引数: `selector`。隠した数か、失敗の理由をJSONで返す。
     static let hide = """
     let found;

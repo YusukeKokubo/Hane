@@ -50,6 +50,26 @@ public enum ControlHelp {
                              ui に overlay: sheet と出たままになったら quit で閉じる
       fill <番号> <文字列>     入力欄に文字列を入れる。select要素なら選択肢を選ぶ
       press <キー> [番号]      キーを送る（Enter, Escape, Tab, ArrowDown など）。Enter はフォームを送信する
+                             click / fill / press はページの中で作った事象で、ページからは isTrusted が false に見える
+
+    ページへ本物の入力を渡す（利用者が操作したのと同じく isTrusted が true。選択中のタブのページだけ）
+      page-click [--right] [--with <修飾>] <番号|x,y>
+                             要素（snapshot の番号）の真ん中か、位置 x,y（CSS の画素。表示している範囲の左上から）を
+                             押して離す。番号の要素が画面の外なら真ん中へスクロールしてから押す。
+                             押した位置で事象を受ける要素を返す（ほかの要素に覆われていれば、手前のものを書く）
+                             --right で右クリック、--with opt や --with cmd+shift で修飾キーを押しながら
+                             例: page-click --right --with opt 5（⌥右クリックで、隠す要素を選び始める）
+                             右クリックのメニューや選択欄の選択肢が出たら、すぐ閉じて項目を返す（選べない。選択欄は fill）
+                             ポップアップを止めていても、操作の中からの window.open は開く
+                             アプリが裏にいても届き、前には出ない
+      page-hover <番号|x,y>  ポインタをそこへ動かす（ホバーで開くメニューなど）。
+                             アプリが裏にいると WebKit がポインタの動きを捨てるので、前面にいるとき（HANE_LAUNCH=front）しか効かない。
+                             なお page-click は裏でもその位置へポインタを移したことになり、ホバーの表示も変わる
+      page-key <キー> [キー…]  キーを押して離す。並べると順に送る。文字のキーでの操作（j, G, g g, f など）が反応する。
+                             キーは key と同じ書き方に、大文字（G は shift+g）と space を加えたもの
+                             例: page-key j、page-key g g、page-key f → page-key s（印を選ぶ）、page-key escape
+                             フォーカスをページへ移してから送る。⌘ 付きでもメニューには行かない（メニューは key）
+                             アプリが裏にいても届き、前には出ない。結果はタブの一覧（x でタブが閉じるなど）
 
     プロファイル（Cookie、ブックマーク、閲覧履歴、閲覧状態を分けて持つ。窓一枚に一つずつ出す）
       profiles               プロファイルの一覧。今のもの（命令の相手。最後に前へ出たプロファイルの窓）に *、
@@ -88,11 +108,13 @@ public enum ControlHelp {
                              アプリが自分で描くので、画面収録の権限が要らず、窓が裏にいても撮れる。
                              窓の枠と信号機ボタンは写らない
       key <キー>              ページの外（メニューやバー）へキーを送り、ui の結果を返す
-                             キーは 1〜9, a〜z, up, down, left, right, return, escape, delete, tab, ","。
+                             キーは 1〜9, a〜z, up, down, left, right, return, escape, delete, tab, space, ","。
                              cmd+ ctrl+ opt+ shift+ を前に付けられる
                              例: key cmd+1（バーの左から1番目。フォルダなら一覧を開く）、key ctrl+tab（次のタブ）、
                              key cmd+,（設定の窓を開く）、key cmd+w（タブか、手前の設定の窓を閉じる）
                              アプリが裏にいても届き、前には出ない
+                             ページにフォーカスがあると修飾なしのキーはページにも届くが、押したままの扱いになる
+                             （離す事象を送らないので、j のスクロールが止まらない）。ページへは page-key を使うこと
       type [--replace] <文字列>
                              フォーカスのある入力欄（アドレスバーなど）へ1文字ずつ打ち込み、ui の結果を返す
                              入力方式に左右されない。--replace を付けると今の中身を選んでから打つ（置き換える）
