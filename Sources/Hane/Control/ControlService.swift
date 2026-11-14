@@ -1380,6 +1380,13 @@ final class ControlService {
         }
         // メニューより先に窓の部品へ渡す。アラートや編集欄の既定のボタン（Return）とキャンセル（Esc）はここで拾われる。
         if window.performKeyEquivalent(with: event) { return }
+        // 既定のボタン（アラートの OK など）の Return は、窓がキーを受ける窓のときしか効かない。裏にいるアプリの窓は
+        // キーを受ける窓になれないので、裏ではシートが Return で閉じなかった（Esc のような、ボタン自身に割り当てたキーは効く）。
+        // 前で打ったときと同じく、既定のボタンを押す。
+        if !window.isKeyWindow, flags.isEmpty, characters == "\r", let button = window.defaultButtonCell {
+            button.performClick(nil)
+            return
+        }
         if NSApp.mainMenu?.performKeyEquivalent(with: event) == true { return }
         window.sendEvent(event)
     }
