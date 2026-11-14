@@ -215,7 +215,7 @@ final class ControlService {
             return await afterUIAction(result)
 
         case "ui-menu":
-            let menu = try windowElements.menu(try await windowElements.resolve(try argument(args, 0, "部品の番号か名前")))
+            let menu = try await windowElements.menu(try await windowElements.resolve(try argument(args, 0, "部品の番号か名前")))
             guard args.count > 1 else {
                 return "menu of \(menu.label):\n" + menu.items.enumerated().map { index, item in
                     "  [\(index + 1)] " + (item === menu.selected ? "* " : "") + item.title
@@ -257,9 +257,11 @@ final class ControlService {
             return "appearance: \(effective)" + (NSApp.appearance == nil ? "（システムに従う）" : "（このアプリだけ固定。appearance system で戻す）")
 
         case "key":
+            let windowsBefore = Set(NSApp.windows.map(ObjectIdentifier.init))
             try sendKey(try argument(args, 0, "キー"))
             // 画面の更新とポップオーバーの出し入れを待ってから様子を返す。
             try? await Task.sleep(for: .milliseconds(300))
+            orderNewWindowsFront(excluding: windowsBefore)
             return describeUI()
 
         case "type":
@@ -1413,6 +1415,21 @@ final class ControlService {
         }
     }
 
+    /// キーで開いた窓（⌘N の窓など）を、本体の窓のすぐ上に重ねる。
+    ///
+    /// アプリが裏にいると、一度シートや選択欄のメニューを出したあとは、新しい窓が本体の窓の裏に置かれた
+    /// （macOS 27.2 で確かめた。出す前なら手前に来る）。裏に置かれると ui-snapshot に出ず、前で打ったときと
+    /// 振る舞いが変わるので、前で打ったときと同じく手前に並べる。`orderFront` や `makeKeyAndOrderFront` は
+    /// 50 ミリ秒もたたずに本体の窓の裏へ戻されたが、本体の窓を指して上に重ねれば残った（小窓と同じやり方）。
+    /// ほかのアプリの窓より前には出さない。前面にいるときは AppKit が手前に置くので何もしない。
+    private func orderNewWindowsFront(excluding before: Set<ObjectIdentifier>) {
+        guard !NSApp.isActive, let main = mainWindow() else { return }
+        for window in NSApp.windows where !before.contains(ObjectIdentifier(window)) {
+            guard window.isVisible, window.parent == nil, window.sheetParent == nil, window.canBecomeMain else { continue }
+            window.order(.above, relativeTo: main.windowNumber)
+        }
+    }
+
     /// 裏にいるとき、前に出ていればキーを受けたはずのウインドウ。シートやポップオーバーが出ていればそちら。
     private func backgroundKeyTarget() -> NSWindow? {
         WindowElements.windows(main: model.currentWindow).last?.window
@@ -1567,11 +1584,14 @@ final class ControlService {
 /// ページが出したメニュー（右クリックのメニューや選択欄の選択肢）を、出たそばから閉じて項目を控える。
 ///
 /// 出たままだと持ち主の画面に残り、閉じるまでメインスレッドがメニューの中を回り続ける。
-/// メニューの項目を選ぶ道は持たない（選択欄は fill で選べる）。
+/// ページのメニューの項目を選ぶ道は持たない（選択欄は fill で選べる）。窓まわりの選択欄は、
+/// 捕まえたメニューの項目の動作を `WindowElements` が直に呼ぶ。
 @MainActor
-private final class MenuCatcher: NSObject {
+final class MenuCatcher: NSObject {
     /// 出たメニューの項目。出なければ nil。
     private(set) var items: [String]?
+    /// 出たメニュー。閉じたあとも項目の動作を呼べるよう持っておく。
+    private(set) var menu: NSMenu?
 
     override init() {
         super.init()
@@ -1581,6 +1601,7 @@ private final class MenuCatcher: NSObject {
     /// メニューが回り始めたときに、メインスレッドで呼ばれる。
     @objc private func began(_ notification: Notification) {
         guard let menu = notification.object as? NSMenu else { return }
+        self.menu = menu
         items = menu.items.filter { !$0.isSeparatorItem && !$0.isHidden }.map(\.title)
         // 回り始めの知らせの中で閉じても効かず、メニューは出たままになった。一拍おいてから閉じる。
         Task { @MainActor in menu.cancelTrackingWithoutAnimation() }

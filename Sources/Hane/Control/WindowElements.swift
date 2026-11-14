@@ -228,7 +228,8 @@ final class WindowElements {
     /// 部品から出るメニュー。選択欄ならその選択肢、ほかは右クリックで出るメニュー。
     ///
     /// どちらも出すと閉じるまでメインスレッドが止まるので、出さずに中身だけを引き、選ぶときは項目の動作を直に呼ぶ。
-    func menu(_ number: Int) throws -> ElementMenu {
+    /// SwiftUI が自分で描く選択欄だけは出さずに引けないので、出してすぐ閉じる（`menuShown`）。
+    func menu(_ number: Int) async throws -> ElementMenu {
         let (element, window, point) = try target(number)
         guard let hit = Self.view(at: point, in: window) else {
             throw ControlError("\(element.label) の位置に部品がない。")
@@ -239,6 +240,13 @@ final class WindowElements {
             // 選択欄の項目は、選ばれたときに選択を移してから選択欄の動作を送るように作られている。
             // 選択欄の動作だけを送っても SwiftUI の値は変わらないので、項目の動作を呼ぶ。
             return ElementMenu(label: element.label, items: Self.choosable(menu), selected: popUp.selectedItem) { item in
+                menu.performActionForItem(at: menu.index(of: item))
+            }
+        }
+        if element.kind == "popup" || element.kind == "menubutton", let menu = await Self.menuShown(by: element.object) {
+            return ElementMenu(
+                label: element.label, items: Self.choosable(menu), selected: menu.items.first { $0.state == .on }
+            ) { item in
                 menu.performActionForItem(at: menu.index(of: item))
             }
         }
@@ -260,6 +268,28 @@ final class WindowElements {
     private static func view(at point: NSPoint, in window: NSWindow) -> NSView? {
         guard let content = window.contentView else { return nil }
         return content.hitTest(content.superview?.convert(point, from: nil) ?? point)
+    }
+
+    /// SwiftUI が自分で描く選択欄のメニュー。
+    ///
+    /// macOS 27.2（Xcode 27.2）で、ポップオーバーの中の `Picker` は `NSPopUpButton` を持たなくなり、
+    /// メニューは出すときに初めて作られるので、出さずに引く道がない。そこでアクセシビリティの押す動作で
+    /// 出させ（「メニューを出す」動作は false を返して何もしなかった）、`MenuCatcher` で出たそばから閉じて、
+    /// そのメニューを持ち帰る。持ち主の画面には一瞬メニューが出る。
+    private static func menuShown(by object: NSObject) async -> NSMenu? {
+        let catcher = MenuCatcher()
+        defer { catcher.stop() }
+        // SwiftUI の部品は動作を持っていても NSAccessibilityProtocol を名乗らないので、名前で呼ぶ。
+        guard (object as AnyObject).accessibilityPerformPress?() == true else { return nil }
+        // メニューは押す動作から返ったあとで出る。閉じるのは一拍おいてからなので、それも待つ。
+        let clock = ContinuousClock()
+        let deadline = clock.now + .seconds(1)
+        while catcher.menu == nil, clock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+        guard let menu = catcher.menu else { return nil }
+        try? await Task.sleep(for: .milliseconds(50))
+        return menu
     }
 
     private static func popUpButton(for object: NSObject) -> NSPopUpButton? {
