@@ -356,7 +356,7 @@ import WebKit
 
     /// iframe の中の要素も snapshot に出て、番号は通しで振られ、その番号で操作できる。
     /// `file://` のページは互いに別のオリジンなので、ページのスクリプトからは中に触れない場合を兼ねている。
-    @Test func readsAndOperatesInsideFrames() async throws {
+    @Test(.enabled(if: PageScripting.canEnterFrames, "iframe の中へ下りるのは macOS 27 から")) func readsAndOperatesInsideFrames() async throws {
         let directory = FileManager.default.temporaryDirectory.appending(path: "control-frames-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -654,7 +654,7 @@ import WebKit
     }
 
     /// `requests` はページが持っている記録を、フレームごとに読む。上限を超えた分は省いたと書く。
-    @Test func listsRequestsPerFrame() async throws {
+    @Test(.enabled(if: PageScripting.canEnterFrames, "iframe の中へ下りるのは macOS 27 から")) func listsRequestsPerFrame() async throws {
         #expect(await run("requests").output.contains("まだページがない"))
         try await open(html: "<title>Req</title><iframe srcdoc='<p>inner</p>'></iframe>")
 

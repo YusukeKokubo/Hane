@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "Hane",
-    platforms: [.macOS("27.0")],
+    platforms: [.macOS("26.7")],
     targets: [
         // アプリ本体。
         .executableTarget(

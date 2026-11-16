@@ -1,12 +1,12 @@
 # Hane
 
-個人用の軽量Webブラウザ。macOS 27.0以降専用で、画面は SwiftUI、ページは `WKWebView` で組んである。持ち主は一人で、配布はしない。
+個人用の軽量Webブラウザ。macOS 26.7以降で動き、画面は SwiftUI、ページは `WKWebView` で組んである。持ち主は一人で、配布はしない。
 
 ## 守ること
 
 - 外部ライブラリは使わない。Apple標準のフレームワークだけで完結させる。
 - ページは `Page`（`WKWebView` を一つ持つ）を通して扱い、`WKWebView` を直に触るのは `Page`、`PageView`、小窓（`PopupWindow`）、`PageProcess` に限る。WebKit for SwiftUI の `WebPage` は使わない（足りない所を埋めるのに WebKit の中を差し替える裏技が要り、履歴を書き出す口もないため。経緯は `docs/pitfalls.md` の「タブとページ」）。普段の動作を WebKit の非公開の中身や実行時の差し替えに頼らせない（開発用の計測で非公開の値を読むのは `PageProcess` だけ）。
-- 古いmacOS向けの分岐（`#available`）は書かない。
+- 古いmacOS向けの分岐（`#available`）は書かない。例外は `hanectl` が iframe の中へ下りる口（macOS 27 の `WKJSHandle`）の一か所だけで、26 では iframe の中は読めないものとして扱う（`PageScripting.canEnterFrames`）。
 - メモリとCPUの軽さが最優先。常駐するタイマーや、表示していないタブのための処理を足さない。`scripts/bench.sh` は触った場所で決まりとして回すものではない。変更が bench の手順（ページを開く、移る、タブを足して閉じる）で通る道の重さを変えそうで、何の数字を見たいか言えるときだけ前後で走らせる（測り方は `docs/measuring.md`）。見たいものが bench の道を通らないなら、`hanectl stats` や `sample` で狙って見る。迷ったら走らせない。
 - Swift 6の厳格な並行性チェックで、警告ゼロを保つ。
 

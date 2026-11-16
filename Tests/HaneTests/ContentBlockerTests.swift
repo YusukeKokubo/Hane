@@ -73,7 +73,7 @@ import WebKit
 
     /// `requests` は、フレームごとの記録と、フィルタで止められた要素（記録がなく、要素の状態が失敗を示すもの）を出す。
     /// file: の資源は WebKit が記録しないので、ここで記録として確かめられるのは各フレームのページ本体だけ。
-    @Test func requestsShowWhatTheFiltersStopped() async throws {
+    @Test(.enabled(if: PageScripting.canEnterFrames, "iframe の中へ下りるのは macOS 27 から")) func requestsShowWhatTheFiltersStopped() async throws {
         defer { try? FileManager.default.removeItem(at: directory) }
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let filters = directory.appending(path: "filters.txt")

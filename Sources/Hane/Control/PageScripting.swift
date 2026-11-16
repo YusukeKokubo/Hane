@@ -11,11 +11,19 @@ final class PageScripting {
     /// 子フレームの窓をアプリへ渡せる（`createJSHandle`）ようにして、iframe の中でも走らせられるようにしてある。
     /// 設定から作った実行環境は名前で引き直せないので、持ち続ける。
     /// ページへの命令が初めて来たときに作る。外から操作しない普段の起動では、この口に触れない。
-    private lazy var world = {
+    private lazy var world: WKContentWorld = {
+        // 子フレームを引く公開の口は macOS 27 の `WKJSHandle` が初めてで、26 では iframe の中へは下りない。
+        // 下りないぶんは名前で引く実行環境で足りる。
+        guard #available(macOS 27, *) else { return .world(name: "hanectl") }
         let configuration = WKContentWorld.Configuration()
         configuration.jsHandleCreationEnabled = true
         return WKContentWorld(configuration: configuration)
     }()
+
+    /// iframe の中へ下りられるか（macOS 27 から）。
+    nonisolated static var canEnterFrames: Bool {
+        if #available(macOS 27, *) { true } else { false }
+    }
     /// タブの状態を一行で表す。
     private let describe: @MainActor (Tab) -> String
     /// アラートのシートが出ているか。
@@ -87,11 +95,14 @@ final class PageScripting {
     /// `every` なら、順番は見えていないものも含めた子フレームの並びで数える。
     func frame(at path: [Int], from start: Frame = Frame(), on tab: Tab, reveal: Bool = false, every: Bool = false) async throws -> Frame {
         var frame = start
+        guard path.isEmpty || Self.canEnterFrames else {
+            throw ControlError("iframe の中へ下りるのは macOS 27 から。")
+        }
         for index in path {
             let value = try await scriptValue(PageScripts.frame, ["index": index, "reveal": reveal, "every": every], on: tab, in: frame.info)
             guard let object = value as? [String: Any] else { throw ControlError("フレームを引けなかった。") }
             if let message = object["error"] as? String { throw ControlError(message) }
-            guard let handle = object["handle"] as? WKJSHandle, let info = await handle.windowProxyFrame else {
+            guard #available(macOS 27, *), let handle = object["handle"] as? WKJSHandle, let info = await handle.windowProxyFrame else {
                 throw ControlError("フレームを引けなかった（読み込み中か、ページが変わった）。snapshot を取り直すこと。")
             }
             let origin = CGPoint(x: object["left"] as? Double ?? 0, y: object["top"] as? Double ?? 0)
