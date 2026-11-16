@@ -251,7 +251,7 @@ final class HistoryStore {
     }
 
     /// 打って訪れた回数を重く見て、しばらく訪れていないものは軽くする。
-    private static func score(_ entry: HistoryEntry, now: Date) -> Double {
+    nonisolated static func score(_ entry: HistoryEntry, now: Date) -> Double {
         let days = max(0, now.timeIntervalSince(entry.lastVisit) / 86_400)
         return Double(entry.typedCount * 5 + entry.visitCount) / (1 + days / 30)
     }

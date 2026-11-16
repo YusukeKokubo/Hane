@@ -88,7 +88,7 @@ struct BrowserWindow: View {
             if let tab = store.selected {
                 ZStack(alignment: .top) {
                     LivePages(store: store, selectedID: tab.id)
-                    PageArea(tab: tab)
+                    PageArea(tab: tab, store: store)
                         .id(tab.id)
                 }
             } else {
@@ -212,10 +212,13 @@ private struct LivePages: View {
 /// 選択中のタブの、ページに重ねるもの。ページを持たないタブでは背景で覆う。
 private struct PageArea: View {
     let tab: Tab
+    let store: TabStore
 
     var body: some View {
         ZStack(alignment: .top) {
-            if tab.page == nil {
+            if case .empty = tab.content {
+                NewTabView(tab: tab, store: store)
+            } else if tab.page == nil {
                 Color(nsColor: .windowBackgroundColor)
             }
             if let failure = tab.failure {
