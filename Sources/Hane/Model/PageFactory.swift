@@ -36,6 +36,7 @@ final class PageFactory {
         let userContent = WKUserContentController()
         if capturesConsole { PageLog.attach(to: userContent) }
         KeyNavigation.attach(to: userContent)
+        userContent.addUserScript(Self.outerSizeScript)
         contentBlocker?.attach(to: userContent)
         configuration.userContentController = userContent
         configuration.applicationNameForUserAgent = BrowserSettings.userAgentSuffix
@@ -47,6 +48,22 @@ final class PageFactory {
         configuration.defaultWebpagePreferences = preferences
         self.configuration = configuration
     }
+
+    /// WKWebView には窓の位置と大きさをページへ渡す公開の口がなく、`outerWidth` と `outerHeight` が 0 になる。
+    /// Google スプレッドシートはこれと `innerWidth` の比を拡大率とみなし、表を 4 分の 1 の細かさで描いてぼやけた。
+    /// 0 のときだけ、表示している範囲の大きさを答える。
+    private static let outerSizeScript = WKUserScript(source: """
+        (() => {
+          for (const [outer, inner] of [["outerWidth", "innerWidth"], ["outerHeight", "innerHeight"]]) {
+            const original = Object.getOwnPropertyDescriptor(window, outer)?.get;
+            if (!original) continue;
+            Object.defineProperty(window, outer, {
+              get() { return original.call(this) || this[inner]; },
+              configurable: true, enumerable: true,
+            });
+          }
+        })();
+        """, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: .page)
 
     /// `opener` は、このページから新しいタブや小窓を開くときに頼む先。
     func makePage(opener: (any TabOpening)?, log: PageLog, onEvent: @escaping @MainActor (Page.Event) -> Void) -> Page {
