@@ -33,6 +33,64 @@ import WebKit
         #expect(store.selectedID == nil)
     }
 
+    /// 読み込んでも失敗するだけで、ネットワークには出ないアドレス。
+    private func localURL(_ name: String) -> URL {
+        FileManager.default.temporaryDirectory.appending(path: "HaneTabStoreTests-\(name).html")
+    }
+
+    /// ⇧⌘T は最後に閉じたページから順に、閉じたときの位置へ開き直して選ぶ。まっさらなタブは数えない。
+    @Test func reopensClosedTabsInReverseOrderAtTheirPlace() {
+        let store = makeStore()
+        let blank = store.tabs[0]
+        let a = store.open(URLRequest(url: localURL("a")))
+        let b = store.open(URLRequest(url: localURL("b")))
+        store.newTab()
+
+        store.close(a.id)
+        store.close(b.id)
+        store.close(blank.id)
+        #expect(store.closedTabs.count == 2)
+
+        let reopenedB = store.reopenClosedTab()
+        #expect(reopenedB?.url == localURL("b"))
+        #expect(store.selectedID == reopenedB?.id)
+        #expect(reopenedB?.hasContent == true, "選んだところで起こす")
+
+        let reopenedA = store.reopenClosedTab()
+        #expect(reopenedA?.url == localURL("a"))
+        #expect(store.tabs.map(\.url) == [nil, localURL("a"), localURL("b")])
+        #expect(store.reopenClosedTab() == nil)
+    }
+
+    /// ブックマークのページはブックマークの側へ戻す。ブックマークがもうなければ普通のタブとして開く。
+    @Test func reopensBookmarkPageIntoItsBookmark() {
+        let store = makeStore()
+        let kept = store.bookmarks.add(title: "Kept", url: localURL("kept"))
+        let gone = store.bookmarks.add(title: "Gone", url: localURL("gone"))
+        let keptTab = store.activate(bookmark: kept.id)!
+        let goneTab = store.activate(bookmark: gone.id)!
+        store.close(keptTab.id)
+        store.close(goneTab.id)
+        store.removeBookmark(gone.id)
+
+        let plain = store.reopenClosedTab()
+        #expect(store.tabs.contains { $0 === plain })
+        #expect(plain?.url == localURL("gone"))
+
+        let pinned = store.reopenClosedTab()
+        #expect(store.bookmarkTabs[kept.id] === pinned)
+    }
+
+    @Test func closedTabsAreLimited() {
+        let store = makeStore()
+        for index in 0..<(BrowserSettings.closedTabLimit + 5) {
+            let tab = store.open(URLRequest(url: localURL("\(index)")))
+            store.close(tab.id)
+        }
+        #expect(store.closedTabs.count == BrowserSettings.closedTabLimit)
+        #expect(store.closedTabs.first?.page.url == localURL("5"), "古いものから捨てる")
+    }
+
     @Test func backgroundTabOpensNextToCurrent() {
         let store = makeStore()
         let first = store.tabs[0]

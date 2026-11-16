@@ -37,7 +37,7 @@ struct SettingsView: View {
             Section {
                 Toggle("文字のキーでページを操作する", isOn: $settings.usesKeyNavigation)
             } footer: {
-                Text("j・k でスクロール、d・u で半画面、gg・G で端まで。f で押せる所に印を出して選び、F なら新しいタブで開く。H・L で戻る・進む、J・K でタブを移る、x でタブを閉じる、o でアドレスバー、yy でアドレスをコピー。入力欄の中では効かず、Esc で入力欄から抜ける。")
+                Text("j・k でスクロール、d・u で半画面、gg・G で端まで。f で押せる所に印を出して選び、F なら新しいタブで開く。H・L で戻る・進む、J・K でタブを移る、x でタブを閉じて X で開き直す、o でアドレスバー、yy でアドレスをコピー。入力欄の中では効かず、Esc で入力欄から抜ける。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

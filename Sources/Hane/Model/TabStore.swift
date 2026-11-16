@@ -44,6 +44,9 @@ final class TabStore: TabOpening {
     private(set) var bookmarkEditorRequest = 0
     /// 一覧を下に出しているフォルダ。キーボードからも開け閉めするので、画面ではなくここで持つ。
     private(set) var openFolder: OpenFolder?
+    /// 閉じたページの控え。新しく閉じたものが後ろ。⇧⌘T で後ろから開き直す。
+    /// 控えには戻る・進むの履歴も入るので、数を `BrowserSettings.closedTabLimit` で区切る。ファイルには残さない。
+    private(set) var closedTabs: [ClosedTab] = []
 
     /// アドレスバーの今の中身。外部から状態を尋ねられたときに答えるための写しで、
     /// 画面の更新には使わない。
@@ -129,12 +132,14 @@ final class TabStore: TabOpening {
     func close(_ id: Tab.ID) -> Bool {
         if let index = tabs.firstIndex(where: { $0.id == id }) {
             let tab = tabs.remove(at: index)
+            remember(tab, at: index)
             tab.tearDown()
             if selectedID == id {
                 selectedID = tabs.indices.contains(index) ? tabs[index].id : (tabs.last ?? allTabs.first)?.id
             }
         } else if let entry = bookmarkTabs.first(where: { $0.value.id == id }) {
             bookmarkTabs[entry.key] = nil
+            remember(entry.value, bookmark: entry.key)
             entry.value.tearDown()
             if allTabs.isEmpty {
                 newTab()
@@ -162,6 +167,7 @@ final class TabStore: TabOpening {
         case .previousTab: select(offset: -1)
         // ⌘W と違い、最後の1枚でも窓は閉じない。ページの中の一打で窓ごと消えないように。
         case .closeTab: closeTab(tab)
+        case .reopenClosedTab: reopenClosedTab()
         case .focusAddressBar: focusAddressBar()
         case .copyURL:
             guard let url = tab.url else { return }
@@ -169,6 +175,28 @@ final class TabStore: TabOpening {
             NSPasteboard.general.setString(url.absoluteString, forType: .string)
         case .openInNewTab(let url): open(URLRequest(url: url), inBackground: true)
         }
+    }
+
+    /// 最後に閉じたページを開き直して選ぶ。戻る・進むの履歴も戻す。開き直すものがなければ `nil`。
+    ///
+    /// 普通のタブは閉じたときの位置へ戻す。ブックマークのページは、ブックマークが残っていてページを開いていなければ
+    /// ブックマークの側へ戻し、そうでなければ普通のタブとして選択中のタブの隣に開く。
+    @discardableResult
+    func reopenClosedTab() -> Tab? {
+        guard !isShutDown, let closed = closedTabs.popLast() else { return nil }
+        let tab = makeTab(restoring: closed.page)
+        if let id = closed.page.bookmark, bookmarks.bookmark(id) != nil, bookmarkTabs[id] == nil {
+            bookmarkTabs[id] = tab
+        } else if let index = closed.index {
+            tabs.insert(tab, at: min(index, tabs.count))
+        } else if let anchor = selectedID, let index = tabs.firstIndex(where: { $0.id == anchor }) {
+            tabs.insert(tab, at: index + 1)
+        } else {
+            tabs.append(tab)
+        }
+        // 選んだところで控えから起こす（`selectedID` の didSet）。
+        selectedID = tab.id
+        return tab
     }
 
     @discardableResult
@@ -339,6 +367,13 @@ final class TabStore: TabOpening {
         return activate(bookmark: rows[row].id)
     }
 
+    struct ClosedTab {
+        /// ブックマークのページなら、控えの `bookmark` にそのブックマークが入る。
+        let page: SavedPage
+        /// 普通のタブだったときの位置。
+        let index: Int?
+    }
+
     struct OpenFolder: Equatable {
         let id: UUID
         /// キーボードの選択が当たっている行。0始まり。
@@ -398,6 +433,7 @@ final class TabStore: TabOpening {
         }
         tabs = []
         bookmarkTabs = [:]
+        closedTabs = []
         openFolder = nil
         selectedID = nil
     }
@@ -441,6 +477,16 @@ final class TabStore: TabOpening {
                 guard !isShutDown, tab.id != selectedID, tab.page === page else { continue }
                 tab.sleep()
             }
+        }
+    }
+
+    /// 閉じるページの控えを取っておく。行き先のないまっさらなタブは残さない。
+    private func remember(_ tab: Tab, at index: Int? = nil, bookmark: UUID? = nil) {
+        guard var page = tab.savedPage() else { return }
+        page.bookmark = bookmark
+        closedTabs.append(ClosedTab(page: page, index: index))
+        if closedTabs.count > BrowserSettings.closedTabLimit {
+            closedTabs.removeFirst(closedTabs.count - BrowserSettings.closedTabLimit)
         }
     }
 

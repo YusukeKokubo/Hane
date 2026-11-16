@@ -11,7 +11,8 @@ enum KeySpec {
             let named = keys.keys.filter { letterKeys[$0] == nil }.sorted()
             throw ControlError("知らないキー: \(name)（a〜z, \(named.joined(separator: ", "))）")
         }
-        return (flags, keyCode, characters)
+        // 本物のキーボードと同じく、Shift つきの英字は大文字で届ける。小文字のままだと ⇧⌘T が ⌘T の項目に取られる。
+        return (flags, keyCode, flags.contains(.shift) && letterKeys[name] != nil ? characters.uppercased() : characters)
     }
 
     /// `page-key` のキー。`key` と同じ書き方に、大文字（Shift つきの英字）を加える。

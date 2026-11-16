@@ -421,7 +421,7 @@ enum KeyNavigation {
         r: () => send({ command: 'reload' }),
         K: () => send({ command: 'nextTab' }), gt: () => send({ command: 'nextTab' }),
         J: () => send({ command: 'previousTab' }), gT: () => send({ command: 'previousTab' }),
-        x: () => send({ command: 'closeTab' }),
+        x: () => send({ command: 'closeTab' }), X: () => send({ command: 'reopenClosedTab' }),
         o: () => send({ command: 'focusAddressBar' }),
         yy: () => send({ command: 'copyURL' }),
       };
@@ -497,7 +497,7 @@ enum KeyNavigation {
 /// ページの中のキー操作から、アプリに頼むこと。
 enum KeyCommand: Equatable {
     case back, forward, reload
-    case nextTab, previousTab, closeTab
+    case nextTab, previousTab, closeTab, reopenClosedTab
     case focusAddressBar, copyURL
     /// 印で選んだリンクを裏の新しいタブで開く。
     case openInNewTab(URL)
@@ -511,6 +511,7 @@ enum KeyCommand: Equatable {
         case "nextTab": self = .nextTab
         case "previousTab": self = .previousTab
         case "closeTab": self = .closeTab
+        case "reopenClosedTab": self = .reopenClosedTab
         case "focusAddressBar": self = .focusAddressBar
         case "copyURL": self = .copyURL
         case "openTab":

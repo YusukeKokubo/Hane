@@ -12,4 +12,6 @@ enum BrowserSettings {
     /// 画面から外れてこれだけ経ったタブは、次に選択が変わったときに眠らせてページのプロセスを返す（秒）。
     /// 起こすと履歴ごと戻るが、ページの中の状態（書きかけの入力など）は読み込み直しで消える。
     static let tabSleepDelay: TimeInterval = 30 * 60
+    /// 閉じたタブを開き直せる数（窓ごと）。控えに戻る・進むの履歴が入るので、際限なく溜めない。
+    static let closedTabLimit = 20
 }

@@ -77,6 +77,7 @@ final class MainMenu: NSObject, NSMenuItemValidation, NSMenuDelegate {
         menu.addItem(item("新規ウインドウ", #selector(newWindow), "n"))
         // 題名は場面で変わる（validateMenuItem）。
         menu.addItem(item("タブを閉じる", #selector(close), "w"))
+        menu.addItem(item("閉じたタブを開き直す", #selector(reopenClosedTab), "T"))
         menu.addItem(.separator())
         menu.addItem(item("場所を開く…", #selector(openLocation), "l"))
         return menu
@@ -289,6 +290,8 @@ final class MainMenu: NSObject, NSMenuItemValidation, NSMenuDelegate {
                 item.title = "ウインドウを閉じる"
                 return false
             }
+        case #selector(reopenClosedTab):
+            return store?.closedTabs.isEmpty == false
         case #selector(fillPassword), #selector(teachPasswordPlace), #selector(reload):
             return selected?.hasContent == true
         case #selector(forgetPasswordPlaces):
@@ -388,6 +391,7 @@ final class MainMenu: NSObject, NSMenuItemValidation, NSMenuDelegate {
     @objc private func showSettings() { settingsWindow.show() }
     @objc private func newTab() { _ = store?.newTab() }
     @objc private func newWindow() { _ = model.openEmptyWindow() }
+    @objc private func reopenClosedTab() { store?.reopenClosedTab() }
     @objc private func openLocation() { store?.focusAddressBar() }
     @objc private func fillPassword() { store?.passwordFill.start(on: store?.selected) }
     @objc private func teachPasswordPlace() { store?.passwordFill.start(on: store?.selected, teaching: true) }

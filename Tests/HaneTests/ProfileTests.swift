@@ -317,6 +317,14 @@ import WebKit
         #expect(store.selectedID == first.id)
         #expect(!handle(key("\t", [], keyCode: 48)), "Tab だけはページの入力欄へ")
 
+        // ⇧⌘T は ⌘T（新規タブ）と取り違えずに、閉じたタブを開き直す。本物のキーでは文字が大文字で届く。
+        store.open(URLRequest(url: FileManager.default.temporaryDirectory.appending(path: "HaneMenuKeys.html")))
+        let opened = store.tabs.count
+        store.closeSelected()
+        #expect(handle(key("T", [.command, .shift], keyCode: 17)))
+        #expect(store.tabs.count == opened)
+        #expect(store.selected?.url?.lastPathComponent == "HaneMenuKeys.html")
+
         #expect(handle(key("1", .control)), "1 番目は今のプロファイル（何も開かない）")
         #expect(model.windows.count == 1)
         #expect(handle(key("2", .control)), "メニューを組んだあとに足したプロファイル")
