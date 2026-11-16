@@ -16,6 +16,12 @@ final class StateText {
         self.model = model
     }
 
+    private static let day: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MM-dd HH:mm"
+        return formatter
+    }()
+
     private static let clock: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateFormat = "HH:mm:ss"
@@ -50,8 +56,14 @@ final class StateText {
         let recent = store.history.entries.values.sorted { $0.lastVisit > $1.lastVisit }.prefix(limit)
         guard !recent.isEmpty else { return "（履歴なし）" }
         return recent.map { entry in
-            "\(Self.clock.string(from: entry.lastVisit)) typed \(entry.typedCount) visits \(entry.visitCount)  "
-                + "\(entry.title.isEmpty ? "(無題)" : entry.title) — \(entry.url.absoluteString)"
+            let sources = [("bookmark", entry.bookmarkCount), ("external", entry.externalCount), ("link", entry.linkCount)]
+                .filter { $0.1 > 0 }.map { " \($0.0) \($0.1)" }.joined()
+            let viewed = entry.viewedSeconds > 0 ? " viewed \(String(format: "%.1f", entry.viewedSeconds))s" : ""
+            let times = entry.visitTimes.count > 1
+                ? "\n    at " + entry.visitTimes.map(Self.day.string(from:)).joined(separator: ", ")
+                : ""
+            return "\(Self.clock.string(from: entry.lastVisit)) typed \(entry.typedCount) visits \(entry.visitCount)\(sources)\(viewed)  "
+                + "\(entry.title.isEmpty ? "(無題)" : entry.title) — \(entry.url.absoluteString)" + times
         }.joined(separator: "\n")
     }
 

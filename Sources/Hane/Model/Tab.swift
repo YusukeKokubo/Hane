@@ -48,8 +48,8 @@ final class Tab: Identifiable {
     @ObservationIgnored private weak var opener: (any TabOpening)?
     @ObservationIgnored private let history: HistoryStore
     @ObservationIgnored private let favicons: FaviconStore
-    /// 次に確定する読み込みが、アドレスバーで確定して始めたものか。履歴で「打って訪れた」と数える。
-    @ObservationIgnored private var typedNavigationPending = false
+    /// 次に確定する読み込みがどこから来たか。履歴で来た道ごとに数える。分からなければ `nil`（`.other` と数える）。
+    @ObservationIgnored private var pendingSource: VisitSource?
     /// ページを移ってから、まだ題名が届いていないか。
     @ObservationIgnored private var awaitingTitle = false
     /// 読み込み中の区間の印。Instruments で読み込みの始まりと終わりを見るため。
@@ -140,13 +140,14 @@ final class Tab: Identifiable {
 
     /// アドレスバーで確定したアドレスを開く。
     func open(typed url: URL) {
-        load(URLRequest(url: url))
         // 検索結果のページは打って訪れたものと数えない。検索語ごとの結果ページが補われてしまうため。
-        typedNavigationPending = !AddressResolver.isSearch(url)
+        load(URLRequest(url: url), from: AddressResolver.isSearch(url) ? nil : .typed)
     }
 
-    func load(_ request: URLRequest) {
+    /// `source` は、履歴でこの読み込みをどこから来たものと数えるか。
+    func load(_ request: URLRequest, from source: VisitSource? = nil) {
         failure = nil
+        pendingSource = source
         let page = self.page ?? makePage()
         content = .live(LivePage(page: page, requested: request.url))
         page.load(request)
@@ -243,9 +244,9 @@ final class Tab: Identifiable {
             loadSignpost = Signposts.poster.beginInterval("ページの読み込み", id: Signposts.poster.makeSignpostID())
         case .committed:
             if let url = page?.url {
-                history.recordVisit(to: url, typed: typedNavigationPending)
+                history.recordVisit(to: url, from: pendingSource ?? .other)
             }
-            typedNavigationPending = false
+            pendingSource = nil
             awaitingTitle = true
         case .finished:
             endLoadSignpost()
@@ -265,12 +266,14 @@ final class Tab: Identifiable {
             }
         case .failed(let message):
             // 打ったアドレスが開けなかったときに、次のリンクの移動を打ったものと数えないように。
-            typedNavigationPending = false
+            pendingSource = nil
             endLoadSignpost()
             if let message {
                 failure = message
                 log.append(level: "navigation", message: message)
             }
+        case .linkFollowed:
+            pendingSource = .link
         case .closeRequested:
             opener?.closeTab(self)
         case .keyCommand(let command):

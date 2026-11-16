@@ -362,6 +362,8 @@ final class BrowserWindowSlot {
         }
         profile = name
         self.store = store
+        // 前に出ている窓でプロファイルを選んだときは、前に出た知らせがもう過ぎている。
+        store.isWindowKey = window?.isKeyWindow ?? false
         rememberFrame()
     }
 

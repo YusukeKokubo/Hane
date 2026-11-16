@@ -56,9 +56,15 @@ final class MainWindow: NSObject, NSWindowDelegate {
 
     func windowDidBecomeKey(_ notification: Notification) {
         model.activate(slot)
+        slot.store?.isWindowKey = true
+    }
+
+    func windowDidResignKey(_ notification: Notification) {
+        slot.store?.isWindowKey = false
     }
 
     func windowWillClose(_ notification: Notification) {
+        slot.store?.isWindowKey = false
         // 閉じた窓は AppKit がしばらく掴んでいることがあり、覚える名前を握ったままだと次に開く窓が使えない。
         window.setFrameAutosaveName("")
         window.delegate = nil

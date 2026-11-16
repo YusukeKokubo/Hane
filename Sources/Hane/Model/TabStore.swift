@@ -60,6 +60,9 @@ final class TabStore: TabOpening {
     /// 控えには戻る・進むの履歴も入るので、数を `BrowserSettings.closedTabLimit` で区切る。ファイルには残さない。
     private(set) var closedTabs: [ClosedTab] = []
 
+    /// この窓がキーを受ける窓か。閲覧履歴で、ページを見ていた時間を数えるのに使う。
+    var isWindowKey = false
+
     /// アドレスバーの今の中身。外部から状態を尋ねられたときに答えるための写しで、
     /// 画面の更新には使わない。
     @ObservationIgnored var addressBar = AddressBarState()
@@ -67,6 +70,8 @@ final class TabStore: TabOpening {
     @ObservationIgnored private let factory: PageFactory
     /// 閲覧状態の書き出し。保存しないとき（テストなど）は `nil`。
     @ObservationIgnored private var recorder: SessionRecorder?
+    /// 見ているページを閲覧履歴へ伝える。
+    @ObservationIgnored private var viewingRecorder: ViewingRecorder?
     @ObservationIgnored private var lastTabNumber = 0
     /// 組ごとに最後に選んでいたページ。組へ戻ったときにそこを選ぶ。
     @ObservationIgnored private var groupSelections: [UUID?: Tab.ID] = [:]
@@ -94,6 +99,10 @@ final class TabStore: TabOpening {
             watched: { [weak self] in self?.touchSessionShape() },
             snapshot: { [weak self] in self?.sessionSnapshot() }
         )
+        viewingRecorder = ViewingRecorder(history: history) { [weak self] in
+            guard let self, self.isWindowKey, ViewerPresence.shared.isPresent else { return nil }
+            return self.selected?.page?.url
+        }
     }
 
     /// バーに見える順のすべてのページ。ブックマークのページが先、普通のタブが後。
@@ -159,14 +168,14 @@ final class TabStore: TabOpening {
     func openTab(with request: URLRequest, inBackground: Bool) {
         // ページの判断は非同期なので、プロファイルを離れたあとに届くことがある。開くと閉じたはずのページが残る。
         guard !isShutDown else { return }
-        open(request, inBackground: inBackground)
+        open(request, inBackground: inBackground, from: .link)
     }
 
-    /// 選択中のタブの隣に、ページを読み込むタブを開く。
+    /// 選択中のタブの隣に、ページを読み込むタブを開く。`source` は履歴でどこから来たと数えるか。
     @discardableResult
-    func open(_ request: URLRequest, inBackground: Bool = false) -> Tab {
+    func open(_ request: URLRequest, inBackground: Bool = false, from source: VisitSource? = nil) -> Tab {
         let tab = insertTab(after: selectedID)
-        tab.load(request)
+        tab.load(request, from: source)
         if !inBackground { selectedID = tab.id }
         return tab
     }
@@ -320,7 +329,7 @@ final class TabStore: TabOpening {
         }
         guard let bookmark = bookmarks.bookmark(id) else { return nil }
         let tab = makeTab()
-        tab.load(URLRequest(url: bookmark.url))
+        tab.load(URLRequest(url: bookmark.url), from: .bookmark)
         bookmarkTabs[id] = tab
         selectedID = tab.id
         return tab
@@ -361,7 +370,7 @@ final class TabStore: TabOpening {
     /// ブックマークから開いたページを、ブックマークのアドレスへ戻す。
     func returnToBookmark(_ id: UUID) {
         guard let bookmark = bookmarks.bookmark(id), let tab = bookmarkTabs[id] else { return }
-        tab.load(URLRequest(url: bookmark.url))
+        tab.load(URLRequest(url: bookmark.url), from: .bookmark)
     }
 
     /// ブックマークの行き先を、そこから開いているページの今のアドレスに付け替える。
@@ -622,6 +631,8 @@ final class TabStore: TabOpening {
         saveSession()
         isShutDown = true
         recorder = nil
+        viewingRecorder?.stop()
+        viewingRecorder = nil
         for tab in everyTab {
             tab.tearDown()
         }

@@ -1,6 +1,19 @@
 import ControlWire
 import Foundation
 
+/// 訪問がどこから来たか。訪れた回数を道ごとに分けて数える。
+enum VisitSource: Sendable {
+    /// アドレスバーに打って（または補われたまま確定して）。検索語は含めない。
+    case typed
+    case bookmark
+    /// ほかのアプリから既定のブラウザとして受けたリンク。
+    case external
+    /// ページの中のリンク（新しいタブに開いたものも含む）。
+    case link
+    /// 戻る・進む、読み込み直し、検索、スクリプトによる移動など。
+    case other
+}
+
 /// 訪れたページ1件ぶんの記録。同じアドレスへの訪問はまとめて数える。
 struct HistoryEntry: Codable, Equatable, Sendable {
     var url: URL
@@ -8,7 +21,38 @@ struct HistoryEntry: Codable, Equatable, Sendable {
     var visitCount: Int
     /// アドレスバーに打って（または補われたまま確定して）訪れた回数。
     var typedCount: Int
+    var bookmarkCount = 0
+    var externalCount = 0
+    var linkCount = 0
     var lastVisit: Date
+    /// 最近訪れた時刻。古いものが先。毎日決まった頃に開くページを見つけるのに使う。
+    /// 続けて訪れたもの（`HistoryStore.visitSpacing` 以内）は一度と数え、`HistoryStore.visitTimesKept` 件まで持つ。
+    var visitTimes: [Date] = []
+    /// 窓が前に出ていて、このページが選ばれていた時間の合計（秒）。
+    var viewedSeconds: Double = 0
+
+    init(url: URL, title: String, visitCount: Int, typedCount: Int, lastVisit: Date) {
+        self.url = url
+        self.title = title
+        self.visitCount = visitCount
+        self.typedCount = typedCount
+        self.lastVisit = lastVisit
+    }
+
+    // 版1のファイルには後から足した項目がないので、無ければ既定の値で読む。
+    init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        url = try values.decode(URL.self, forKey: .url)
+        title = try values.decode(String.self, forKey: .title)
+        visitCount = try values.decode(Int.self, forKey: .visitCount)
+        typedCount = try values.decode(Int.self, forKey: .typedCount)
+        bookmarkCount = try values.decodeIfPresent(Int.self, forKey: .bookmarkCount) ?? 0
+        externalCount = try values.decodeIfPresent(Int.self, forKey: .externalCount) ?? 0
+        linkCount = try values.decodeIfPresent(Int.self, forKey: .linkCount) ?? 0
+        lastVisit = try values.decode(Date.self, forKey: .lastVisit)
+        visitTimes = try values.decodeIfPresent([Date].self, forKey: .visitTimes) ?? []
+        viewedSeconds = try values.decodeIfPresent(Double.self, forKey: .viewedSeconds) ?? 0
+    }
 }
 
 /// アドレスバーで補う候補。`text` は入力欄にそのまま入れる文字列で、打った部分を頭に含む。
@@ -26,8 +70,16 @@ final class HistoryStore {
     static let limit = 5000
     /// 訪れるたびに数千件を書き直さないよう、変化が落ち着くまで待ってからまとめて書く。
     private static let saveDelay: Duration = .seconds(5)
+    /// 1件あたりに残す訪問の時刻の数。毎日開くページなら3週間ほどの癖が読める。
+    static let visitTimesKept = 20
+    /// これより間を置かずに訪れ直したもの（読み込み直しや戻る・進むの行き来）は、時刻を増やさない。
+    static let visitSpacing: TimeInterval = 30 * 60
+    /// 見ていた時間の一続きをこれより長くは数えない。窓を前に出したまま席を離れたときに膨らませないため。
+    static let longestViewing: TimeInterval = 60 * 60
 
     private(set) var entries: [URL: HistoryEntry] = [:]
+    /// 今見ているページと、見始めた時刻。
+    private var viewing: (url: URL, since: Date)?
 
     private let fileURL: URL?
     private var pendingSave: Task<Void, Never>?
@@ -49,11 +101,23 @@ final class HistoryStore {
     // MARK: 記録する
 
     /// 訪問を1回数える。補う意味のないアドレス（about: など）は記録しない。
-    func recordVisit(to url: URL, typed: Bool, at date: Date = Date()) {
+    func recordVisit(to url: URL, from source: VisitSource, at date: Date = Date()) {
         guard Self.isRecordable(url) else { return }
         var entry = entries[url] ?? HistoryEntry(url: url, title: "", visitCount: 0, typedCount: 0, lastVisit: date)
         entry.visitCount += 1
-        if typed { entry.typedCount += 1 }
+        switch source {
+        case .typed: entry.typedCount += 1
+        case .bookmark: entry.bookmarkCount += 1
+        case .external: entry.externalCount += 1
+        case .link: entry.linkCount += 1
+        case .other: break
+        }
+        if entry.visitTimes.last.map({ date.timeIntervalSince($0) >= Self.visitSpacing }) ?? true {
+            entry.visitTimes.append(date)
+            if entry.visitTimes.count > Self.visitTimesKept {
+                entry.visitTimes.removeFirst(entry.visitTimes.count - Self.visitTimesKept)
+            }
+        }
         entry.lastVisit = date
         entries[url] = entry
         if entries.count > Self.limit { prune() }
@@ -66,6 +130,26 @@ final class HistoryStore {
         guard !title.isEmpty, var entry = entries[url], entry.title != title else { return }
         entry.title = title
         entries[url] = entry
+    }
+
+    /// 今見ているページが変わった。前に見ていたページに、見ていた時間を足す。
+    /// 何も見ていない（窓が裏にいる、画面が眠った）ときは `nil` を渡す。
+    ///
+    /// 書き出しは予約しない。タブを移るたびに数千件を書き直さないためで、時間は次の訪問か終了するときの書き出しに乗る。
+    func view(_ url: URL?, at date: Date = Date()) {
+        if let viewing, viewing.url == url { return }
+        closeViewing(at: date)
+        viewing = url.map { ($0, date) }
+    }
+
+    /// 見ている途中の時間をここまでで締め、続きをここから数え直す。
+    private func closeViewing(at date: Date) {
+        guard let viewing else { return }
+        self.viewing = nil
+        let seconds = min(max(0, date.timeIntervalSince(viewing.since)), Self.longestViewing)
+        guard seconds > 0, var entry = entries[viewing.url] else { return }
+        entry.viewedSeconds += seconds
+        entries[viewing.url] = entry
     }
 
     // MARK: 補う
@@ -96,9 +180,13 @@ final class HistoryStore {
     // MARK: 保存
 
     /// 待たずに書き出す。終了直前に呼ぶ。
-    func saveNow() {
+    func saveNow(at date: Date = Date()) {
         pendingSave?.cancel()
         pendingSave = nil
+        if let url = viewing?.url {
+            closeViewing(at: date)
+            viewing = (url, date)
+        }
         guard let fileURL else { return }
         do {
             try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -114,7 +202,8 @@ final class HistoryStore {
     // MARK: 内部
 
     private struct SavedFile: Codable {
-        var version = 1
+        /// 2 で、来た道ごとの回数、訪れた時刻、見ていた時間を足した。1 も読める。
+        var version = 2
         var entries: [HistoryEntry]
     }
 

@@ -32,6 +32,8 @@ final class Page {
         case titleChanged(String)
         /// 失敗の文言。利用者による中断のように見せなくてよい失敗なら `nil`。
         case failed(String?)
+        /// 上のフレームでページの中のリンクをたどり始めた。履歴で「リンクから来た」と数える。
+        case linkFollowed
         /// ページが `window.close()` で自分を閉じた。タブなら閉じ、小窓なら窓を閉じる。
         case closeRequested
         /// ページの中のキー操作が、ブラウザにしかできないことを頼んできた（`KeyNavigation`）。
@@ -291,6 +293,9 @@ final class Page {
             let wantsNewWindow = action.targetFrame == nil
             let commandClick = action.navigationType == .linkActivated && action.modifierFlags.contains(.command)
             guard wantsNewWindow || commandClick, let opener, action.request.url != nil else {
+                if action.navigationType == .linkActivated, action.targetFrame?.isMainFrame == true {
+                    onEvent(.linkFollowed)
+                }
                 return (.allow, preferences)
             }
             opener.openTab(with: action.request, inBackground: commandClick)

@@ -56,9 +56,9 @@ enum ExternalLinks {
         let request = URLRequest(url: url)
         // 開いたばかりの空のタブが選ばれていれば、そこで開く。並べると使わない空のタブが残る。
         if let tab = store.selected, case .empty = tab.content {
-            tab.load(request)
+            tab.load(request, from: .external)
         } else {
-            store.open(request)
+            store.open(request, from: .external)
         }
         return true
     }

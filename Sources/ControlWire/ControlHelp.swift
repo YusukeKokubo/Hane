@@ -167,7 +167,9 @@ public enum ControlHelp {
       window-size <幅> <高さ>  窓の大きさを変える（左上は動かさない）。幅で見た目が変わる部品を確かめるため
       appearance [dark|light|system]
                              このアプリの外観を固定する。system でシステムに従う。引数なしで今の外観を返す
-      history [--limit N]    閲覧履歴を新しい順に。typed はアドレスバーで確定して訪れた回数
+      history [--limit N]    閲覧履歴を新しい順に。typed はアドレスバーで確定して、bookmark はブックマークから、
+                             external はほかのアプリから、link はページの中のリンクから訪れた回数。
+                             viewed は窓が前にあってそのページを選んでいた秒数。at は最近訪れた時刻（30分以内の訪れ直しは一度と数える）
       logs [--limit N] [--clear]
                              console出力、未処理の例外、読み込み失敗の記録（新しい順ではなく時系列）。
                              console出力と例外は HANE_INSTANCE を付けた開発用の実体だけで、普段使いの実体では読み込み失敗だけ
