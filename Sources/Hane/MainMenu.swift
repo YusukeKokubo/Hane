@@ -77,6 +77,8 @@ final class MainMenu: NSObject, NSMenuItemValidation, NSMenuDelegate {
         menu.addItem(item("新規ウインドウ", #selector(newWindow), "n"))
         // 題名は場面で変わる（validateMenuItem）。
         menu.addItem(item("タブを閉じる", #selector(close), "w"))
+        // Arc と同じく、タブが残っていても窓（プロファイル）ごと閉じる。
+        menu.addItem(item("ウインドウを閉じる", #selector(closeWindow), "W"))
         menu.addItem(item("閉じたタブを開き直す", #selector(reopenClosedTab), "T"))
         menu.addItem(.separator())
         menu.addItem(item("場所を開く…", #selector(openLocation), "l"))
@@ -322,6 +324,8 @@ final class MainMenu: NSObject, NSMenuItemValidation, NSMenuDelegate {
             let count = hiddenElementCount()
             item.title = count > 0 ? "このサイトで隠した要素を元に戻す（\(count)件）" : "このサイトで隠した要素を元に戻す"
             return count > 0
+        case #selector(closeWindow):
+            return frontClosableWindow() != nil
         case #selector(closeAllWindows):
             return !closableWindows().isEmpty
         default:
@@ -378,6 +382,15 @@ final class MainMenu: NSObject, NSMenuItemValidation, NSMenuDelegate {
     /// シートやポップオーバーのような、ほかの窓に付いている窓は親と一緒に閉じるので数えない。
     private func closableWindows() -> [NSWindow] {
         NSApp.windows.filter { $0.isVisible && $0.parent == nil && $0.sheetParent == nil && $0.styleMask.contains(.closable) }
+    }
+
+    /// シートやポップオーバーが手前なら、その下の窓を閉じる。
+    private func frontClosableWindow() -> NSWindow? {
+        NSApp.orderedWindows.first { $0.isVisible && $0.parent == nil && $0.sheetParent == nil && $0.styleMask.contains(.closable) }
+    }
+
+    @objc private func closeWindow() {
+        frontClosableWindow()?.performClose(nil)
     }
 
     @objc private func closeAllWindows() {
