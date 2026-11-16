@@ -129,6 +129,30 @@ import WebKit
         #expect(ui.contains("app: pid \(getpid()), started "), "古い版が動いていないか確かめられるよう、起動と作った時刻を出す")
     }
 
+    @Test func groupCommands() async throws {
+        _ = await run("new")
+        let created = await run("group-new", "1on1", "--move")
+        #expect(created.ok, "\(created.output)")
+        #expect(created.output.contains("* 1on1 — 1 tabs"))
+        #expect(created.output.contains("  (グループなし) — 1 tabs"))
+        #expect(!(await run("group-new", "1on1")).ok, "同じ名前は作らない")
+
+        #expect((await run("group-bar", "1on1", "on")).output.contains("1on1 — 1 tabs [bar]"))
+        #expect((await run("ui")).output.contains("group: 1on1  bar: [*1on1]"))
+
+        let shown = await run("group-show", "none")
+        #expect(shown.output.contains("* (グループなし)"))
+        #expect(store.currentGroupID == nil)
+
+        #expect((await run("group-move", "1on1")).ok)
+        #expect(store.tabs.count == 1, "最後のタブを移したので空のタブが開く")
+        #expect((await run("group-rename", "1on1", "定例")).output.contains("定例 — 2 tabs"))
+        #expect(!(await run("group-show", "1on1")).ok)
+
+        #expect((await run("group-remove", "定例")).output == "* (グループなし) — 3 tabs")
+        #expect(store.groups.isEmpty)
+    }
+
     @Test func bookmarkCommands() async throws {
         #expect(await run("bookmarks").output.contains("ブックマークなし"))
         #expect(await run("ui").output.contains("bookmarks bar: (なし)"))

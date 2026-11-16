@@ -37,6 +37,15 @@ final class StateText {
         store.allTabs.map(tab).joined(separator: "\n")
     }
 
+    /// 組の一覧。出している組に * 、バーに並べている組に [bar] を付ける。
+    func groups(of store: TabStore) -> String {
+        let ungrouped = (store.currentGroupID == nil ? "*" : " ") + " (グループなし) — \(store.tabs(in: nil).count) tabs"
+        return ([ungrouped] + store.groups.map { group in
+            (store.currentGroupID == group.id ? "*" : " ") + " \(group.name) — \(store.tabs(in: group.id).count) tabs"
+                + (group.showsInBar ? " [bar]" : "")
+        }).joined(separator: "\n")
+    }
+
     func history(of store: TabStore, limit: Int) -> String {
         let recent = store.history.entries.values.sorted { $0.lastVisit > $1.lastVisit }.prefix(limit)
         guard !recent.isEmpty else { return "（履歴なし）" }
@@ -80,6 +89,11 @@ final class StateText {
             }
         }
         lines.append("bookmarks bar: " + bookmarkBar(of: store))
+        if !store.groups.isEmpty {
+            let bar = store.groups.filter(\.showsInBar).map { "[" + (store.currentGroupID == $0.id ? "*" : "") + $0.name + "]" }
+            lines.append("group: " + (store.currentGroup?.name ?? "(グループなし)")
+                + (bar.isEmpty ? "" : "  bar: " + bar.joined(separator: " ")))
+        }
         if let open = store.openFolder, let folder = store.bookmarks.folder(open.id) {
             // 選択の当たっている行に > を付ける。番号は数字キーで開くときのもの。
             let rows = folder.bookmarks.enumerated().map { index, bookmark in

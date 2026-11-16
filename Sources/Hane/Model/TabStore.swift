@@ -7,13 +7,25 @@ import Observation
 /// ブックマークからその場で開いたページ（`bookmarkTabs`）。後者はブックマークに結びつき、
 /// 閉じてもブックマークは残る。開いていないブックマークはタブを持たない。
 ///
+/// 普通のタブは組（`TabGroup`）に分けて持ち、バーには選んでいる組のタブ（`tabs`）だけを出す。
+/// ほかの組のタブ（`parkedTabs`）は、選ばれていないタブと同じ扱いで、眠らせ方も変わらない。
+/// ブックマークのページはどの組にも入らず、どの組を出していてもバーの左に並ぶ。
+///
 /// しばらく画面に出していないタブは、選択が変わったときに眠らせてページのプロセスを返す（`sleepIdleTabs`）。
 /// 眠らせるかを決めるのは選択が変わったときだけで、タイマーは使わない。
 @MainActor
 @Observable
 final class TabStore: TabOpening {
-    /// 普通のタブ。バーの右側に並ぶ。
+    /// 今出している組の普通のタブ。バーの右側に並ぶ。
     private(set) var tabs: [Tab] = []
+    /// 普通のタブの組。並びはバーと一覧に出す順。
+    private(set) var groups: [TabGroup] = []
+    /// 今バーに出している組。`nil` はどの組にも入っていないタブ。
+    private(set) var currentGroupID: UUID?
+    /// 出していない組の普通のタブ。組のIDで引き、`nil` はどの組にも入っていないタブ。空になった組は持たない。
+    private(set) var parkedTabs: [UUID?: [Tab]] = [:]
+    /// 組の名前を打ってもらう頼み。画面が入力欄を出して受け、`finishGroupNaming` で返す。
+    private(set) var groupNaming: GroupNaming?
     /// ページを開いているブックマーク。ブックマークのIDで引く。ブックマークとタブの結びつきはここだけで持つ。
     private(set) var bookmarkTabs: [UUID: Tab] = [:]
     var selectedID: Tab.ID? {
@@ -56,6 +68,8 @@ final class TabStore: TabOpening {
     /// 閲覧状態の書き出し。保存しないとき（テストなど）は `nil`。
     @ObservationIgnored private var recorder: SessionRecorder?
     @ObservationIgnored private var lastTabNumber = 0
+    /// 組ごとに最後に選んでいたページ。組へ戻ったときにそこを選ぶ。
+    @ObservationIgnored private var groupSelections: [UUID?: Tab.ID] = [:]
     /// プロファイルを離れて閉じたか。閉じたあとに遅れて届く新しいタブの頼みや閲覧状態の書き出しを断る。
     @ObservationIgnored private(set) var isShutDown = false
 
@@ -87,6 +101,38 @@ final class TabStore: TabOpening {
         bookmarks.allBookmarks.compactMap { bookmarkTabs[$0.id] } + tabs
     }
 
+    /// 出していない組のタブも含めた、すべてのページ。ブックマークのページ、組に入っていないタブ、組の並び順。
+    var everyTab: [Tab] {
+        bookmarks.allBookmarks.compactMap { bookmarkTabs[$0.id] } + groupKeys.flatMap(tabs(in:))
+    }
+
+    /// 組に入っていないタブ（`nil`）と、組の並び。
+    private var groupKeys: [UUID?] {
+        [nil] + groups.map(\.id)
+    }
+
+    /// その組の普通のタブ。`nil` は組に入っていないタブ。
+    func tabs(in group: UUID?) -> [Tab] {
+        group == currentGroupID ? tabs : parkedTabs[group] ?? []
+    }
+
+    var currentGroup: TabGroup? {
+        currentGroupID.flatMap(group(withID:))
+    }
+
+    func group(withID id: UUID) -> TabGroup? {
+        groups.first { $0.id == id }
+    }
+
+    func group(named name: String) -> TabGroup? {
+        groups.first { $0.name == name }
+    }
+
+    /// 普通のタブなら、入っている組（組に入っていなければ `.some(nil)`）。ブックマークのページなどは `nil`。
+    func groupKey(of tabID: Tab.ID) -> UUID?? {
+        groupKeys.first { tabs(in: $0).contains { $0.id == tabID } }
+    }
+
     var contentBlocker: ContentBlocker? { factory.contentBlocker }
     var downloads: Downloads { factory.downloads }
 
@@ -96,6 +142,7 @@ final class TabStore: TabOpening {
 
     private func tab(withID id: Tab.ID) -> Tab? {
         tabs.first { $0.id == id } ?? bookmarkTabs.values.first { $0.id == id }
+            ?? parkedTabs.values.lazy.flatMap(\.self).first { $0.id == id }
     }
 
     // MARK: タブの増減
@@ -127,16 +174,27 @@ final class TabStore: TabOpening {
     /// ページを閉じる。何も残らなくなったら `false` を返す（呼び出し側でウインドウを閉じる）。
     ///
     /// ブックマークのページはページだけ閉じてブックマークを残す。
-    /// それで何も残らなくても、ウインドウは閉じずに空のタブを開く。
+    /// それで何も残らなくても、ウインドウは閉じずに空のタブを開く。ほかの組にタブが残っているときも同じ。
     @discardableResult
     func close(_ id: Tab.ID) -> Bool {
         if let index = tabs.firstIndex(where: { $0.id == id }) {
             let tab = tabs.remove(at: index)
-            remember(tab, at: index)
+            remember(tab, at: index, group: currentGroupID)
             tab.tearDown()
-            if selectedID == id {
+            if allTabs.isEmpty, !parkedTabs.isEmpty {
+                newTab()
+            } else if selectedID == id {
                 selectedID = tabs.indices.contains(index) ? tabs[index].id : (tabs.last ?? allTabs.first)?.id
             }
+        } else if let entry = parkedTabs.first(where: { $0.value.contains { $0.id == id } }),
+                  let index = entry.value.firstIndex(where: { $0.id == id }) {
+            // 出していない組のページが自分を閉じた（`window.close()`）。
+            // 組に入っていないタブの鍵は `nil` なので、`if let` で鍵だけを取り出さない（見つからないのと見分けがつかない）。
+            let key = entry.key
+            let tab = parkedTabs[key]!.remove(at: index)
+            if parkedTabs[key]!.isEmpty { parkedTabs[key] = nil }
+            remember(tab, at: index, group: key)
+            tab.tearDown()
         } else if let entry = bookmarkTabs.first(where: { $0.value.id == id }) {
             bookmarkTabs[entry.key] = nil
             remember(entry.value, bookmark: entry.key)
@@ -153,12 +211,12 @@ final class TabStore: TabOpening {
     /// ページが `window.close()` で自分を閉じた。最後の1枚でも窓は閉じず、空のタブを開く
     /// （ページの都合で窓ごと閉じてアプリを終わらせないため）。
     func closeTab(_ tab: Tab) {
-        guard !isShutDown, allTabs.contains(where: { $0 === tab }) else { return }
+        guard !isShutDown, everyTab.contains(where: { $0 === tab }) else { return }
         if !close(tab.id) { newTab() }
     }
 
     func perform(_ command: KeyCommand, from tab: Tab) {
-        guard !isShutDown, allTabs.contains(where: { $0 === tab }) else { return }
+        guard !isShutDown, everyTab.contains(where: { $0 === tab }) else { return }
         switch command {
         case .back: tab.goBack()
         case .forward: tab.goForward()
@@ -179,7 +237,8 @@ final class TabStore: TabOpening {
 
     /// 最後に閉じたページを開き直して選ぶ。戻る・進むの履歴も戻す。開き直すものがなければ `nil`。
     ///
-    /// 普通のタブは閉じたときの位置へ戻す。ブックマークのページは、ブックマークが残っていてページを開いていなければ
+    /// 普通のタブは閉じたときの組と位置へ戻す（組が残っていて今出していなければ、その組へ移る）。
+    /// ブックマークのページは、ブックマークが残っていてページを開いていなければ
     /// ブックマークの側へ戻し、そうでなければ普通のタブとして選択中のタブの隣に開く。
     @discardableResult
     func reopenClosedTab() -> Tab? {
@@ -188,6 +247,9 @@ final class TabStore: TabOpening {
         if let id = closed.page.bookmark, bookmarks.bookmark(id) != nil, bookmarkTabs[id] == nil {
             bookmarkTabs[id] = tab
         } else if let index = closed.index {
+            if closed.group != currentGroupID, closed.group.map({ group(withID: $0) != nil }) ?? true {
+                swapShownGroup(to: closed.group)
+            }
             tabs.insert(tab, at: min(index, tabs.count))
         } else if let anchor = selectedID, let index = tabs.firstIndex(where: { $0.id == anchor }) {
             tabs.insert(tab, at: index + 1)
@@ -370,8 +432,10 @@ final class TabStore: TabOpening {
     struct ClosedTab {
         /// ブックマークのページなら、控えの `bookmark` にそのブックマークが入る。
         let page: SavedPage
-        /// 普通のタブだったときの位置。
+        /// 普通のタブだったときの、組の中の位置。
         let index: Int?
+        /// 普通のタブだったときに入っていた組。
+        var group: UUID?
     }
 
     struct OpenFolder: Equatable {
@@ -387,16 +451,144 @@ final class TabStore: TabOpening {
         var completion: String?
     }
 
+    // MARK: 組
+
+    /// 組を出す（`nil` は組に入っていないタブ）。前にその組で選んでいたページを選び、タブが一枚もなければ空のタブを開く。
+    func showGroup(_ id: UUID?) {
+        guard !isShutDown, id != currentGroupID, id.map({ group(withID: $0) != nil }) ?? true else { return }
+        swapShownGroup(to: id)
+        let remembered = groupSelections[id].flatMap { id in allTabs.first { $0.id == id } }
+        if let next = remembered ?? tabs.last {
+            selectedID = next.id
+        } else {
+            newTab()
+        }
+    }
+
+    /// 新しい組を作って出す。タブを渡せば、そのタブを連れて移る。名前が空なら作らない。
+    @discardableResult
+    func createGroup(named name: String, moving tabID: Tab.ID? = nil) -> TabGroup? {
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !isShutDown, !name.isEmpty else { return nil }
+        let group = TabGroup(id: UUID(), name: name, showsInBar: false)
+        groups.append(group)
+        if let tabID, groupKey(of: tabID) != nil {
+            move(tabID, to: group.id, following: true)
+        } else {
+            showGroup(group.id)
+        }
+        return group
+    }
+
+    /// 普通のタブをほかの組へ移す（`nil` は組から外す）。`following` なら移った先の組を出してそのタブを選ぶ。
+    ///
+    /// 出している組から選んでいるタブを移して、ついて行かないときは、閉じたときと同じく隣を選ぶ。
+    func move(_ tabID: Tab.ID, to target: UUID?, following: Bool = false) {
+        guard !isShutDown, let source = groupKey(of: tabID), source != target,
+              target.map({ group(withID: $0) != nil }) ?? true
+        else { return }
+        let tab: Tab
+        var index: Int?
+        if source == currentGroupID {
+            index = tabs.firstIndex { $0.id == tabID }
+            tab = tabs.remove(at: index!)
+        } else {
+            let at = parkedTabs[source]!.firstIndex { $0.id == tabID }!
+            tab = parkedTabs[source]!.remove(at: at)
+            if parkedTabs[source]!.isEmpty { parkedTabs[source] = nil }
+        }
+        if target == currentGroupID {
+            tabs.append(tab)
+        } else {
+            parkedTabs[target, default: []].append(tab)
+        }
+        if following {
+            if target != currentGroupID { swapShownGroup(to: target) }
+            selectedID = tab.id
+        } else if selectedID == tabID, let index {
+            let next: Tab? = tabs.indices.contains(index) ? tabs[index] : (tabs.last ?? allTabs.first)
+            if let next {
+                selectedID = next.id
+            } else {
+                newTab()
+            }
+        }
+    }
+
+    func renameGroup(_ id: UUID, to name: String) {
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, let index = groups.firstIndex(where: { $0.id == id }) else { return }
+        groups[index].name = name
+    }
+
+    func setShowsInBar(_ id: UUID, _ shows: Bool) {
+        guard let index = groups.firstIndex(where: { $0.id == id }) else { return }
+        groups[index].showsInBar = shows
+    }
+
+    /// 組を解く。中のタブは閉じずに、組に入っていないタブの後ろへ移す。出している組なら、組に入っていないタブを出す。
+    func removeGroup(_ id: UUID) {
+        guard !isShutDown, let index = groups.firstIndex(where: { $0.id == id }) else { return }
+        if currentGroupID == id {
+            tabs = (parkedTabs.removeValue(forKey: nil) ?? []) + tabs
+            groupSelections[nil] = nil
+            currentGroupID = nil
+        } else if let moved = parkedTabs.removeValue(forKey: id) {
+            if currentGroupID == nil {
+                tabs += moved
+            } else {
+                parkedTabs[nil, default: []] += moved
+            }
+        }
+        groups.remove(at: index)
+        groupSelections[id] = nil
+    }
+
+    func requestGroupName(_ naming: GroupNaming) {
+        guard !isShutDown else { return }
+        groupNaming = naming
+    }
+
+    /// 名前の入力を終えた。`nil` は取りやめ。
+    func finishGroupNaming(_ name: String?) {
+        guard let naming = groupNaming else { return }
+        groupNaming = nil
+        guard let name else { return }
+        switch naming {
+        case .create(let tabID): createGroup(named: name, moving: tabID)
+        case .rename(let id): renameGroup(id, to: name)
+        }
+    }
+
+    /// バーに出す組を入れ替える。選択は変えないので、呼んだ側が選び直す。
+    private func swapShownGroup(to id: UUID?) {
+        groupSelections[currentGroupID] = selectedID
+        parkedTabs[currentGroupID] = tabs.isEmpty ? nil : tabs
+        tabs = parkedTabs.removeValue(forKey: id) ?? []
+        currentGroupID = id
+    }
+
     // MARK: 閲覧状態
 
     /// 今の閲覧状態。まっさらなタブは含めない。
     func sessionSnapshot() -> SavedSession {
         var snapshot = SavedSession()
-        for tab in allTabs {
-            guard var page = tab.savedPage() else { continue }
-            page.bookmark = bookmarkID(of: tab)
+        func add(_ tab: Tab, bookmark: UUID? = nil, group: UUID? = nil) {
+            guard var page = tab.savedPage() else { return }
+            page.bookmark = bookmark
+            page.group = group
             if tab.id == selectedID { snapshot.selected = snapshot.pages.count }
             snapshot.pages.append(page)
+        }
+        for bookmark in bookmarks.allBookmarks {
+            if let tab = bookmarkTabs[bookmark.id] { add(tab, bookmark: bookmark.id) }
+        }
+        for key in groupKeys {
+            for tab in tabs(in: key) { add(tab, group: key) }
+        }
+        if !groups.isEmpty {
+            snapshot.groups = groups
+            snapshot.currentGroup = currentGroupID
         }
         return snapshot
     }
@@ -408,7 +600,9 @@ final class TabStore: TabOpening {
     /// 移ってから後の題名の変化は、次の書き出しか終了するときの書き出しに乗る。
     private func touchSessionShape() {
         _ = selectedID
-        for tab in allTabs {
+        _ = groups
+        _ = currentGroupID
+        for tab in everyTab {
             _ = tab.url
             _ = tab.titleArrivals
         }
@@ -428,11 +622,13 @@ final class TabStore: TabOpening {
         saveSession()
         isShutDown = true
         recorder = nil
-        for tab in allTabs {
+        for tab in everyTab {
             tab.tearDown()
         }
         tabs = []
+        parkedTabs = [:]
         bookmarkTabs = [:]
+        groupNaming = nil
         closedTabs = []
         openFolder = nil
         selectedID = nil
@@ -443,6 +639,9 @@ final class TabStore: TabOpening {
     /// 読み込むのは選んでいたページだけで、ほかは選ばれるまで待たせる。
     private func restore(_ saved: SavedSession?) -> Bool {
         guard let saved else { return false }
+        groups = saved.groups ?? []
+        let known = Set(groups.map(\.id))
+        currentGroupID = saved.currentGroup.flatMap { known.contains($0) ? $0 : nil }
         var selectedTab: Tab?
         for (index, page) in saved.pages.enumerated() {
             let tab = makeTab(restoring: page)
@@ -450,11 +649,19 @@ final class TabStore: TabOpening {
                 bookmarkTabs[id] = tab
             } else {
                 // ブックマークが見つからないページは、ブックマークを消したときと同じく普通のタブとして残す。
-                tabs.append(tab)
+                // 組が見つからないページは、組に入っていないタブにする。
+                let group = page.group.flatMap { known.contains($0) ? $0 : nil }
+                if group == currentGroupID {
+                    tabs.append(tab)
+                } else {
+                    parkedTabs[group, default: []].append(tab)
+                }
             }
             if index == saved.selected { selectedTab = tab }
         }
-        guard let fallback = selectedTab ?? tabs.last ?? allTabs.first else { return false }
+        // 選んでいたページは出している組にあるはずだが、ファイルが食い違っていても見えないタブは選ばない。
+        let shown = selectedTab.flatMap { tab in allTabs.contains { $0 === tab } ? tab : nil }
+        guard let fallback = shown ?? tabs.last ?? allTabs.first else { return false }
         selectedID = fallback.id
         return true
     }
@@ -465,7 +672,7 @@ final class TabStore: TabOpening {
     ///
     /// 読み込み中のタブと、音や動画を流している・カメラやマイクを使っているタブは眠らせない。
     func sleepIdleTabs(now: Date = Date()) {
-        let idle = allTabs.filter {
+        let idle = everyTab.filter {
             $0.id != selectedID && $0.hasContent && !$0.isLoading
                 && now.timeIntervalSince($0.lastShown) > BrowserSettings.tabSleepDelay
         }
@@ -481,10 +688,10 @@ final class TabStore: TabOpening {
     }
 
     /// 閉じるページの控えを取っておく。行き先のないまっさらなタブは残さない。
-    private func remember(_ tab: Tab, at index: Int? = nil, bookmark: UUID? = nil) {
+    private func remember(_ tab: Tab, at index: Int? = nil, bookmark: UUID? = nil, group: UUID? = nil) {
         guard var page = tab.savedPage() else { return }
         page.bookmark = bookmark
-        closedTabs.append(ClosedTab(page: page, index: index))
+        closedTabs.append(ClosedTab(page: page, index: index, group: group))
         if closedTabs.count > BrowserSettings.closedTabLimit {
             closedTabs.removeFirst(closedTabs.count - BrowserSettings.closedTabLimit)
         }

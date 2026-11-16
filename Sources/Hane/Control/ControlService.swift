@@ -116,6 +116,7 @@ final class ControlService {
         if let output = try await pageCommand(command, &args, options) { return output }
         if let output = try await windowCommand(command, &args, options) { return output }
         if let output = try await bookmarkCommand(command, &args, options) { return output }
+        if let output = try groupCommand(command, &args, options) { return output }
         if let output = try await siteCommand(command, &args, options) { return output }
         if let output = try await profileCommand(command, &args) { return output }
         if let output = try await appCommand(command, &args, options) { return output }
@@ -144,7 +145,7 @@ final class ControlService {
             let number = try args.first.map { try integer($0, "タブ番号") } ?? options.tabNumber
             let tab = try tab(numbered: number)
             // ブックマークのページは閉じてもウインドウが残るので、最後の1枚でも閉じてよい。
-            guard try store.allTabs.count > 1 || store.bookmarkID(of: tab) != nil else {
+            guard try store.everyTab.count > 1 || store.bookmarkID(of: tab) != nil else {
                 throw ControlError("最後の1枚は閉じられない（ウインドウが閉じてアプリが終了するため）。")
             }
             try store.close(tab.id)
@@ -352,6 +353,81 @@ final class ControlService {
     }
 
     /// ブックマークとダウンロード。
+    /// 普通のタブの組を作る・出す・タブを移す。
+    private func groupCommand(_ command: String, _ args: inout [String], _ options: Options) throws -> String? {
+        switch command {
+        case "groups":
+            return try state.groups(of: store)
+
+        case "group-new":
+            let moving = takeFlag("--move", from: &args)
+            let store = try store
+            let name = args.joined(separator: " ")
+            guard store.group(named: name) == nil else { throw ControlError("グループ「\(name)」はもうある。") }
+            var tabID: Tab.ID?
+            if moving {
+                let tab = try target(options)
+                guard store.groupKey(of: tab.id) != nil else { throw ControlError("ブックマークのページはグループに入れられない。") }
+                tabID = tab.id
+            }
+            guard store.createGroup(named: name, moving: tabID) != nil else { throw ControlError("グループの名前がない。") }
+            return state.groups(of: store)
+
+        case "group-show":
+            let store = try store
+            store.showGroup(try groupID(named: args.joined(separator: " "), in: store))
+            return state.groups(of: store) + "\n" + state.tabs(of: store)
+
+        case "group-move":
+            let store = try store
+            let tab = try target(options)
+            guard store.groupKey(of: tab.id) != nil else { throw ControlError("ブックマークのページはグループに入れられない。") }
+            store.move(tab.id, to: try groupID(named: args.joined(separator: " "), in: store))
+            return state.groups(of: store) + "\n" + state.tabs(of: store)
+
+        case "group-rename":
+            let store = try store
+            guard let id = try groupID(named: try argument(args, 0, "グループ名"), in: store) else {
+                throw ControlError("グループなしの名前は変えられない。")
+            }
+            let name = args.dropFirst().joined(separator: " ")
+            guard !name.trimmingCharacters(in: .whitespaces).isEmpty else { throw ControlError("新しい名前がない。") }
+            store.renameGroup(id, to: name)
+            return state.groups(of: store)
+
+        case "group-bar":
+            let store = try store
+            guard let id = try groupID(named: try argument(args, 0, "グループ名"), in: store) else {
+                throw ControlError("グループなしはバーに出せない。")
+            }
+            let value = try argument(args, 1, "on か off ")
+            guard ["on", "off"].contains(value) else { throw ControlError("on か off で指定すること: \(value)") }
+            store.setShowsInBar(id, value == "on")
+            return state.groups(of: store)
+
+        case "group-remove":
+            let store = try store
+            guard let id = try groupID(named: args.joined(separator: " "), in: store) else {
+                throw ControlError("グループなしは解けない。")
+            }
+            store.removeGroup(id)
+            return state.groups(of: store)
+
+        default:
+            return nil
+        }
+    }
+
+    /// 名前の組。`none` は組に入っていないタブ（`nil`）。
+    private func groupID(named name: String, in store: TabStore) throws -> UUID? {
+        guard !name.isEmpty else { throw ControlError("グループ名がない（組に入っていないタブは none）。") }
+        if name == "none" { return nil }
+        guard let group = store.group(named: name) else {
+            throw ControlError("グループ「\(name)」はない。`groups` で一覧を見ること。")
+        }
+        return group.id
+    }
+
     private func bookmarkCommand(_ command: String, _ args: inout [String], _ options: Options) async throws -> String? {
         switch command {
         case "bookmarks":

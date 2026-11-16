@@ -178,6 +178,7 @@ final class Tab: Identifiable {
             return nil
         case .asleep(var saved):
             saved.bookmark = nil
+            saved.group = nil
             return saved
         case .live(let live):
             guard let url else { return nil }

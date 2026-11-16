@@ -198,7 +198,8 @@ private struct LivePages: View {
 
     var body: some View {
         ZStack {
-            ForEach(store.allTabs.filter { $0.page != nil }) { tab in
+            // 出していない組のページも、選ばれていないタブと同じく隠して置いておく。
+            ForEach(store.everyTab.filter { $0.page != nil }) { tab in
                 if let page = tab.page {
                     PageView(page: page, isHidden: tab.id != selectedID, focusRequest: store.pageFocusRequest)
                         .id(ObjectIdentifier(page))

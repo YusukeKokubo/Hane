@@ -2,7 +2,7 @@ import CoreTransferable
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// ツールバー直下の一列。左にブックマーク、仕切りを挟んで右に普通のタブが並ぶ。
+/// ツールバー直下の一列。左にブックマーク、仕切りを挟んで組の切り替え、その右に今の組の普通のタブが並ぶ。
 struct TabBar: View {
     let store: TabStore
     let onClose: (Tab.ID) -> Void
@@ -17,6 +17,8 @@ struct TabBar: View {
     var body: some View {
         HStack(spacing: Self.spacing) {
             BookmarkStrip(store: store)
+                .fixedSize()
+            GroupSwitcher(store: store)
                 .fixedSize()
             // 入りきらないときは、まずタブを縮め、それでも足りなければ横に流す。
             // ViewThatFits で両方を候補に出すと、並びを二組作って変化のたびに両方を測り直すので、
@@ -69,6 +71,7 @@ struct TabBar: View {
                     // 行き先のないまっさらなタブは固定できない（`pin` が断る）。
                     Button("タブを固定") { store.pin(tab.id) }
                         .disabled(tab.url == nil)
+                    MoveToGroupMenu(store: store, tab: tab)
                     Divider()
                     Button("タブを閉じる") { onClose(tab.id) }
                 }

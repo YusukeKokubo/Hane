@@ -8,6 +8,8 @@ struct SavedPage: Codable, Equatable, Sendable {
     var title: String
     /// ブックマークから開いたページなら、そのブックマーク。
     var bookmark: UUID?
+    /// 組に入っている普通のタブなら、その組。前の版のファイルにはないので省ける。
+    var group: UUID?
     /// 戻る・進むの履歴と今の位置の控え（`WKWebView.interactionState`）。中身は WebKit だけが読める。
     /// 前の版のファイルにはないので省ける。
     var state: Data?
@@ -22,6 +24,10 @@ struct SavedSession: Codable, Equatable, Sendable {
     var pages: [SavedPage] = []
     /// `pages` の中で選んでいたページの位置。
     var selected: Int?
+    /// 普通のタブの組。前の版のファイルにはないので省ける。
+    var groups: [TabGroup]?
+    /// バーに出していた組。`nil` はどの組にも入っていないタブ。
+    var currentGroup: UUID?
 }
 
 /// 閲覧状態の保存先。
