@@ -68,15 +68,38 @@ import Testing
         #expect(suggestions.habits.count == 1)
     }
 
-    @Test func listsFrequentSitesOncePerSiteWithoutHabits() {
+    @Test func groupsFrequentPagesBySiteWithoutHabitsOrSearches() {
         let habitTimes = [3, 4, 5].map { at(day: monday - $0, hour: 9, minute: 0) }
         let suggestions = NewTabSuggestions.make(from: [
             entry("https://habit.example/", times: habitTimes, typed: 50),
-            entry("https://dev.example/", typed: 10),
-            entry("https://dev.example/docs", typed: 1),
+            entry("https://habit.example/other", typed: 1),
+            entry("https://notes.example/page-a", typed: 10),
+            entry("https://notes.example/page-b", typed: 1),
             entry("https://www.google.com/search?q=x", typed: 99),
         ], now: now, timeZone: utc)
-        #expect(suggestions.frequent.map(\.url.absoluteString) == ["https://dev.example/"])
+        #expect(suggestions.frequent.map(\.site) == ["notes.example", "habit.example"], "ページの重みの合計で並べる")
+        #expect(suggestions.frequent.first?.root.children.map(\.id) == ["/page-a", "/page-b"])
+        #expect(suggestions.frequent.last?.root.entry == nil, "いつものに出したページは重ねない")
+    }
+
+    /// Notion のようにワークスペースの下にページが並ぶサイト。開いていない道筋は見出しとして残し、
+    /// 一つのページにつながるだけの道筋は詰める。
+    @Test func nestsPagesByTheirPath() throws {
+        let suggestions = NewTabSuggestions.make(from: [
+            entry("https://www.notion.so/", title: "Notion", typed: 1),
+            entry("https://www.notion.so/team/%E8%AD%B0%E4%BA%8B%E9%8C%B2-1", title: "議事録", typed: 9),
+            entry("https://www.notion.so/team/Design-2", title: "設計メモ", typed: 5),
+            entry("https://www.notion.so/team/Design-2?pvs=4", title: "設計メモ（別の見た目）", typed: 1),
+            entry("https://www.notion.so/me/deep/Diary-3", title: "日記", typed: 3),
+        ], now: now, timeZone: utc)
+        let site = try #require(suggestions.frequent.first)
+        #expect(site.site == "www.notion.so")
+        #expect(site.root.entry?.title == "Notion")
+        let team = try #require(site.root.children.first)
+        #expect(team.entry == nil && team.label == "team")
+        #expect(team.children.map(\.title) == ["議事録", "設計メモ"])
+        #expect(team.children.last?.children.map(\.title) == ["設計メモ（別の見た目）"], "クエリだけ違うページは下に置く")
+        #expect(site.root.children.last?.title == "日記", "開いていない道筋が一つのページにつながるだけなら詰める")
     }
 
     @Test func listsPagesLeftSoonAfterFollowingALink() {

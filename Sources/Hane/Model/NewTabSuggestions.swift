@@ -20,7 +20,7 @@ struct NewTabSuggestions: Equatable {
     }
 
     var habits: [Habit] = []
-    var frequent: [HistoryEntry] = []
+    var frequent: [FrequentSite] = []
     var unfinished: [HistoryEntry] = []
 
     var isEmpty: Bool { habits.isEmpty && frequent.isEmpty && unfinished.isEmpty }
@@ -34,6 +34,9 @@ struct NewTabSuggestions: Equatable {
     /// 読みかけとして出すのは、これより短く見て離れたページ。
     static let unfinishedViewLimit: TimeInterval = 120
     static let unfinishedLookbackDays = 7
+    /// よく行くに出すサイトの数と、1サイトあたりのページの数。
+    static let frequentSiteLimit = 4
+    static let frequentPagesPerSite = 8
 
     /// `isBookmarked` はブックマーク済みのページか。読みかけから外す。
     static func make(
@@ -44,10 +47,10 @@ struct NewTabSuggestions: Equatable {
     ) -> NewTabSuggestions {
         let clock = LocalClock(timeZone: timeZone, now: now)
         let habits = Self.habits(in: entries, clock: clock)
-        let shown = Set(habits.map { $0.entry.url.host() ?? $0.entry.url.absoluteString })
+        let shown = Set(habits.map(\.entry.url))
         return NewTabSuggestions(
             habits: habits,
-            frequent: Self.frequent(in: entries, now: now, excludingHosts: shown),
+            frequent: Self.frequent(in: entries, now: now, excluding: shown),
             unfinished: Self.unfinished(in: entries, now: now, isBookmarked: isBookmarked)
         )
     }
@@ -99,17 +102,22 @@ struct NewTabSuggestions: Equatable {
 
     // MARK: よく行く
 
-    /// アドレスバーで補う候補と同じ重みで、サイトごとに一つずつ。
-    private static func frequent(in entries: some Collection<HistoryEntry>, now: Date, excludingHosts: Set<String>) -> [HistoryEntry] {
-        var best: [String: (entry: HistoryEntry, score: Double)] = [:]
-        for entry in entries where !AddressResolver.isSearch(entry.url) {
-            let site = entry.url.host() ?? entry.url.absoluteString
-            guard !excludingHosts.contains(site) else { continue }
-            let score = HistoryStore.score(entry, now: now)
-            if let current = best[site], current.score >= score { continue }
-            best[site] = (entry, score)
+    /// アドレスバーで補う候補と同じ重みで、サイトごとにページを選び、URL の道筋で入れ子にする。
+    /// 同じサイトの別々のページ（Notion の各ページなど）を一つにまとめると、どれを開けばよいか分からなくなるため。
+    /// サイトはページの重みの合計で並べる。いつものに出したページは重ねて出さない。
+    private static func frequent(in entries: some Collection<HistoryEntry>, now: Date, excluding shown: Set<URL>) -> [FrequentSite] {
+        var bySite: [String: [(entry: HistoryEntry, score: Double)]] = [:]
+        for entry in entries where !AddressResolver.isSearch(entry.url) && !shown.contains(entry.url) {
+            bySite[FrequentSite.site(of: entry.url), default: []].append((entry, HistoryStore.score(entry, now: now)))
         }
-        return best.values.sorted { $0.score > $1.score }.prefix(6).map(\.entry)
+        return bySite
+            .map { site, pages in (site: site, pages: pages, total: pages.reduce(0) { $0 + $1.score }) }
+            .sorted { $0.total > $1.total }
+            .prefix(frequentSiteLimit)
+            .map { site in
+                let pages = site.pages.sorted { $0.score > $1.score }.prefix(frequentPagesPerSite)
+                return FrequentSite(site: site.site, pages: pages.map { ($0.entry, $0.score) })
+            }
     }
 
     // MARK: 読みかけ
@@ -130,6 +138,84 @@ struct NewTabSuggestions: Equatable {
             .sorted { $0.lastVisit > $1.lastVisit }
             .prefix(5)
             .map(\.self)
+    }
+}
+
+/// よく行くサイト一つ。開いたページを URL の道筋で入れ子にして持つ。
+struct FrequentSite: Equatable, Identifiable {
+    /// 入れ子の一段。開いたページなら `entry` を持ち、ページの間をつなぐだけの道筋なら持たない。
+    struct Node: Equatable, Identifiable {
+        /// サイトの中での道筋。並びの中で一つに決まる。
+        var id: String
+        /// 道筋の一区切り。開いたページなら題名を使う（`title`）。
+        var label: String
+        var entry: HistoryEntry?
+        var children: [Node] = []
+        /// この下でいちばん重いページの重み。兄弟の並び順に使う。
+        var score: Double = 0
+
+        var title: String {
+            guard let entry, !entry.title.isEmpty else { return label }
+            return entry.title
+        }
+    }
+
+    var site: String
+    /// サイトの入口。入口のページを開いていれば `entry` を持つ。
+    var root: Node
+
+    var id: String { site }
+
+    static func site(of url: URL) -> String {
+        url.host() ?? url.scheme ?? url.absoluteString
+    }
+
+    /// 重いものから順に渡す。同じ道筋に二つ来たら（クエリだけ違うなど）、先の方を残す。
+    init(site: String, pages: [(entry: HistoryEntry, score: Double)]) {
+        self.site = site
+        var root = Node(id: "", label: site)
+        for page in pages {
+            root.insert(Self.segments(of: page.entry.url)[...], entry: page.entry, score: page.score)
+        }
+        root.children = root.children.map { $0.tidied() }.sorted { $0.score > $1.score }
+        self.root = root
+    }
+
+    /// 道筋の区切り。クエリは別のページとして最後の区切りに足す。フラグメントは同じページと見る。
+    static func segments(of url: URL) -> [String] {
+        var segments = url.pathComponents.filter { $0 != "/" }
+        if let query = url.query(), !query.isEmpty { segments.append("?" + query) }
+        return segments
+    }
+}
+
+private extension FrequentSite.Node {
+    mutating func insert(_ segments: ArraySlice<String>, entry: HistoryEntry, score: Double) {
+        self.score = max(self.score, score)
+        guard let first = segments.first else {
+            if self.entry == nil { self.entry = entry }
+            return
+        }
+        let childID = id + "/" + first
+        if let index = children.firstIndex(where: { $0.id == childID }) {
+            children[index].insert(segments.dropFirst(), entry: entry, score: score)
+        } else {
+            var child = Self(id: childID, label: first.removingPercentEncoding ?? first)
+            child.insert(segments.dropFirst(), entry: entry, score: score)
+            children.append(child)
+        }
+    }
+
+    /// 開いていない道筋が一つのページにつながるだけなら、間を詰める。重いものから並べる。
+    func tidied() -> Self {
+        var node = self
+        while node.entry == nil, node.children.count == 1 {
+            let only = node.children[0]
+            node = Self(id: only.id, label: only.entry == nil ? node.label + "/" + only.label : only.label,
+                        entry: only.entry, children: only.children, score: only.score)
+        }
+        node.children = node.children.map { $0.tidied() }.sorted { $0.score > $1.score }
+        return node
     }
 }
 

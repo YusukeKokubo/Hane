@@ -41,17 +41,23 @@ struct NewTabView: View {
             if !suggestions.habits.isEmpty {
                 habits(suggestions.habits)
             }
-            if !suggestions.frequent.isEmpty || !suggestions.unfinished.isEmpty {
-                HStack(alignment: .top, spacing: 20) {
-                    if !suggestions.frequent.isEmpty {
-                        LinkList(title: "よく行く", note: "打って開いた回数と、最近かどうかで並べています",
-                                 entries: suggestions.frequent, showsHost: true, open: open)
+            if !suggestions.frequent.isEmpty {
+                VStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("よく行く").font(.title3.bold())
+                        Text("開いた回数（打って開いたものは重く）と、最近かどうかで並べています")
+                            .font(.caption).foregroundStyle(.secondary)
                     }
-                    if !suggestions.unfinished.isEmpty {
-                        LinkList(title: "読みかけ", note: "リンクから開いて、少しだけ見て離れたページ",
-                                 entries: suggestions.unfinished, showsHost: false, open: open)
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 300), spacing: 14, alignment: .top)], spacing: 14) {
+                        ForEach(suggestions.frequent) { site in
+                            SiteCard(site: site, icon: store.favicons.image(for: site.root.entry?.url ?? site.firstURL), open: open)
+                        }
                     }
                 }
+            }
+            if !suggestions.unfinished.isEmpty {
+                LinkList(title: "読みかけ", note: "リンクから開いて、少しだけ見て離れたページ",
+                         entries: suggestions.unfinished, open: open)
             }
         }
     }
@@ -134,7 +140,6 @@ private struct LinkList: View {
     let title: String
     let note: String
     let entries: [HistoryEntry]
-    let showsHost: Bool
     let open: (URL) -> Void
 
     var body: some View {
@@ -144,7 +149,7 @@ private struct LinkList: View {
                 Button {
                     open(entry.url)
                 } label: {
-                    Text(showsHost ? (entry.url.host() ?? entry.url.lastPathComponent) : displayTitle(of: entry))
+                    Text(displayTitle(of: entry))
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }
@@ -157,6 +162,69 @@ private struct LinkList: View {
         .padding(18)
         .background(RoundedRectangle(cornerRadius: 12).fill(Color(nsColor: .controlBackgroundColor)))
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color(nsColor: .separatorColor)))
+    }
+}
+
+/// よく行くサイト一つ。開いたページを URL の道筋で字下げして並べる。
+private struct SiteCard: View {
+    let site: FrequentSite
+    let icon: NSImage?
+    let open: (URL) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                if let url = site.root.entry?.url ?? site.firstURL {
+                    SiteIcon(url: url, icon: icon, size: 18)
+                }
+                if let entry = site.root.entry {
+                    Button(site.site) { open(entry.url) }
+                        .buttonStyle(.link)
+                        .font(.headline)
+                        .help(entry.url.absoluteString)
+                } else {
+                    Text(site.site).font(.headline)
+                }
+            }
+            ForEach(site.rows, id: \.node.id) { row in
+                Group {
+                    if let entry = row.node.entry {
+                        Button {
+                            open(entry.url)
+                        } label: {
+                            Text(row.node.title).lineLimit(1).truncationMode(.middle)
+                        }
+                        .buttonStyle(.link)
+                        .help(entry.url.absoluteString)
+                    } else {
+                        Label(row.node.label, systemImage: "folder")
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                }
+                .padding(.leading, CGFloat(row.depth) * 16)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color(nsColor: .controlBackgroundColor)))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color(nsColor: .separatorColor)))
+    }
+}
+
+private extension FrequentSite {
+    /// 入れ子を上から順に一列に並べたもの。`depth` は入口の下を 0 とした深さ。
+    var rows: [(node: Node, depth: Int)] {
+        func walk(_ nodes: [Node], _ depth: Int) -> [(node: Node, depth: Int)] {
+            nodes.flatMap { [($0, depth)] + walk($0.children, depth + 1) }
+        }
+        return walk(root.children, 0)
+    }
+
+    /// 入口を開いていないときにアイコンを引くための、サイトのどれかのページ。
+    var firstURL: URL? {
+        rows.first { $0.node.entry != nil }?.node.entry?.url
     }
 }
 
