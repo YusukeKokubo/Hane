@@ -33,6 +33,26 @@ import WebKit
         #expect(store.selectedID == nil)
     }
 
+    /// 開いたタブをほかへ移らずに閉じると、開く前に選んでいたタブへ戻る。ほかへ移ったあとなら隣へ。
+    @Test func closingAnOpenedTabReturnsToWhereItCameFrom() {
+        let store = makeStore()
+        let first = store.tabs[0]
+        let second = store.newTab()
+        _ = store.newTab()
+        store.selectedID = first.id
+
+        let opened = store.open(URLRequest(url: localURL("opened")))
+        #expect(store.tabs.firstIndex { $0.id == opened.id } == 1, "選んでいたタブの隣に開く")
+        #expect(store.close(opened.id))
+        #expect(store.selectedID == first.id)
+
+        let visited = store.open(URLRequest(url: localURL("visited")))
+        store.selectedID = second.id
+        store.selectedID = visited.id
+        #expect(store.close(visited.id))
+        #expect(store.selectedID == second.id, "ほかへ移ったあとは隣へ")
+    }
+
     /// 読み込んでも失敗するだけで、ネットワークには出ないアドレス。
     private func localURL(_ name: String) -> URL {
         FileManager.default.temporaryDirectory.appending(path: "HaneTabStoreTests-\(name).html")

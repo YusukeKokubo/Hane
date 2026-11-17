@@ -10,9 +10,12 @@ public enum ControlHelp {
       tabs                   タブの一覧。ページを持たないタブ（前回の閲覧から戻しただけのタブと、
                              しばらく画面に出さず眠らせたタブ）には [asleep] が付き、選ぶか reload すると
                              戻る・進むの履歴ごと起きる。サイトのアイコンを取れているタブには [icon] が付く
+                             普段使いの実体ではほかのタブの題名まで並ぶので、自分のタブを確かめるだけなら tab を使う
+      tab                    選択中のタブ（--tab で指したタブ）の一行だけ
       new [URL|検索語]      新しいタブを開いて選択する
       select <番号>           タブを選択する
-      close [番号]            タブを閉じる（最後の1枚は閉じられない）
+      close [番号]            タブを閉じ、閉じたあとに選ばれたタブを返す（最後の1枚は閉じられない）。
+                             new やリンクで開いたタブを、ほかへ移らずに閉じると、開く前に選んでいたタブへ戻る
       sleep [番号]            タブを眠らせてページのプロセスを返す（選択中のタブは眠らせられない）。
                              アプリは画面から外れて30分経ったタブを、選択が変わったときに自分で眠らせる
 
@@ -39,11 +42,12 @@ public enum ControlHelp {
     移動（どれも読み込みが終わり、ページの題名がアプリに届くまで待ってから返る）
       open <URL|検索語>       ページを開く。URLでなければ検索する
       back / forward / reload
-      wait                   読み込みが終わるのを待つ
+      wait                   読み込みが終わるのを待つ（eval と setTimeout で待つ代わりに、下の条件つきの形を使う）
       wait [--text <文字列>] [--selector <CSSセレクタ>] [--js <式>] [--gone] [--timeout 秒] [--frame <フレーム>]
                              条件が成り立つまで待つ（読み込みのあとにスクリプトが描く画面向け）。
                              --text は本文にその文字列が現れるまで、--selector は合う見えている要素が現れるまで、
                              --js は式（await も書ける）が真になるまで。複数並べるとすべてが成り立つまで。
+                             例: wait --selector '[role=dialog]'、wait --js 'document.querySelectorAll("tr").length > 10'
                              --gone は逆で、並べたどれも成り立たなくなる（消える）まで。
                              --timeout は既定 10 秒、最大 100 秒。時間切れは失敗で、最後に見えた状態を理由に出す。
                              待っている間にページが移れば、読み込みを待って移った先で続ける。
@@ -69,6 +73,7 @@ public enum ControlHelp {
 
     ページを操作する（番号は直前の snapshot のもの）
       click <番号>            クリックする
+      dblclick <番号>         ダブルクリックする（押して離すのを二度と click を二度、続けて dblclick を送る）
                              ページが alert / confirm / prompt を出すと窓のシートになり、答えるまでその命令は返らない。
                              別の hanectl から ui-snapshot と ui-click で答える
                              （裏のタブのページが出したものは、取り消したものとして答える）
@@ -77,7 +82,7 @@ public enum ControlHelp {
       fill <番号> <文字列>     入力欄に文字列を入れる。select要素なら選択肢を選ぶ
       press <キー> [番号]      キーを送る（Enter, Escape, Tab, ArrowDown など）。Enter はフォームを送信する
                              番号を省くとフォーカスのある要素へ（iframe の中にフォーカスがあれば、その中の要素へ）
-                             click / fill / press はページの中で作った事象で、ページからは isTrusted が false に見える
+                             click / dblclick / fill / press はページの中で作った事象で、ページからは isTrusted が false に見える
 
     ページへ本物の入力を渡す（利用者が操作したのと同じく isTrusted が true。選択中のタブのページだけ）
       page-click [--right] [--with <修飾>] <番号|x,y>

@@ -129,6 +129,10 @@ final class ControlService {
         case "tabs":
             return try state.tabs(of: store)
 
+        case "tab":
+            if let extra = args.first { throw ControlError("tab に余分な引数がある: \(extra)。ほかのタブは --tab <番号> tab で見る。") }
+            return state.tab(try target(options))
+
         case "new":
             if args.isEmpty {
                 return state.tab(try store.newTab())
@@ -149,7 +153,8 @@ final class ControlService {
                 throw ControlError("最後の1枚は閉じられない（ウインドウが閉じてアプリが終了するため）。")
             }
             try store.close(tab.id)
-            return try "closed tab \(tab.number)\n" + state.tabs(of: store)
+            // 普段使いの実体では作業と関係のないタブの題名まで並べないよう、残りは選ばれたタブだけを返す。
+            return try "closed tab \(tab.number)\n" + (store.selected.map(state.tab) ?? "")
 
         case "open":
             let tab = try target(options)
@@ -178,7 +183,7 @@ final class ControlService {
             let tab = try tab(numbered: number)
             guard try tab.id != store.selectedID else { throw ControlError("画面に出ているタブは眠らせられない。先に別のタブを選ぶこと。") }
             guard tab.sleep() else { throw ControlError("このタブはページを持っていない（もう眠っているか、まだ何も開いていない）。") }
-            return try state.tabs(of: store)
+            return state.tab(tab)
 
         case "history":
             return try state.history(of: store, limit: options.limit ?? 30)
@@ -222,6 +227,10 @@ final class ControlService {
         case "click":
             let ref = try integer(try argument(args, 0, "要素の番号"), "要素の番号")
             return try await pages.act("click", ref: ref, text: "", on: try target(options))
+
+        case "dblclick":
+            let ref = try integer(try argument(args, 0, "要素の番号"), "要素の番号")
+            return try await pages.act("dblclick", ref: ref, text: "", on: try target(options))
 
         case "fill":
             let ref = try integer(try argument(args, 0, "要素の番号"), "要素の番号")

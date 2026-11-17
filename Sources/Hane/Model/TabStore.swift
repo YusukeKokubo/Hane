@@ -32,6 +32,8 @@ final class TabStore: TabOpening {
         // 前回の閲覧から戻したタブと眠らせたタブは、選ばれたここで起こす。
         didSet {
             guard selectedID != oldValue else { return }
+            // ほかのタブへ移ったら、開いたタブを閉じても元へは戻さない（どこへ戻るかが読めなくなるため）。
+            if returnOnClose?.tab != selectedID { returnOnClose = nil }
             Signposts.poster.emitEvent("タブの選択")
             if let previous = oldValue.flatMap(tab(withID:)) { previous.lastShown = Date() }
             selected?.wake()
@@ -160,7 +162,7 @@ final class TabStore: TabOpening {
     @discardableResult
     func newTab() -> Tab {
         let tab = insertTab(after: nil)
-        selectedID = tab.id
+        select(opened: tab)
         focusAddressBar()
         return tab
     }
@@ -176,8 +178,25 @@ final class TabStore: TabOpening {
     func open(_ request: URLRequest, inBackground: Bool = false, from source: VisitSource? = nil) -> Tab {
         let tab = insertTab(after: selectedID)
         tab.load(request, from: source)
-        if !inBackground { selectedID = tab.id }
+        if !inBackground { select(opened: tab) }
         return tab
+    }
+
+    /// 開いたばかりのタブを選ぶ。ほかへ移らずに閉じたら、それまで選んでいたタブへ戻す。
+    /// 隣へ移すと、開いたついでに見ただけのタブを閉じたとき、元いたタブを探し直すことになるため。
+    private func select(opened tab: Tab) {
+        let back = selectedID
+        selectedID = tab.id
+        returnOnClose = back.map { (tab: tab.id, back: $0) }
+    }
+
+    /// 開いて選んだタブと、そのとき選んでいたタブ。
+    @ObservationIgnored private var returnOnClose: (tab: Tab.ID, back: Tab.ID)?
+
+    /// 選ばれていたタブ `id` を閉じたあとに選ぶタブ。開いたときに選んでいたタブが見えていればそこ。
+    private func returnTarget(closing id: Tab.ID) -> Tab.ID? {
+        guard let entry = returnOnClose, entry.tab == id else { return nil }
+        return allTabs.first { $0.id == entry.back }?.id
     }
 
     /// ページを閉じる。何も残らなくなったら `false` を返す（呼び出し側でウインドウを閉じる）。
@@ -193,7 +212,8 @@ final class TabStore: TabOpening {
             if allTabs.isEmpty, !parkedTabs.isEmpty {
                 newTab()
             } else if selectedID == id {
-                selectedID = tabs.indices.contains(index) ? tabs[index].id : (tabs.last ?? allTabs.first)?.id
+                selectedID = returnTarget(closing: id)
+                    ?? (tabs.indices.contains(index) ? tabs[index].id : (tabs.last ?? allTabs.first)?.id)
             }
         } else if let entry = parkedTabs.first(where: { $0.value.contains { $0.id == id } }),
                   let index = entry.value.firstIndex(where: { $0.id == id }) {
@@ -211,7 +231,7 @@ final class TabStore: TabOpening {
             if allTabs.isEmpty {
                 newTab()
             } else if selectedID == id {
-                selectedID = (tabs.last ?? allTabs.first)?.id
+                selectedID = returnTarget(closing: id) ?? (tabs.last ?? allTabs.first)?.id
             }
         }
         return !allTabs.isEmpty

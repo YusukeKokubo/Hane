@@ -170,6 +170,23 @@ enum PageScripts {
       return '{}';
     }
 
+    if (action === 'dblclick') {
+      el.scrollIntoView({ block: 'center', inline: 'center' });
+      if (el.focus) el.focus();
+      // 押して離すのを二度送り、続けて dblclick を送る。本物の操作と同じ順にしないと、
+      // mousedown や click の detail を見て二度目を数えるページで効かない。
+      const box = el.getBoundingClientRect();
+      const at = { bubbles: true, cancelable: true, composed: true, view: window, button: 0,
+                   clientX: box.left + box.width / 2, clientY: box.top + box.height / 2 };
+      for (const detail of [1, 2]) {
+        el.dispatchEvent(new MouseEvent('mousedown', Object.assign({ detail, buttons: 1 }, at)));
+        el.dispatchEvent(new MouseEvent('mouseup', Object.assign({ detail }, at)));
+        el.dispatchEvent(new MouseEvent('click', Object.assign({ detail }, at)));
+      }
+      el.dispatchEvent(new MouseEvent('dblclick', Object.assign({ detail: 2 }, at)));
+      return '{}';
+    }
+
     if (action === 'fill') {
       el.scrollIntoView({ block: 'center', inline: 'center' });
       if (el.focus) el.focus();

@@ -91,8 +91,14 @@ import WebKit
         response = await run("select", "1")
         #expect(store.selected?.number == 1)
 
+        response = await run("tab")
+        #expect(response.output.hasPrefix("* tab 1:"), "\(response.output)")
+        #expect(!response.output.contains("tab 2"))
+        #expect(await run("--tab", "2", "tab").output.hasPrefix("  tab 2:"))
+
         response = await run("close", "2")
         #expect(response.ok)
+        #expect(response.output.hasPrefix("closed tab 2\n* tab 1:"), "残りは選ばれたタブだけ出す: \(response.output)")
         #expect(store.tabs.count == 1)
 
         response = await run("close")
@@ -327,6 +333,25 @@ import WebKit
 
         #expect(await !run("click", "42").ok)
         #expect(await run("text").output.contains("Sign in"))
+    }
+
+    /// dblclick は、本物のダブルクリックと同じ順と detail で事象を送る（表のセルを直す画面など向け）。
+    @Test func doubleClicksAnElement() async throws {
+        try await open(html: """
+            <title>Cells</title><button id="cell">Cell</button>
+            <script>
+              const seen = [];
+              for (const type of ['mousedown', 'mouseup', 'click', 'dblclick'])
+                cell.addEventListener(type, e => seen.push(type + e.detail));
+              cell.addEventListener('dblclick', () => { document.title = seen.join(' '); });
+            </script>
+            """)
+        _ = await run("snapshot")
+        let response = await run("dblclick", "1")
+        #expect(response.ok, "\(response.output)")
+        let seen = await run("eval", "document.title").output
+        #expect(seen.contains("mousedown1 mouseup1 click1 mousedown2 mouseup2 click2 dblclick2"), "\(seen)")
+        #expect(await !run("dblclick", "9").ok)
     }
 
     /// page-click / page-key は、ページに本物の事象（isTrusted）として届く。
