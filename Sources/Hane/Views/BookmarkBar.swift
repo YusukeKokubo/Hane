@@ -39,7 +39,10 @@ private struct BookmarkChip: View {
         let awayTitle = store.awayTitle(for: bookmark)
 
         // Chrome や Arc の固定タブと同じく、アイコンだけで場所を取らない。名前は指したときの説明に回す。
-        Favicon(image: store.favicons.image(for: bookmark.url))
+        // 普通のタブと同じく、名前の頭の絵文字をアイコンの場所に出す。Notion のようにページごとの絵文字を
+        // 題名の頭に付けるサイトでは、サイトのアイコンだけだとどれも同じに見えるため。
+        // ページを開いていても名前の方を見るのは、ページがほかへ移っても固定が何かを見失わないため。
+        Favicon(image: store.favicons.image(for: bookmark.url), emoji: TitleEmoji(bookmark.title)?.emoji)
             .overlay(alignment: .topTrailing) {
                 // ブックマークのアドレスから離れていることだけは、アイコンの上で分かるようにする。
                 if awayTitle != nil {
