@@ -40,6 +40,8 @@ final class Tab: Identifiable {
     /// 題名は読み終えた後に届くことがあり、行き先が変わった時点の書き出しには間に合わないため。
     /// その後の題名の変化では進めない（題名を書き換え続けるページで書き出しが続かないように）。
     private(set) var titleArrivals = 0
+    /// 生きているページが自分だけのものとして示したアイコン。眠らせたり別のページへ移ったりしたら捨てる。
+    private(set) var pageIcon: PageIcon?
 
     /// 最後に画面から外れた時刻。しばらく使われていないタブを眠らせるのに使う。
     @ObservationIgnored var lastShown = Date()
@@ -54,6 +56,8 @@ final class Tab: Identifiable {
     @ObservationIgnored private var awaitingTitle = false
     /// 読み込み中の区間の印。Instruments で読み込みの始まりと終わりを見るため。
     @ObservationIgnored private var loadSignpost: OSSignpostIntervalState?
+    /// アイコンを読みに行った回数。遅れて返った古い読みで、新しい読みの結果を上書きしないため。
+    @ObservationIgnored private var faviconLookups = 0
 
     init(
         number: Int,
@@ -120,8 +124,12 @@ final class Tab: Identifiable {
         return hasContent ? "読み込み中…" : "新規タブ"
     }
 
-    /// 行き先のサイトのアイコン。まだ取っていなければ `nil`。眠っているタブでも、覚えていれば返す。
-    var favicon: NSImage? { favicons.image(for: url) }
+    /// ページが自分だけのアイコンを示していればそれを、なければ行き先のサイトのアイコン。
+    /// まだ取っていなければ `nil`。眠っているタブでも、サイトのものを覚えていれば返す。
+    var favicon: NSImage? {
+        if page != nil, let pageIcon { return pageIcon.image }
+        return favicons.image(for: url)
+    }
 
     var canGoBack: Bool { page?.canGoBack ?? false }
     var canGoForward: Bool { page?.canGoForward ?? false }
@@ -240,6 +248,7 @@ final class Tab: Identifiable {
     /// ページの見張りと案内役を外す。手放すのは、呼んだ側が `content` を入れ替えたとき。
     private func closePage() {
         endLoadSignpost()
+        dropPageIcon()
         page?.tearDown()
     }
 
@@ -255,12 +264,13 @@ final class Tab: Identifiable {
             }
             pendingSource = nil
             awaitingTitle = true
+            dropPageIcon()
         case .finished:
             endLoadSignpost()
             // 前のページと同じ題名なら変化の知らせが来ないので、読み終えたときにも入れる（空なら何もしない）。
             if let page, let url = page.url {
                 history.setTitle(page.title, for: url)
-                lookUpFavicon(of: page, at: url)
+                lookUpFavicon(of: page, at: url, rereading: false)
             }
         case .titleChanged(let title):
             if awaitingTitle {
@@ -270,6 +280,11 @@ final class Tab: Identifiable {
             // 読み終えた時点ではまだ題名が届いていないことがあるので、届いたときにも入れる。
             if let url = page?.url {
                 history.setTitle(title, for: url)
+            }
+            // 読み終えた後にページがアイコンを書き換えることがある（Notion はページのアイコンを描いて差し込み、
+            // ページの中で移るたびに題名と一緒に替える）。読み込み中なら読み終えたときに読むので、ここでは読まない。
+            if let page, let url = page.url, !page.isLoading {
+                lookUpFavicon(of: page, at: url, rereading: true)
             }
         case .failed(let message):
             // 打ったアドレスが開けなかったときに、次のリンクの移動を打ったものと数えないように。
@@ -288,12 +303,24 @@ final class Tab: Identifiable {
         }
     }
 
-    /// ページが示すアイコンを読んで取りに行く。読み終えるたびに読むが、同じアイコンを取り直すことはない（`FaviconStore`）。
-    private func lookUpFavicon(of page: Page, at url: URL) {
-        Task { [weak page, favicons] in
+    /// ページが示すアイコンを読んで取りに行く。読み終えるたびと題名が変わるたびに読むが、
+    /// 同じアイコンを取り直すことはない（`FaviconStore`）。
+    private func lookUpFavicon(of page: Page, at url: URL, rereading: Bool) {
+        faviconLookups += 1
+        let lookup = faviconLookups
+        let current = pageIcon
+        Task { [weak self, weak page, favicons] in
             guard let page else { return }
-            await favicons.update(from: page, at: url)
+            let found = await favicons.update(from: page, at: url, current: current, rereading: rereading)
+            guard let self, faviconLookups == lookup, self.page === page else { return }
+            // 同じものを入れ直すと、題名が変わるたびにタブを描き直すことになる。
+            if found?.source != pageIcon?.source { pageIcon = found }
         }
+    }
+
+    private func dropPageIcon() {
+        faviconLookups += 1
+        if pageIcon != nil { pageIcon = nil }
     }
 
     private func endLoadSignpost() {

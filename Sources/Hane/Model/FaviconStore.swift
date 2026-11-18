@@ -20,6 +20,14 @@ struct IconLink: Equatable, Sendable {
     var type: String = ""
 }
 
+/// ページが自分だけのものとして示したアイコン（Notion のページごとのアイコンなど）。
+/// サイトの分としては覚えず、示したページを開いているタブだけが持つ。
+struct PageIcon {
+    /// 示された `data:` のアドレス。同じものを縮め直さないために持つ。
+    let source: URL
+    let image: NSImage
+}
+
 /// サイトのアイコン（favicon）。タブとブックマークの頭に出す。プロファイルごとに一つ。
 ///
 /// WebKit は `WKWebView` にアイコンを渡す公開の API を持たないので、読み終えたページから候補を読み、自分で取りに行く。
@@ -105,26 +113,49 @@ final class FaviconStore {
 
     // MARK: 取りに行く
 
-    /// 読み終えたページから候補を読んで取りに行く。
-    func update(from page: Page, at url: URL) async {
-        guard let result = try? await page.callJavaScript(Self.script, arguments: [:], contentWorld: .defaultClient) else { return }
+    /// ページから候補を読んで取りに行く。ページが `data:` で示したアイコンは、そのページだけのものとして返す。
+    ///
+    /// `rereading` は、読み終えた後にページがアイコンを書き換えたかもしれないときの読み直し。
+    /// そのときは `data:` のアイコンだけを見る。ネットの上のアイコンの書き換え（未読の数を出すなど）まで追うと、
+    /// 数が変わるたびにサイトの分を取り直して書き換えることになるため。
+    func update(from page: Page, at url: URL, current: PageIcon?, rereading: Bool) async -> PageIcon? {
+        guard let result = try? await page.callJavaScript(Self.script, arguments: [:], contentWorld: .defaultClient) else { return current }
         let found = Self.parse(result)
-        await update(page: url, links: found.links, userAgent: found.userAgent)
+        return await update(page: url, links: found.links, userAgent: found.userAgent, current: current, rereading: rereading)
     }
 
-    /// 候補から一つ選んで取りに行き、覚える。前にこの実体で同じアイコンを取っていれば何もしない。
-    func update(page: URL, links: [IconLink], userAgent: String?) async {
-        guard let keys = Self.keys(for: page), let icon = Self.choose(links, for: page) else { return }
+    /// 候補から一つ選んで取りに行く。ネットの上のアイコンはサイトの分として覚え、前にこの実体で同じアイコンを取っていれば何もしない。
+    ///
+    /// `data:` のアイコンは、ページのスクリプトがその場で作ったもの（Notion はページのアイコンを描いて差し込む）として、
+    /// サイトの分にも一段目の分にも入れず、返すだけにする。同じ一段目のページどうしで違うアイコンを示すので、
+    /// 覚えると最後に開いたページのアイコンがほかのページにも出る。サイトのアイコンがまだ無いときだけ、代わりとして覚える。
+    @discardableResult
+    func update(page: URL, links: [IconLink], userAgent: String?, current: PageIcon? = nil, rereading: Bool = false) async -> PageIcon? {
+        guard let keys = Self.keys(for: page), let icon = Self.choose(links, for: page) else { return nil }
+        if icon.scheme?.lowercased() == "data" {
+            if let current, current.source == icon { return current }
+            guard let png = await Self.fetch(icon, userAgent: nil), let image = Self.image(fromPNG: png) else { return nil }
+            let site = slot(keys.site)
+            if site.png == nil { store(png, in: site, key: keys.site) }
+            return PageIcon(source: icon, image: image)
+        }
+        guard !rereading else { return nil }
         let requestKey = keys.section ?? keys.site
-        guard requested[requestKey] != icon else { return }
+        guard requested[requestKey] != icon else { return nil }
         requested[requestKey] = icon
+        guard let png = await Self.fetch(icon, userAgent: userAgent) else { return nil }
+        remember(png, from: page)
+        return nil
+    }
 
+    /// 取ってきて32ピクセルの PNG に縮める。取れない、大きすぎる、読めない画像なら `nil`。
+    private static func fetch(_ icon: URL, userAgent: String?) async -> Data? {
         var request = URLRequest(url: icon)
         if let userAgent { request.setValue(userAgent, forHTTPHeaderField: "User-Agent") }
-        guard let (data, response) = try? await Self.session.data(for: request) else { return }
-        if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) { return }
-        guard data.count <= Self.maximumBytes, let png = Self.thumbnail(from: data) else { return }
-        remember(png, for: keys)
+        guard let (data, response) = try? await session.data(for: request) else { return nil }
+        if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) { return nil }
+        guard data.count <= maximumBytes else { return nil }
+        return thumbnail(from: data)
     }
 
     /// ページの中のスクリプト（`script`）の結果を読む。
@@ -159,7 +190,8 @@ final class FaviconStore {
 
     /// サイトのアイコンは、サイトの入口で取ったものか、まだ無いときに取ったもので決める。
     /// それと違うアイコンだけを一段目で覚え、同じになったら一段目の分は捨てる。
-    private func remember(_ png: Data, for keys: Keys) {
+    func remember(_ png: Data, from page: URL) {
+        guard let keys = Self.keys(for: page) else { return }
         let site = slot(keys.site)
         guard let section = keys.section, site.png != nil else {
             store(png, in: site, key: keys.site)

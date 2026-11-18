@@ -51,27 +51,77 @@ import Testing
     }
 
     /// 同じサイトでも、パスの一段目でアイコンが違うものはそこで覚える（docs.google.com のドキュメントとスプレッドシート）。
-    @Test func remembersSectionsWhoseIconDiffersFromTheSite() async throws {
+    @Test func remembersSectionsWhoseIconDiffersFromTheSite() throws {
         let favicons = FaviconStore()
-        let red = try Self.dataURL(.red)
-        let blue = try Self.dataURL(.blue)
+        let red = try #require(FaviconStore.thumbnail(from: Self.png(.red, side: 32)))
+        let blue = try #require(FaviconStore.thumbnail(from: Self.png(.blue, side: 32)))
         let document = URL(string: "https://docs.example/document/d/1/edit")!
         let sheet = URL(string: "https://docs.example/spreadsheets/d/2/edit")!
 
-        await favicons.update(page: document, links: [IconLink(url: red, kind: .icon)], userAgent: nil)
+        favicons.remember(red, from: document)
         let site = try #require(favicons.image(for: URL(string: "https://docs.example/")!))
         #expect(favicons.image(for: document) === site, "まだサイトのアイコンがなければ、サイトのものとして覚える")
 
-        await favicons.update(page: sheet, links: [IconLink(url: blue, kind: .icon)], userAgent: nil)
+        favicons.remember(blue, from: sheet)
         let sheetIcon = try #require(favicons.image(for: sheet))
         #expect(sheetIcon !== site)
         #expect(favicons.image(for: URL(string: "https://docs.example/spreadsheets/d/3")!) === sheetIcon)
         #expect(favicons.image(for: document) === site)
         #expect(favicons.image(for: URL(string: "https://docs.example/presentation/d/4")!) === site, "知らない一段目はサイトのものを出す")
 
-        await favicons.update(page: sheet, links: [IconLink(url: red, kind: .icon)], userAgent: nil)
+        favicons.remember(red, from: sheet)
         #expect(favicons.image(for: sheet) === site, "サイトと同じになったら一段目の分は捨てる")
         #expect(favicons.image(for: URL(string: "https://other.example/")!) == nil)
+    }
+
+    /// `data:` で示したアイコンはページだけのもの（Notion はページごとのアイコンを描いて差し込む）。
+    /// サイトの分がまだ無いときだけ代わりに覚え、一段目の分には入れない。
+    @Test func dataIconsBelongToThePage() async throws {
+        let favicons = FaviconStore()
+        let red = try Self.dataURL(.red)
+        let blue = try Self.dataURL(.blue)
+        let first = URL(string: "https://notes.example/p/first")!
+        let second = URL(string: "https://notes.example/p/second")!
+
+        let firstIcon = try #require(await favicons.update(page: first, links: [IconLink(url: red, kind: .icon)], userAgent: nil))
+        let site = try #require(favicons.image(for: first), "サイトのアイコンがまだ無ければ、代わりに覚える")
+
+        let secondIcon = try #require(await favicons.update(page: second, links: [IconLink(url: blue, kind: .icon)], userAgent: nil))
+        #expect(secondIcon.image !== firstIcon.image)
+        #expect(favicons.image(for: second) === site, "ほかのページのアイコンで、サイトや一段目の分を書き換えない")
+
+        let again = await favicons.update(page: second, links: [IconLink(url: blue, kind: .icon)], userAgent: nil, current: secondIcon)
+        #expect(again?.image === secondIcon.image, "同じものは縮め直さない")
+        let rereadOther = await favicons.update(
+            page: second, links: [IconLink(url: URL(string: "https://notes.example/count.png")!, kind: .icon)],
+            userAgent: nil, current: secondIcon, rereading: true)
+        #expect(rereadOther == nil, "読み直しでネットの上のアイコンに替わったら、ページの分は捨てる（取りには行かない）")
+    }
+
+    /// 読み終えた後にページがアイコンと題名を書き換えたら、タブはそのアイコンを出す。サイトの分は替えない。
+    @Test func tabsFollowIconsThePageDrawsLater() async throws {
+        let pages = directory.appending(path: "drawn")
+        try FileManager.default.createDirectory(at: pages, withIntermediateDirectories: true)
+        try Self.png(.green, side: 64).write(to: pages.appending(path: "icon.png"))
+        let drawn = try Self.dataURL(.purple).absoluteString
+        let pageURL = pages.appending(path: "page.html")
+        try """
+            <title>Loading</title><link rel="icon" href="icon.png">
+            <script>
+            addEventListener('load', () => setTimeout(() => {
+                document.querySelector('link[rel=icon]').href = '\(drawn)';
+                document.title = 'Drawn';
+            }, 300));
+            </script>
+            """.write(to: pageURL, atomically: true, encoding: .utf8)
+
+        let store = TabStore(factory: PageFactory(dataStore: .nonPersistent()))
+        let tab = try #require(store.selected)
+        tab.open(pageURL.absoluteString)
+        try await waitFor { tab.pageIcon != nil }
+        let site = try #require(store.favicons.image(for: pageURL))
+        #expect(tab.favicon === tab.pageIcon?.image)
+        #expect(tab.favicon !== site)
     }
 
     /// タブで読み終えたページのアイコンを取り、保存先があれば次に作ったときも読める。
