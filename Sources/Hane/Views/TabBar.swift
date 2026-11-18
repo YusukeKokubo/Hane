@@ -99,12 +99,14 @@ private struct TabItem: View {
     @State private var isHovered = false
 
     var body: some View {
+        let title = tab.title
+        let titleEmoji = TitleEmoji(title)
         HStack(spacing: 6) {
             // 新しいタブには行き先がないので出さない。
             if tab.url != nil {
-                Favicon(image: tab.favicon)
+                Favicon(image: tab.favicon, emoji: titleEmoji?.emoji)
             }
-            Text(tab.title)
+            Text(titleEmoji?.rest ?? title)
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -153,12 +155,18 @@ struct LoadingLine: View {
 // MARK: 見た目の共通部品
 
 /// タブとブックマークの頭に出すサイトのアイコン。まだ取っていないサイトでは地球儀で場所を取っておき、題名の位置をそろえる。
+/// 題名の頭の絵文字（`TitleEmoji`）があれば、サイトのアイコンより先にそれを出す。
 struct Favicon: View {
     let image: NSImage?
+    var emoji: String?
 
     var body: some View {
         Group {
-            if let image {
+            if let emoji {
+                Text(emoji)
+                    .font(.system(size: 13))
+                    .fixedSize()
+            } else if let image {
                 Image(nsImage: image)
                     .resizable()
                     .interpolation(.high)
