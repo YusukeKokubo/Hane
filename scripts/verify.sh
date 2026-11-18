@@ -140,20 +140,19 @@ expect "設定の窓の中身も一覧に出る" 'checkbox' ui-snapshot
 expect "⌘Wで手前の設定の窓だけ閉じる" '* tab 1: Popup' key cmd+w
 expect "設定の窓が閉じている" 'tabs (left to right):' ui
 "$CTL" open "$FIXTURES/smoke.html" >/dev/null
-expect "今のタブをブックマークにする" '2 Smoke' bookmark-add --folder 試験
-expect "フォルダの中のページを選んでいる表示" '[*試験 › Smoke ▾]' ui
-expect "URLでブックマークを足す" '3 Second' bookmark-add "$FIXTURES/second.html" --name Second
-expect "ブックマークをその場で開く" '[bookmark: Second]' bookmark-open 3
-expect "ページを開いたブックマークの表示" '[*Second (open)]' ui
-"$CTL" bookmark-remove 3 >/dev/null
+expect "今のタブをブックマークにする" '1 Smoke' bookmark-add
+expect "ブックマークのページを選んでいる表示" '[*Smoke (open)]' ui
+expect "URLでブックマークを足す" '2 Second' bookmark-add "$FIXTURES/second.html" --name Second
+expect "ブックマークをその場で開く" '[bookmark: Second]' bookmark-open 2
+expect "ページを開いたブックマークの表示" '[Smoke (open)] [*Second (open)]' ui
+"$CTL" bookmark-remove 2 >/dev/null
 expect "消したブックマークのページはタブに残る" 'ブックマークのページ 1' stats
 expect "残ったページは普通のタブ" 'Second — file' tabs
-"$CTL" bookmark-add "$FIXTURES/second.html" --name 二番 --folder 試験 >/dev/null
-# ⌘1〜8 はバーの左から数える。ここではバーの1番目がフォルダ、2番目が最初の普通のタブ。
-expect "⌘1でバーの1番目のフォルダの一覧を開く" 'folder list: 試験 [>1 Smoke] [2 二番]' key cmd+1
-expect "↓で次の行を選ぶ" 'folder list: 試験 [1 Smoke] [>2 二番]' key down
-expect "Returnで選んだ行を開く" '[*試験 › 二番 ▾]' key return
-expect "⌘2でフォルダの次の最初の普通のタブ" 'window title: Second' key cmd+2
+"$CTL" bookmark-add "$FIXTURES/second.html" --name 二番 >/dev/null
+# ⌘1〜8 はバーの左から数える。ここではバーの1・2番目がブックマーク、3番目が最初の普通のタブ。
+expect "⌘2でバーの2番目のブックマークを開く" '[Smoke (open)] [*二番 (open)]' key cmd+2
+expect "⌘1でバーの1番目のブックマークへ移る" 'window title: Smoke' key cmd+1
+expect "⌘3でブックマークの次の最初の普通のタブ" 'window title: Second' key cmd+3
 expect "⌃Tabで次のタブ（最後からは最初のブックマークのページへ巡る）" 'window title: Smoke' key ctrl+tab
 expect "⌃⇧Tabで前のタブ" 'window title: Second' key ctrl+shift+tab
 "$CTL" new >/dev/null
@@ -189,20 +188,20 @@ fi
 "$CTL" close >/dev/null
 "$CTL" close >/dev/null
 "$CTL" bookmark-add "$FIXTURES/second.html" --name 三番 >/dev/null
-expect "ブックマークの右クリックのメニュー" '名前とフォルダを編集…' ui-menu bookmark:三番
-expect "メニューから編集のポップオーバーを出す" 'overlay: popover' ui-menu bookmark:三番 名前とフォルダを編集…
+expect "ブックマークの右クリックのメニュー" '名前を編集…' ui-menu bookmark:三番
+expect "メニューから編集のポップオーバーを出す" 'overlay: popover' ui-menu bookmark:三番 名前を編集…
+expect "ポップオーバーの中身も一覧に出る" 'textfield "名前" value="三番"' ui-snapshot
 "$CTL" ui-click textfield:名前 >/dev/null
 "$CTL" type --replace 四番 >/dev/null
-expect "選択欄でフォルダを選ぶ" 'chose "試験"' ui-menu 'popup:なし（いちばん上）' 試験
-expect "Returnで編集を終える" 'bookmarks bar: [試験 ▾]' key return
-expect "名前とフォルダが変わる" 'folder list: 試験 [>1 Smoke] [2 二番] [3 四番]' key cmd+1
-"$CTL" ui-menu bookmark:四番 名前とフォルダを編集… >/dev/null
-expect "一覧の行から開いた編集欄（ポップオーバーの上に重なる）も一覧に出る" 'textfield "名前" value="四番"' ui-snapshot
-"$CTL" key escape >/dev/null
-"$CTL" key escape >/dev/null
-expect "フォルダの名前を変えるアラート" 'overlay: sheet' ui-menu folder:試験 名前を変更…
-"$CTL" type --replace 検証 >/dev/null
-expect "Returnでアラートを確定する" 'bookmarks bar: [検証 ▾]' key return
+expect "Returnで編集を終えて名前が変わる" '[四番]' key return
+# アラートのシートに打って Return で確定する。空の組を出すと空のタブが一枚でき、解くとグループなしへ移るので閉じる。
+"$CTL" group-new 検証 >/dev/null
+"$CTL" group-bar 検証 on >/dev/null
+expect "組の名前を変えるアラート" 'overlay: sheet' ui-menu 検証 名前を変える…
+"$CTL" type --replace 確認 >/dev/null
+expect "Returnでアラートを確定する" 'bar: [*確認]' key return
+"$CTL" group-remove 確認 >/dev/null
+"$CTL" close >/dev/null
 frame="$("$CTL" ui | sed -n 's/^window frame: \([0-9]*\)x\([0-9]*\) .*/\1 \2/p')"
 expect "窓の大きさを変える" 'window frame: 700x500' window-size 700 500
 "$CTL" window-size $frame >/dev/null

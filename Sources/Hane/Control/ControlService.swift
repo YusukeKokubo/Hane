@@ -444,25 +444,23 @@ final class ControlService {
 
         case "bookmark-add":
             let name = try takeOption("--name", from: &args)
-            let folderName = try takeOption("--folder", from: &args)
             let store = try store
-            let folderID = folderName.map { store.bookmarks.folder(named: $0)?.id ?? store.bookmarks.addFolder(named: $0).id }
             if args.isEmpty {
                 let tab = try target(options)
                 guard store.bookmarkID(of: tab) == nil else { throw ControlError("このタブはすでにブックマークのページ。") }
-                guard store.pin(tab.id, title: name, folder: folderID) != nil else {
+                guard store.pin(tab.id, title: name) != nil else {
                     throw ControlError("このタブにはまだページがない。")
                 }
             } else {
                 let url = try url(from: args)
-                store.bookmarks.add(title: name ?? "", url: url, folder: folderID)
+                store.bookmarks.add(title: name ?? "", url: url)
             }
             return try state.bookmarks(of: self.store)
 
         case "bookmark-open":
             let store = try store
             let id = try bookmarkID(try argument(args, 0, "ブックマークの番号"), in: store)
-            guard let tab = store.activate(bookmark: id) else { throw ControlError("フォルダは開けない。中のブックマークの番号を指定すること。") }
+            guard let tab = store.activate(bookmark: id) else { throw ControlError("ブックマークを開けなかった。") }
             return try await pages.settled(tab)
 
         case "bookmark-remove":
@@ -479,7 +477,7 @@ final class ControlService {
         }
     }
 
-    /// `bookmarks` の一覧に出る番号を、ブックマークかフォルダのIDに引き直す。
+    /// `bookmarks` の一覧に出る番号を、ブックマークのIDに引き直す。
     private func bookmarkID(_ text: String, in store: TabStore) throws -> UUID {
         try StateText.bookmarkID(try integer(text, "ブックマークの番号"), in: store)
     }

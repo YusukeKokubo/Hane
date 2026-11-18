@@ -132,7 +132,7 @@ private struct TabItem: View {
         .onHover { isHovered = $0 }
         .help(tab.url?.absoluteString ?? tab.title)
         .draggable(BarDragItem.tab(tab.id))
-        // タブとブックマークとフォルダを、VoiceOver や hanectl の ui-snapshot から見分けられるようにする。
+        // タブとブックマークを、VoiceOver や hanectl の ui-snapshot から見分けられるようにする。
         .accessibilityElement(children: .contain)
         .accessibilityLabel(tab.title)
         .accessibilityIdentifier("tab")
@@ -201,31 +201,23 @@ extension View {
         return background(Color.primary.opacity(opacity), in: .rect(cornerRadius: 6))
     }
 
-    /// バーの項目を落とし先にする。重なっている間だけ目印を出す。
-    func barDropTarget(_ marker: BarDropMarker, perform: @escaping (BarDragItem) -> Void) -> some View {
-        modifier(BarDropTarget(marker: marker, perform: perform))
+    /// バーの項目を落とし先にする。重なっている間だけ、項目の手前に縦線を出す（その前に入る）。
+    func barDropTarget(perform: @escaping (BarDragItem) -> Void) -> some View {
+        modifier(BarDropTarget(perform: perform))
     }
 }
 
-enum BarDropMarker {
-    /// 項目の手前に縦線を出す（その前に入る）。
-    case leading
-    /// 項目の上に横線を出す（縦に並ぶ一覧で、その上に入る）。
-    case top
-    /// 項目全体を囲む（その中に入る）。
-    case highlight
-}
-
 private struct BarDropTarget: ViewModifier {
-    let marker: BarDropMarker
     let perform: (BarDragItem) -> Void
 
     @State private var isTargeted = false
 
     func body(content: Content) -> some View {
         content
-            .overlay(alignment: alignment) {
-                if isTargeted { markerView }
+            .overlay(alignment: .leading) {
+                if isTargeted {
+                    Capsule().fill(.tint).frame(width: 2).padding(.vertical, 1).offset(x: -3)
+                }
             }
             .dropDestination(for: BarDragItem.self) { items, _ in
                 isTargeted = false
@@ -237,25 +229,6 @@ private struct BarDropTarget: ViewModifier {
                 default: isTargeted = false
                 }
             }
-    }
-
-    private var alignment: Alignment {
-        switch marker {
-        case .leading: .leading
-        case .top: .top
-        case .highlight: .center
-        }
-    }
-
-    @ViewBuilder private var markerView: some View {
-        switch marker {
-        case .leading:
-            Capsule().fill(.tint).frame(width: 2).padding(.vertical, 1).offset(x: -3)
-        case .top:
-            Capsule().fill(.tint).frame(height: 2).offset(y: -2)
-        case .highlight:
-            RoundedRectangle(cornerRadius: 6).strokeBorder(.tint, lineWidth: 2)
-        }
     }
 }
 

@@ -18,59 +18,33 @@ import WebKit
         #expect(store.bookmark(matching: c) == nil)
     }
 
-    @Test func movesIntoFolderAndReorders() {
+    @Test func reordersAndRemoves() {
         let store = BookmarkStore()
         let first = store.add(title: "A", url: a)
         let second = store.add(title: "B", url: b)
-        let folder = store.addFolder(named: "仕事")
+        let third = store.add(title: "C", url: c, before: second.id)
+        #expect(store.bookmarks.map(\.id) == [first.id, third.id, second.id])
 
-        store.move(first.id, into: folder.id)
-        #expect(store.folderID(containing: first.id) == folder.id)
-        #expect(store.items.map(\.id) == [second.id, folder.id])
+        store.move(first.id)
+        #expect(store.bookmarks.map(\.id) == [third.id, second.id, first.id], "目印を省くと末尾へ")
+        store.move(first.id, before: third.id)
+        #expect(store.bookmarks.map(\.id) == [first.id, third.id, second.id])
 
-        // フォルダの中の項目を目印にすると、一段目ではそのフォルダの前に入る。
-        let third = store.add(title: "C", url: c, before: first.id)
-        #expect(store.items.map(\.id) == [second.id, third.id, folder.id])
-
-        store.move(third.id, into: folder.id, before: first.id)
-        #expect(store.folder(folder.id)?.bookmarks.map(\.id) == [third.id, first.id])
-        #expect(store.allBookmarks.map(\.id) == [second.id, third.id, first.id])
-    }
-
-    @Test func foldersStayOneLevelDeep() {
-        let store = BookmarkStore()
-        let outer = store.addFolder(named: "外")
-        let inner = store.addFolder(named: "中")
-
-        store.move(inner.id, into: outer.id, before: outer.id)
-        #expect(store.folders.map(\.id) == [inner.id, outer.id])
-        #expect(store.folder(outer.id)?.bookmarks.isEmpty == true)
-    }
-
-    @Test func removingFolderRemovesItsBookmarks() {
-        let store = BookmarkStore()
-        let folder = store.addFolder(named: "仕事")
-        let inside = store.add(title: "A", url: a, folder: folder.id)
-        let outside = store.add(title: "B", url: b)
-
-        #expect(store.remove(folder.id) == [inside.id])
-        #expect(store.items.map(\.id) == [outside.id])
-        #expect(store.remove(UUID()).isEmpty)
+        #expect(store.remove(third.id))
+        #expect(!store.remove(UUID()))
+        #expect(store.bookmarks.map(\.id) == [first.id, second.id])
     }
 
     @Test func renamesAndRepoints() {
         let store = BookmarkStore()
-        let folder = store.addFolder(named: "仕事")
-        let bookmark = store.add(title: "A", url: a, folder: folder.id)
+        let bookmark = store.add(title: "A", url: a)
 
         store.rename(bookmark.id, to: "新しい名前")
-        store.rename(folder.id, to: "趣味")
-        store.rename(folder.id, to: "   ")
+        store.rename(bookmark.id, to: "   ")
         store.setURL(bookmark.id, to: b)
 
-        #expect(store.bookmark(bookmark.id)?.title == "新しい名前")
+        #expect(store.bookmark(bookmark.id)?.title == "新しい名前", "空の名前は受け付けない")
         #expect(store.bookmark(bookmark.id)?.url == b)
-        #expect(store.folder(folder.id)?.name == "趣味", "空の名前は受け付けない")
     }
 
     @Test func persistsAcrossLaunches() throws {
@@ -78,12 +52,35 @@ import WebKit
         defer { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
 
         let saved = BookmarkStore(fileURL: file)
-        let folder = saved.addFolder(named: "仕事")
-        saved.add(title: "A", url: a, folder: folder.id)
+        saved.add(title: "A", url: a)
         saved.add(title: "B", url: b)
 
         let loaded = BookmarkStore(fileURL: file)
-        #expect(loaded.items == saved.items)
+        #expect(loaded.bookmarks == saved.bookmarks)
+    }
+
+    /// フォルダを持てた版 1 のファイルは、フォルダの中身をフォルダの位置へ並べて読む。
+    @Test func readsFoldersOfOldFilesInPlace() throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: "bookmarks-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let file = directory.appending(path: "bookmarks.json")
+        func entry(_ title: String, _ url: URL) -> String {
+            #"{"id": "\#(UUID().uuidString)", "title": "\#(title)", "url": "\#(url.absoluteString)"}"#
+        }
+        let old = """
+        {"version": 1, "items": [
+          {"bookmark": \(entry("A", a))},
+          {"folder": {"id": "\(UUID().uuidString)", "name": "仕事", "bookmarks": [\(entry("B", b)), \(entry("C", c))]}}
+        ]}
+        """
+        try Data(old.utf8).write(to: file)
+
+        let store = BookmarkStore(fileURL: file)
+        #expect(store.bookmarks.map(\.title) == ["A", "B", "C"])
+
+        store.rename(store.bookmarks[0].id, to: "A2")
+        #expect(BookmarkStore(fileURL: file).bookmarks.map(\.title) == ["A2", "B", "C"], "書き戻すと新しい形になる")
     }
 
     @Test func setsBrokenFileAsideInsteadOfOverwriting() throws {
@@ -94,7 +91,7 @@ import WebKit
         try Data("not json".utf8).write(to: file)
 
         let store = BookmarkStore(fileURL: file)
-        #expect(store.items.isEmpty)
+        #expect(store.bookmarks.isEmpty)
         let names = try FileManager.default.contentsOfDirectory(atPath: directory.path(percentEncoded: false))
         #expect(names.contains { $0.hasPrefix("bookmarks.broken-") })
     }
@@ -155,21 +152,19 @@ import WebKit
         tab.load(URLRequest(url: blank))
         try await waitForURL(tab)
 
-        let folder = store.bookmarks.addFolder(named: "仕事")
-        let bookmark = try #require(store.pin(tab.id, title: "空", folder: folder.id))
+        let bookmark = try #require(store.pin(tab.id, title: "空"))
         #expect(store.tabs.isEmpty)
         #expect(store.bookmarkTabs[bookmark.id]?.id == tab.id, "ページはそのまま引き継ぐ")
         #expect(store.bookmarkID(of: tab) == bookmark.id)
-        #expect(store.bookmarks.folderID(containing: bookmark.id) == folder.id)
+        #expect(store.bookmarks.bookmark(bookmark.id)?.title == "空")
         #expect(store.selectedID == tab.id)
     }
 
     @Test func removingBookmarkKeepsPageAsTab() throws {
-        let folder = store.bookmarks.addFolder(named: "仕事")
-        let bookmark = store.bookmarks.add(title: "A", url: blank, folder: folder.id)
+        let bookmark = store.bookmarks.add(title: "A", url: blank)
         let tab = try #require(store.activate(bookmark: bookmark.id))
 
-        store.removeBookmark(folder.id)
+        store.removeBookmark(bookmark.id)
         #expect(store.bookmarkTabs.isEmpty)
         #expect(store.tabs.last?.id == tab.id)
         #expect(store.bookmarkID(of: tab) == nil)
@@ -178,20 +173,20 @@ import WebKit
 
     @Test func dropReordersAndPins() async throws {
         let first = store.bookmarks.add(title: "A", url: blank)
-        let folder = store.bookmarks.addFolder(named: "仕事")
+        let second = store.bookmarks.add(title: "B", url: blank)
         let tab = store.tabs[0]
         tab.load(URLRequest(url: blank))
         try await waitForURL(tab)
 
-        store.drop(.tab(tab.id), into: nil, before: first.id)
+        store.drop(.tab(tab.id), before: first.id)
         let pinned = try #require(store.bookmarkID(of: tab))
-        #expect(store.bookmarks.items.map(\.id) == [pinned, first.id, folder.id])
+        #expect(store.bookmarks.bookmarks.map(\.id) == [pinned, first.id, second.id])
 
-        store.drop(.bookmark(first.id), into: folder.id, before: nil)
-        #expect(store.bookmarks.folderID(containing: first.id) == folder.id)
+        store.drop(.bookmark(pinned), before: nil)
+        #expect(store.bookmarks.bookmarks.map(\.id) == [first.id, second.id, pinned])
 
-        store.drop(.bookmark(folder.id), into: nil, before: pinned)
-        #expect(store.bookmarks.items.map(\.id) == [folder.id, pinned])
+        store.drop(.bookmark(second.id), before: first.id)
+        #expect(store.bookmarks.bookmarks.map(\.id) == [second.id, first.id, pinned])
     }
 
     @Test func tracksPagesThatWanderedAway() async throws {

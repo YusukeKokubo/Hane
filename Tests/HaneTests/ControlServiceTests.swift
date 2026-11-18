@@ -164,25 +164,23 @@ import WebKit
         #expect(await run("ui").output.contains("bookmarks bar: (なし)"))
 
         try await open(html: "<title>Pinned</title>")
-        var response = await run("bookmark-add", "--folder", "仕事")
+        var response = await run("bookmark-add")
         #expect(response.ok, "\(response.output)")
-        #expect(response.output.contains("  1 仕事/"))
-        #expect(response.output.contains("*   2 Pinned"))
+        #expect(response.output.contains("* 1 Pinned"))
         #expect(store.tabs.isEmpty, "今のタブはブックマークの側へ移る")
         #expect(await !run("bookmark-add").ok, "ブックマークのページは重ねて登録できない")
 
         response = await run("bookmark-add", "about:blank", "--name", "Blank")
-        #expect(response.output.contains("  3 Blank — about:blank"))
-        #expect(!response.output.contains("3 Blank — about:blank (open"), "URLで足しただけではページを開かない")
+        #expect(response.output.contains("  2 Blank — about:blank"))
+        #expect(!response.output.contains("2 Blank — about:blank (open"), "URLで足しただけではページを開かない")
 
         response = await run("ui")
-        #expect(response.output.contains("bookmarks bar: [*仕事 › Pinned ▾] [Blank]"))
+        #expect(response.output.contains("bookmarks bar: [*Pinned (open)] [Blank]"))
 
-        response = await run("bookmark-open", "3")
+        response = await run("bookmark-open", "2")
         #expect(response.ok, "\(response.output)")
         #expect(response.output.contains("[bookmark: Blank]"))
-        #expect(await run("ui").output.contains("[仕事 ▾] [*Blank (open)]"))
-        #expect(await !run("bookmark-open", "1").ok, "フォルダは開けない")
+        #expect(await run("ui").output.contains("[Pinned (open)] [*Blank (open)]"))
         #expect(await !run("bookmark-open", "9").ok)
 
         response = await run("bookmark-remove", "1")
@@ -190,17 +188,7 @@ import WebKit
         #expect(store.tabs.map(\.title) == ["Pinned"], "消したブックマークのページはタブに残る")
     }
 
-    /// フォルダの一覧が出ているあいだ、ui に行と選択の当たりが出ること。
-    @Test func folderListInUI() async {
-        let folder = store.bookmarks.addFolder(named: "仕事")
-        store.bookmarks.add(title: "A", url: URL(string: "about:blank")!, folder: folder.id)
-        store.bookmarks.add(title: "B", url: URL(string: "about:blank")!, folder: folder.id)
-        #expect(await !run("ui").output.contains("folder list"))
-
-        store.toggleFolder(folder.id)
-        store.moveFolderHighlight(by: 1)
-        #expect(await run("ui").output.contains("folder list: 仕事 [1 A] [>2 B]"))
-
+    @Test func rejectsUnknownKeys() async {
         #expect(await !run("key").ok)
         #expect(await !run("key", "f13").ok)
         #expect(await !run("key", "hyper+1").ok)

@@ -106,13 +106,6 @@ final class StateText {
             lines.append("group: " + (store.currentGroup?.name ?? "(グループなし)")
                 + (bar.isEmpty ? "" : "  bar: " + bar.joined(separator: " ")))
         }
-        if let open = store.openFolder, let folder = store.bookmarks.folder(open.id) {
-            // 選択の当たっている行に > を付ける。番号は数字キーで開くときのもの。
-            let rows = folder.bookmarks.enumerated().map { index, bookmark in
-                "[" + (index == open.highlighted ? ">" : "") + "\(index + 1) \(bookmark.title)]"
-            }
-            lines.append("folder list: \(folder.name) " + (rows.isEmpty ? "(空)" : rows.joined(separator: " ")))
-        }
         for (_, kind) in WindowElements.windows(main: model.currentWindow).dropFirst() {
             lines.append("overlay: \(kind)（中身は ui-snapshot）")
         }
@@ -135,18 +128,11 @@ final class StateText {
     /// バーの左側を、画面に出ている文字のとおりに一行で表す。
     /// 選ばれている項目には *、ページを開いている項目には (open) を付ける。
     private func bookmarkBar(of store: TabStore) -> String {
-        guard !store.bookmarks.items.isEmpty else { return "(なし)" }
-        return store.bookmarks.items.map { item in
-            switch item {
-            case .bookmark(let bookmark):
-                let tab = store.bookmarkTabs[bookmark.id]
-                let label = store.awayTitle(for: bookmark).map { "\(bookmark.title) / \($0)" } ?? bookmark.title
-                return "[" + mark(tab) + label + (tab != nil ? " (open)" : "") + "]"
-            case .folder(let folder):
-                let selected = folder.bookmarks.first { store.bookmarkTabs[$0.id]?.id == store.selectedID }
-                let label = selected.map { "\(folder.name) › \(store.awayTitle(for: $0) ?? $0.title)" } ?? folder.name
-                return "[" + (selected != nil ? "*" : "") + label + " ▾]"
-            }
+        guard !store.bookmarks.bookmarks.isEmpty else { return "(なし)" }
+        return store.bookmarks.bookmarks.map { bookmark in
+            let tab = store.bookmarkTabs[bookmark.id]
+            let label = store.awayTitle(for: bookmark).map { "\(bookmark.title) / \($0)" } ?? bookmark.title
+            return "[" + mark(tab) + label + (tab != nil ? " (open)" : "") + "]"
         }.joined(separator: " ")
     }
 
@@ -173,41 +159,23 @@ final class StateText {
 
     // MARK: ブックマーク
 
-    /// ブックマークを番号つきで一覧する。番号はフォルダも含めた上からの通し番号。
+    /// ブックマークを番号つきで一覧する。番号はバーの左からの通し番号。
     func bookmarks(of store: TabStore) -> String {
-        var lines: [String] = []
-        var number = 0
-        func line(_ bookmark: Bookmark, indent: String) -> String {
-            number += 1
+        let lines = store.bookmarks.bookmarks.enumerated().map { index, bookmark in
             let tab = store.bookmarkTabs[bookmark.id]
             let open = tab.map { " (open: tab \($0.number))" } ?? ""
-            return "\(mark(tab).isEmpty ? " " : "*") \(indent)\(number) \(bookmark.title) — \(bookmark.url.absoluteString)\(open)"
-        }
-        for item in store.bookmarks.items {
-            switch item {
-            case .bookmark(let bookmark):
-                lines.append(line(bookmark, indent: ""))
-            case .folder(let folder):
-                number += 1
-                lines.append("  \(number) \(folder.name)/")
-                lines.append(contentsOf: folder.bookmarks.map { line($0, indent: "  ") })
-            }
+            return "\(mark(tab).isEmpty ? " " : "*") \(index + 1) \(bookmark.title) — \(bookmark.url.absoluteString)\(open)"
         }
         return lines.isEmpty ? "（ブックマークなし）" : lines.joined(separator: "\n")
     }
 
-    /// `bookmarks` の一覧に出る番号を、ブックマークかフォルダのIDに引き直す。
+    /// `bookmarks` の一覧に出る番号を、ブックマークのIDに引き直す。
     static func bookmarkID(_ number: Int, in store: TabStore) throws -> UUID {
-        let ids = store.bookmarks.items.flatMap { item -> [UUID] in
-            switch item {
-            case .bookmark(let bookmark): [bookmark.id]
-            case .folder(let folder): [folder.id] + folder.bookmarks.map(\.id)
-            }
-        }
-        guard ids.indices.contains(number - 1) else {
+        let bookmarks = store.bookmarks.bookmarks
+        guard bookmarks.indices.contains(number - 1) else {
             throw ControlError("ブックマーク \(number) はない。`bookmarks` で一覧を見ること。")
         }
-        return ids[number - 1]
+        return bookmarks[number - 1].id
     }
 
     private func mark(_ tab: Tab?) -> String {

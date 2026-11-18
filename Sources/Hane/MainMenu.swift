@@ -142,7 +142,7 @@ final class MainMenu: NSObject, NSMenuItemValidation, NSMenuDelegate {
         // 本物の ⌃⇧Tab は文字が backtab になって届くので、その形でも受ける。
         menu.addItem(hidden(item("前のタブ", #selector(previousTab), "\u{19}", [.control, .shift])))
         menu.addItem(.separator())
-        // バーに見えている並びのまま、左から数える。ブックマークとフォルダもタブと同じ一列の項目として扱う。
+        // バーに見えている並びのまま、左から数える。ブックマークもタブと同じ一列の項目として扱う。
         for number in 1...9 {
             let entry = item(number == 9 ? "最後のタブ" : "バーの左から \(number) 番目", #selector(activateBarItem), "\(number)")
             entry.tag = number
@@ -210,31 +210,15 @@ final class MainMenu: NSObject, NSMenuItemValidation, NSMenuDelegate {
         menu.removeAllItems()
         // 題名は validateMenuItem。
         menu.addItem(item("ブックマークを追加…", #selector(editBookmark), "d"))
-        let items = store?.bookmarks.items ?? []
-        if !items.isEmpty {
+        let bookmarks = store?.bookmarks.bookmarks ?? []
+        if !bookmarks.isEmpty {
             menu.addItem(.separator())
         }
-        for entry in items {
-            switch entry {
-            case .bookmark(let bookmark):
-                menu.addItem(bookmarkItem(bookmark))
-            case .folder(let folder):
-                let folderMenu = NSMenu(title: folder.name)
-                for bookmark in folder.bookmarks {
-                    folderMenu.addItem(bookmarkItem(bookmark))
-                }
-                let folderItem = NSMenuItem(title: folder.name, action: nil, keyEquivalent: "")
-                folderItem.image = NSImage(systemSymbolName: "folder", accessibilityDescription: nil)
-                folderItem.submenu = folderMenu
-                menu.addItem(folderItem)
-            }
+        for bookmark in bookmarks {
+            let entry = item(bookmark.title, #selector(openBookmark(_:)))
+            entry.representedObject = bookmark.id
+            menu.addItem(entry)
         }
-    }
-
-    private func bookmarkItem(_ bookmark: Bookmark) -> NSMenuItem {
-        let entry = item(bookmark.title, #selector(openBookmark(_:)))
-        entry.representedObject = bookmark.id
-        return entry
     }
 
     /// プロファイルの一覧が変わったら作り直す。

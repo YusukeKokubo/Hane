@@ -56,8 +56,6 @@ final class TabStore: TabOpening {
     private(set) var pageFocusRequest = 0
     /// 選択中のページについて、ブックマークの追加・編集画面を開いてほしいときに増やす合図。
     private(set) var bookmarkEditorRequest = 0
-    /// 一覧を下に出しているフォルダ。キーボードからも開け閉めするので、画面ではなくここで持つ。
-    private(set) var openFolder: OpenFolder?
     /// 閉じたページの控え。新しく閉じたものが後ろ。⇧⌘T で後ろから開き直す。
     /// 控えには戻る・進むの履歴も入るので、数を `BrowserSettings.closedTabLimit` で区切る。ファイルには残さない。
     private(set) var closedTabs: [ClosedTab] = []
@@ -109,12 +107,12 @@ final class TabStore: TabOpening {
 
     /// バーに見える順のすべてのページ。ブックマークのページが先、普通のタブが後。
     var allTabs: [Tab] {
-        bookmarks.allBookmarks.compactMap { bookmarkTabs[$0.id] } + tabs
+        bookmarks.bookmarks.compactMap { bookmarkTabs[$0.id] } + tabs
     }
 
     /// 出していない組のタブも含めた、すべてのページ。ブックマークのページ、組に入っていないタブ、組の並び順。
     var everyTab: [Tab] {
-        bookmarks.allBookmarks.compactMap { bookmarkTabs[$0.id] } + groupKeys.flatMap(tabs(in:))
+        bookmarks.bookmarks.compactMap { bookmarkTabs[$0.id] } + groupKeys.flatMap(tabs(in:))
     }
 
     /// 組に入っていないタブ（`nil`）と、組の並び。
@@ -306,22 +304,19 @@ final class TabStore: TabOpening {
         selectedID = all[next].id
     }
 
-    /// バーの左から N 番目（1始まり）の項目を使う。ブックマークは開き、フォルダは一覧を開け閉めし、タブは選ぶ。
-    /// 9 は常に最後の普通のタブ。番号を見た目の並びと合わせるため、ブックマークとフォルダもタブと同じに数える。
+    /// バーの左から N 番目（1始まり）の項目を使う。ブックマークは開き、タブは選ぶ。
+    /// 9 は常に最後の普通のタブ。番号を見た目の並びと合わせるため、ブックマークもタブと同じに数える。
     func activateBarItem(number: Int) {
         if number == 9 {
             if let last = tabs.last { selectedID = last.id }
             return
         }
-        let items = bookmarks.items
-        if items.indices.contains(number - 1) {
-            switch items[number - 1] {
-            case .bookmark(let bookmark): activate(bookmark: bookmark.id)
-            case .folder(let folder): toggleFolder(folder.id)
-            }
+        let pinned = bookmarks.bookmarks
+        if pinned.indices.contains(number - 1) {
+            activate(bookmark: pinned[number - 1].id)
             return
         }
-        let index = number - 1 - items.count
+        let index = number - 1 - pinned.count
         guard tabs.indices.contains(index) else { return }
         selectedID = tabs[index].id
     }
@@ -357,33 +352,25 @@ final class TabStore: TabOpening {
 
     /// 普通のタブをブックマークにして、ページごとブックマークの側へ移す。
     @discardableResult
-    func pin(_ tabID: Tab.ID, title: String? = nil, folder: UUID? = nil, before anchor: UUID? = nil) -> Bookmark? {
+    func pin(_ tabID: Tab.ID, title: String? = nil, before anchor: UUID? = nil) -> Bookmark? {
         guard let index = tabs.firstIndex(where: { $0.id == tabID }), let url = tabs[index].url else { return nil }
         let tab = tabs.remove(at: index)
-        let bookmark = bookmarks.add(title: title ?? tab.title, url: url, folder: folder, before: anchor)
+        let bookmark = bookmarks.add(title: title ?? tab.title, url: url, before: anchor)
         bookmarkTabs[bookmark.id] = tab
         return bookmark
     }
 
-    /// ブックマークかフォルダを消す。開いていたページは普通のタブとして残す。
+    /// ブックマークを消す。開いていたページは普通のタブとして残す。
     func removeBookmark(_ id: UUID) {
-        if openFolder?.id == id { openFolder = nil }
-        for removed in bookmarks.remove(id) {
-            guard let tab = bookmarkTabs.removeValue(forKey: removed) else { continue }
-            tabs.append(tab)
-        }
+        guard bookmarks.remove(id), let tab = bookmarkTabs.removeValue(forKey: id) else { return }
+        tabs.append(tab)
     }
 
     /// バーへのドロップを、ブックマークの移動か、タブのブックマーク化に置き換える。
-    func drop(_ item: BarDragItem, into folder: UUID?, before anchor: UUID?) {
+    func drop(_ item: BarDragItem, before anchor: UUID?) {
         switch item {
-        case .tab(let id):
-            pin(id, folder: folder, before: anchor)
-        case .bookmark(let id) where bookmarks.folder(id) != nil:
-            // フォルダはフォルダに入れられないので、落とされた場所の前に置く。
-            bookmarks.move(id, into: nil, before: anchor ?? folder)
-        case .bookmark(let id):
-            bookmarks.move(id, into: folder, before: anchor)
+        case .tab(let id): pin(id, before: anchor)
+        case .bookmark(let id): bookmarks.move(id, before: anchor)
         }
     }
 
@@ -418,46 +405,6 @@ final class TabStore: TabOpening {
         return tab.title
     }
 
-    // MARK: フォルダの一覧
-
-    /// バーで左から数えて N 番目のフォルダの一覧を開け閉めする。ブックマーク単体は数えない。
-    func toggleFolder(_ id: UUID) {
-        if openFolder?.id == id {
-            openFolder = nil
-            return
-        }
-        guard let folder = bookmarks.folder(id) else { return }
-        // 中のページを見ているなら、その行から選び始める。
-        let current = folder.bookmarks.firstIndex { bookmarkTabs[$0.id]?.id == selectedID }
-        openFolder = OpenFolder(id: id, highlighted: current ?? 0)
-    }
-
-    /// 一覧を閉じる。別のフォルダへ切り替えた直後に古い一覧の閉じる知らせが来ても、新しい方は閉じない。
-    func closeFolder(_ id: UUID? = nil) {
-        guard openFolder != nil, id == nil || openFolder?.id == id else { return }
-        openFolder = nil
-    }
-
-    /// 選択の当たっている行を動かす。端で止める。
-    func moveFolderHighlight(by offset: Int) {
-        guard let open = openFolder, let count = bookmarks.folder(open.id)?.bookmarks.count, count > 0 else { return }
-        openFolder?.highlighted = min(max(open.highlighted + offset, 0), count - 1)
-    }
-
-    func highlightFolderRow(_ index: Int) {
-        openFolder?.highlighted = index
-    }
-
-    /// 一覧の行（省けば選択の当たっている行）のブックマークを開いて、一覧を閉じる。
-    @discardableResult
-    func activateFolderRow(_ index: Int? = nil) -> Tab? {
-        guard let open = openFolder, let rows = bookmarks.folder(open.id)?.bookmarks else { return nil }
-        let row = index ?? open.highlighted
-        guard rows.indices.contains(row) else { return nil }
-        openFolder = nil
-        return activate(bookmark: rows[row].id)
-    }
-
     struct ClosedTab {
         /// ブックマークのページなら、控えの `bookmark` にそのブックマークが入る。
         let page: SavedPage
@@ -465,12 +412,6 @@ final class TabStore: TabOpening {
         let index: Int?
         /// 普通のタブだったときに入っていた組。
         var group: UUID?
-    }
-
-    struct OpenFolder: Equatable {
-        let id: UUID
-        /// キーボードの選択が当たっている行。0始まり。
-        var highlighted: Int
     }
 
     struct AddressBarState {
@@ -609,7 +550,7 @@ final class TabStore: TabOpening {
             if tab.id == selectedID { snapshot.selected = snapshot.pages.count }
             snapshot.pages.append(page)
         }
-        for bookmark in bookmarks.allBookmarks {
+        for bookmark in bookmarks.bookmarks {
             if let tab = bookmarkTabs[bookmark.id] { add(tab, bookmark: bookmark.id) }
         }
         for key in groupKeys {
@@ -661,7 +602,6 @@ final class TabStore: TabOpening {
         bookmarkTabs = [:]
         groupNaming = nil
         closedTabs = []
-        openFolder = nil
         selectedID = nil
     }
 

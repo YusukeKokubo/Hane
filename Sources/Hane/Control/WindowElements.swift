@@ -52,7 +52,7 @@ final class WindowElements {
     ]
 
     /// 画面の側でアクセシビリティの識別子を付けた、バーの項目のまとまり。中の部品ではなく項目ごと一行に出す。
-    private static let itemKinds: Set<String> = ["tab", "bookmark", "folder"]
+    private static let itemKinds: Set<String> = ["tab", "bookmark"]
 
     // MARK: 一覧
 
@@ -107,7 +107,7 @@ final class WindowElements {
             ?? visible.first(where: \.canBecomeMain)
         else { return [] }
         var result: [(NSWindow, String)] = [(main, "window")]
-        // フォルダの一覧から開く編集欄のように、ポップオーバーの上に重なるものは孫の窓になる。
+        // ポップオーバーの上にさらに重なるものは孫の窓になる。
         func appendChildren(of window: NSWindow) {
             for child in window.childWindows ?? [] where child.isVisible {
                 result.append((child, String(describing: type(of: child)).contains("Popover") ? "popover" : "child window"))
