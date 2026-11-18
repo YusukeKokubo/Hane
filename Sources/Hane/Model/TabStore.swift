@@ -267,6 +267,16 @@ final class TabStore: TabOpening {
         if !close(tab.id) { newTab() }
     }
 
+    /// ブックマークのページが、ブックマークのアドレスのまま示したアイコンだけを覚える。
+    /// ページがほかへ移った先のアイコンで、ブックマークのアイコンを替えないため。
+    func pageIconChanged(in tab: Tab) {
+        guard let id = bookmarkTabs.first(where: { $0.value === tab })?.key,
+              let bookmark = bookmarks.bookmark(id),
+              tab.url.map({ $0.isSameDestination(as: bookmark.url) }) ?? false
+        else { return }
+        favicons.rememberPageIcon(tab.pageIcon, for: bookmark.url)
+    }
+
     func perform(_ command: KeyCommand, from tab: Tab) {
         guard !isShutDown, everyTab.contains(where: { $0 === tab }) else { return }
         switch command {
@@ -388,6 +398,8 @@ final class TabStore: TabOpening {
         let tab = tabs.remove(at: index)
         let bookmark = bookmarks.add(title: title ?? tab.title, url: url, group: group, before: anchor)
         bookmarkTabs[bookmark.id] = tab
+        // ページがもう示しているアイコンは、次に読み直すのを待たずに覚える。
+        if let icon = tab.pageIcon { favicons.rememberPageIcon(icon, for: url) }
         return bookmark
     }
 
@@ -402,6 +414,9 @@ final class TabStore: TabOpening {
     /// `opening` なら、ページを開いていなくても普通のタブとして裏で開く（タブの並びへドラッグしたとき）。
     func removeBookmark(_ id: UUID, before anchor: Tab.ID? = nil, opening: Bool = false) {
         guard let bookmark = bookmarks.bookmark(id), bookmarks.remove(id) else { return }
+        if !bookmarks.bookmarks.contains(where: { $0.url.isSameDestination(as: bookmark.url) }) {
+            favicons.rememberPageIcon(nil, for: bookmark.url)
+        }
         var tab = bookmarkTabs.removeValue(forKey: id)
         if tab == nil, opening {
             let opened = makeTab()

@@ -26,6 +26,8 @@ struct PageIcon {
     /// 示された `data:` のアドレス。同じものを縮め直さないために持つ。
     let source: URL
     let image: NSImage
+    /// 縮めた PNG。ブックマークのページのアイコンとして覚えるときに書く。
+    let png: Data
 }
 
 /// サイトのアイコン（favicon）。タブとブックマークの頭に出す。プロファイルごとに一つ。
@@ -111,6 +113,27 @@ final class FaviconStore {
         return slot(keys.site).image
     }
 
+    // MARK: ブックマークのページのアイコン
+
+    /// ブックマークしたページが自分だけのものとして示したアイコン（`PageIcon`）。覚えていなければ `nil`。
+    /// サイトのアイコンと違い、ページ（ホストとパス）ごとに覚える。訪れたページごとに覚えるとファイルが増え続けるので、
+    /// ブックマークのページだけにする。
+    func pageImage(for url: URL) -> NSImage? {
+        Self.pageKey(for: url).flatMap { slot($0).image }
+    }
+
+    /// ブックマークのページのアイコンを覚える。`nil` なら忘れる。
+    func rememberPageIcon(_ icon: PageIcon?, for url: URL) {
+        guard let key = Self.pageKey(for: url) else { return }
+        store(icon?.png, in: slot(key), key: key)
+    }
+
+    /// 問い合わせや断片は同じページの別の見え方として扱い、キーに入れない。
+    private static func pageKey(for url: URL) -> String? {
+        guard let keys = keys(for: url) else { return nil }
+        return "page:" + keys.site + url.path(percentEncoded: true)
+    }
+
     // MARK: 取りに行く
 
     /// ページから候補を読んで取りに行く。ページが `data:` で示したアイコンは、そのページだけのものとして返す。
@@ -137,7 +160,7 @@ final class FaviconStore {
             guard let png = await Self.fetch(icon, userAgent: nil), let image = Self.image(fromPNG: png) else { return nil }
             let site = slot(keys.site)
             if site.png == nil { store(png, in: site, key: keys.site) }
-            return PageIcon(source: icon, image: image)
+            return PageIcon(source: icon, image: image, png: png)
         }
         guard !rereading else { return nil }
         let requestKey = keys.section ?? keys.site

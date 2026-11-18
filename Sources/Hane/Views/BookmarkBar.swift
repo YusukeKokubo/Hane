@@ -42,7 +42,11 @@ private struct BookmarkChip: View {
         // 普通のタブと同じく、名前の頭の絵文字をアイコンの場所に出す。Notion のようにページごとの絵文字を
         // 題名の頭に付けるサイトでは、サイトのアイコンだけだとどれも同じに見えるため。
         // ページを開いていても名前の方を見るのは、ページがほかへ移っても固定が何かを見失わないため。
-        Favicon(image: store.favicons.image(for: bookmark.url), emoji: TitleEmoji(bookmark.title)?.emoji)
+        // ページが自分だけのアイコンを示していれば（Notion のページごとのアイコン）、サイトのアイコンより先に出す。
+        // 開いていなくても出せるよう、ブックマークのページのものは覚えておく（`FaviconStore.pageImage`）。
+        let pageIcon = awayTitle == nil && tab?.hasContent == true ? tab?.pageIcon?.image : nil
+        let icon = pageIcon ?? store.favicons.pageImage(for: bookmark.url) ?? store.favicons.image(for: bookmark.url)
+        Favicon(image: icon, emoji: TitleEmoji(bookmark.title)?.emoji)
             .overlay(alignment: .topTrailing) {
                 // ブックマークのアドレスから離れていることだけは、アイコンの上で分かるようにする。
                 if awayTitle != nil {

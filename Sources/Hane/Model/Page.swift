@@ -10,6 +10,8 @@ protocol TabOpening: AnyObject {
     func closeTab(_ tab: Tab)
     /// タブのページの中のキー操作から頼まれたこと。
     func perform(_ command: KeyCommand, from tab: Tab)
+    /// タブのページが自分だけのアイコンを示した、または示さなくなった（`Tab.pageIcon`）。
+    func pageIconChanged(in tab: Tab)
 }
 
 /// タブや小窓が今読み込んでいるページ。`WKWebView` を一つ持ち、画面と操作に要る値を Observable にして見せる。

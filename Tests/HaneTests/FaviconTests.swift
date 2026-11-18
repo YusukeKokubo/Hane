@@ -122,6 +122,13 @@ import Testing
         let site = try #require(store.favicons.image(for: pageURL))
         #expect(tab.favicon === tab.pageIcon?.image)
         #expect(tab.favicon !== site)
+
+        // 固定したら、開いていないときにも出せるよう、ブックマークのページのアイコンとして覚える。
+        let bookmark = try #require(store.pin(tab.id))
+        #expect(store.favicons.pageImage(for: pageURL) != nil)
+        #expect(store.favicons.pageImage(for: pages.appending(path: "other.html")) == nil, "ほかのページには出さない")
+        store.removeBookmark(bookmark.id)
+        #expect(store.favicons.pageImage(for: pageURL) == nil, "ブックマークを消したら忘れる")
     }
 
     /// タブで読み終えたページのアイコンを取り、保存先があれば次に作ったときも読める。

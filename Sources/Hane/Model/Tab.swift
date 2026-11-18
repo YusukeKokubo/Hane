@@ -314,7 +314,9 @@ final class Tab: Identifiable {
             let found = await favicons.update(from: page, at: url, current: current, rereading: rereading)
             guard let self, faviconLookups == lookup, self.page === page else { return }
             // 同じものを入れ直すと、題名が変わるたびにタブを描き直すことになる。
-            if found?.source != pageIcon?.source { pageIcon = found }
+            guard found?.source != pageIcon?.source else { return }
+            pageIcon = found
+            opener?.pageIconChanged(in: self)
         }
     }
 
