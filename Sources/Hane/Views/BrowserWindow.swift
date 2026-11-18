@@ -156,7 +156,7 @@ private struct ProfileLabel: View {
     }
 }
 
-/// 戻る・進む、アドレスバー、再読み込みを並べた段。タブバーの下に置く。
+/// 戻る・進む、再読み込み、アドレスバーを並べた段。タブバーの下に置く。
 ///
 /// 標準のツールバーに入力欄を置くと `FocusState` でフォーカスを移せないため、
 /// ウインドウの中身として自前で並べている。
@@ -170,15 +170,15 @@ private struct NavigationRow: View {
                 .disabled(!tab.canGoBack)
             Button("進む", systemImage: "chevron.right") { tab.goForward() }
                 .disabled(!tab.canGoForward)
-            AddressBar(tab: tab, store: store)
-            BookmarkStarButton(tab: tab, store: store)
-            PasswordFillButton(fill: store.passwordFill, tab: tab)
             if tab.isLoading {
                 Button("読み込みを中止", systemImage: "xmark") { tab.stop() }
             } else {
                 Button("再読み込み", systemImage: "arrow.clockwise") { tab.reload() }
                     .disabled(!tab.hasContent)
             }
+            AddressBar(tab: tab, store: store)
+            BookmarkStarButton(tab: tab, store: store)
+            PasswordFillButton(fill: store.passwordFill, tab: tab)
             DownloadsButton(downloads: store.downloads)
         }
         .labelStyle(.iconOnly)
