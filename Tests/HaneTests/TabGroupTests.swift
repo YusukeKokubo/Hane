@@ -85,6 +85,22 @@ import WebKit
         #expect(store.tabs(in: group.id).contains { $0.id == first.id })
     }
 
+    @Test func reordersGroups() throws {
+        let store = makeStore()
+        let a = try #require(store.createGroup(named: "A"))
+        let b = try #require(store.createGroup(named: "B"))
+        let c = try #require(store.createGroup(named: "C"))
+
+        store.moveGroup(c.id, before: a.id)
+        #expect(store.groups.map(\.name) == ["C", "A", "B"])
+        store.moveGroup(c.id)
+        #expect(store.groups.map(\.name) == ["A", "B", "C"], "目印を省くと末尾へ")
+        store.moveGroup(b.id, before: b.id)
+        store.moveGroup(UUID(), before: a.id)
+        #expect(store.groups.map(\.name) == ["A", "B", "C"], "自分の前や、ない組では動かない")
+        #expect(store.currentGroupID == c.id, "並べ替えても出している組は変わらない")
+    }
+
     @Test func removingGroupKeepsItsTabs() throws {
         let store = makeStore()
         let first = store.tabs[0]

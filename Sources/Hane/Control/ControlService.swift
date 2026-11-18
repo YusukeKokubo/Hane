@@ -404,6 +404,19 @@ final class ControlService {
             store.renameGroup(id, to: name)
             return state.groups(of: store)
 
+        case "group-order":
+            let store = try store
+            let anchorName = try takeOption("--before", from: &args)
+            let none = ControlError("グループなしは並べ替えられない。")
+            guard let id = try groupID(named: args.joined(separator: " "), in: store) else { throw none }
+            var anchor: UUID?
+            if let anchorName {
+                guard let anchorID = try groupID(named: anchorName, in: store) else { throw none }
+                anchor = anchorID
+            }
+            store.moveGroup(id, before: anchor)
+            return state.groups(of: store)
+
         case "group-bar":
             let store = try store
             guard let id = try groupID(named: try argument(args, 0, "グループ名"), in: store) else {

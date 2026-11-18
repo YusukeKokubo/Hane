@@ -27,6 +27,8 @@ public enum ControlHelp {
                              タブがなければ空のタブを開く
       group-move <名前|none>  今のタブ（--tab で指したタブ）をその組へ移す。移った先へはついて行かない
       group-rename <名前> <新しい名前>
+      group-order <名前> [--before <名前>]
+                             組の並びを変える。--before の組の前へ、省くと末尾へ。バーの名前もこの順に並ぶ
       group-bar <名前> on|off  名前をバーに並べるか
       group-remove <名前>     組を解く。中のタブは閉じずに組に入っていないタブへ移す
 

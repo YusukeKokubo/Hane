@@ -155,7 +155,14 @@ import WebKit
         #expect((await run("group-rename", "1on1", "定例")).output.contains("定例 — 2 tabs"))
         #expect(!(await run("group-show", "1on1")).ok)
 
-        #expect((await run("group-remove", "定例")).output == "* (グループなし) — 3 tabs")
+        _ = await run("group-new", "週次")
+        let ordered = await run("group-order", "週次", "--before", "定例")
+        #expect(ordered.output.contains("週次 — 1 tabs\n  定例"), "\(ordered.output)")
+        #expect(!(await run("group-order", "週次", "--before", "none")).ok, "グループなしの前へは動かせない")
+        #expect((await run("group-order", "週次")).output.hasSuffix("週次 — 1 tabs"), "目印を省くと末尾へ")
+        _ = await run("group-remove", "週次")
+
+        #expect((await run("group-remove", "定例")).output == "* (グループなし) — 4 tabs")
         #expect(store.groups.isEmpty)
     }
 

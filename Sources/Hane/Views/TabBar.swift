@@ -201,22 +201,32 @@ extension View {
         return background(Color.primary.opacity(opacity), in: .rect(cornerRadius: 6))
     }
 
-    /// バーの項目を落とし先にする。重なっている間だけ、項目の手前に縦線を出す（その前に入る）。
-    func barDropTarget(perform: @escaping (BarDragItem) -> Void) -> some View {
-        modifier(BarDropTarget(perform: perform))
+    /// バーの項目を落とし先にする。重なっている間だけ、項目の手前に線を出す（その前に入る）。
+    /// 横に並ぶバーでは左に縦線、縦に並ぶ一覧では上に横線。
+    func barDropTarget(_ edge: BarDropEdge = .leading, perform: @escaping (BarDragItem) -> Void) -> some View {
+        modifier(BarDropTarget(edge: edge, perform: perform))
     }
 }
 
+enum BarDropEdge {
+    case leading
+    case top
+}
+
 private struct BarDropTarget: ViewModifier {
+    let edge: BarDropEdge
     let perform: (BarDragItem) -> Void
 
     @State private var isTargeted = false
 
     func body(content: Content) -> some View {
         content
-            .overlay(alignment: .leading) {
+            .overlay(alignment: edge == .leading ? .leading : .top) {
                 if isTargeted {
-                    Capsule().fill(.tint).frame(width: 2).padding(.vertical, 1).offset(x: -3)
+                    switch edge {
+                    case .leading: Capsule().fill(.tint).frame(width: 2).padding(.vertical, 1).offset(x: -3)
+                    case .top: Capsule().fill(.tint).frame(height: 2).padding(.horizontal, 4).offset(y: -1)
+                    }
                 }
             }
             .dropDestination(for: BarDragItem.self) { items, _ in
@@ -238,6 +248,8 @@ private struct BarDropTarget: ViewModifier {
 enum BarDragItem: Codable, Sendable, Transferable {
     case tab(UUID)
     case bookmark(UUID)
+    /// 組の一覧の行。一覧の中でだけ並べ替えに使う。
+    case group(UUID)
 
     static var transferRepresentation: some TransferRepresentation {
         CodableRepresentation(contentType: .browserBarItem)

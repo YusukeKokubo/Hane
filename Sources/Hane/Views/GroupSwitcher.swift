@@ -97,9 +97,18 @@ private struct GroupList: View {
                     .padding(.bottom, 2)
                 ForEach(store.groups) { group in
                     groupRow(group.id, name: group.name, systemImage: "rectangle.stack")
+                        .draggable(BarDragItem.group(group.id))
+                        .barDropTarget(.top) { dropGroup($0, before: group.id) }
                 }
+                // 末尾への落とし先を兼ねる、仕切りの上の隙間。
+                Color.clear
+                    .frame(height: 6)
+                    .contentShape(.rect)
+                    .barDropTarget(.top) { dropGroup($0, before: nil) }
+                Divider().padding(.bottom, 4)
+            } else {
+                Divider().padding(.vertical, 4)
             }
-            Divider().padding(.vertical, 4)
             ListRow(title: "今のタブで新しいグループを作る…", systemImage: "plus.rectangle.on.rectangle") {
                 dismiss()
                 store.requestGroupName(.create(moving: selectedPlainTab))
@@ -135,6 +144,11 @@ private struct GroupList: View {
             dismiss()
             store.showGroup(id)
         }
+    }
+
+    /// 一覧の中で運ばれた組だけを並べ替える。タブやブックマークが落とされても何もしない。
+    private func dropGroup(_ item: BarDragItem, before anchor: UUID?) {
+        if case .group(let id) = item { store.moveGroup(id, before: anchor) }
     }
 
     /// 選んでいるのが普通のタブなら、そのID。ブックマークのページは組に入れない。

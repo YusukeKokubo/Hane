@@ -371,6 +371,7 @@ final class TabStore: TabOpening {
         switch item {
         case .tab(let id): pin(id, before: anchor)
         case .bookmark(let id): bookmarks.move(id, before: anchor)
+        case .group: break
         }
     }
 
@@ -489,6 +490,16 @@ final class TabStore: TabOpening {
         let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty, let index = groups.firstIndex(where: { $0.id == id }) else { return }
         groups[index].name = name
+    }
+
+    /// 組の並びを変える。`anchor` の組の前へ、省くと末尾へ。バーに並べた名前もこの順に出る。
+    func moveGroup(_ id: UUID, before anchor: UUID? = nil) {
+        guard id != anchor, let index = groups.firstIndex(where: { $0.id == id }) else { return }
+        var reordered = groups
+        let group = reordered.remove(at: index)
+        let position = anchor.flatMap { anchor in reordered.firstIndex { $0.id == anchor } }
+        reordered.insert(group, at: position ?? reordered.endIndex)
+        groups = reordered
     }
 
     func setShowsInBar(_ id: UUID, _ shows: Bool) {
