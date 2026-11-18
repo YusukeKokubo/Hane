@@ -92,6 +92,11 @@ final class Page {
         webView.reload()
     }
 
+    /// キャッシュを使わず、元のサーバーから取り直す。
+    func reloadFromOrigin() {
+        webView.reloadFromOrigin()
+    }
+
     func stopLoading() {
         webView.stopLoading()
     }

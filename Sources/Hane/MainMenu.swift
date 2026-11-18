@@ -132,6 +132,7 @@ final class MainMenu: NSObject, NSMenuItemValidation, NSMenuDelegate {
         menu.addItem(item("進む", #selector(goForward), "]"))
         menu.addItem(.separator())
         menu.addItem(item("ページを再読み込み", #selector(reload), "r"))
+        menu.addItem(item("キャッシュを使わずに再読み込み", #selector(reloadFromOrigin), "r", [.command, .shift]))
         menu.addItem(item("読み込みを中止", #selector(stopLoading), "."))
         menu.addItem(.separator())
         // 一つの項目にキーは一つしか付かないので、⌃Tab / ⌃⇧Tab は見えない代わりの項目で受ける。
@@ -278,7 +279,7 @@ final class MainMenu: NSObject, NSMenuItemValidation, NSMenuDelegate {
             }
         case #selector(reopenClosedTab):
             return store?.closedTabs.isEmpty == false
-        case #selector(fillPassword), #selector(teachPasswordPlace), #selector(reload):
+        case #selector(fillPassword), #selector(teachPasswordPlace), #selector(reload), #selector(reloadFromOrigin):
             return selected?.hasContent == true
         case #selector(forgetPasswordPlaces):
             let count = passwordPlaceCount()
@@ -401,6 +402,7 @@ final class MainMenu: NSObject, NSMenuItemValidation, NSMenuDelegate {
     @objc private func goBack() { store?.selected?.goBack() }
     @objc private func goForward() { store?.selected?.goForward() }
     @objc private func reload() { store?.selected?.reload() }
+    @objc private func reloadFromOrigin() { store?.selected?.reloadFromOrigin() }
     @objc private func stopLoading() { store?.selected?.stop() }
     @objc private func nextTab() { store?.select(offset: 1) }
     @objc private func previousTab() { store?.select(offset: -1) }

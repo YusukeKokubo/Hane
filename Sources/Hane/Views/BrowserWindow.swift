@@ -173,7 +173,10 @@ private struct NavigationRow: View {
             if tab.isLoading {
                 Button("読み込みを中止", systemImage: "xmark") { tab.stop() }
             } else {
-                Button("再読み込み", systemImage: "arrow.clockwise") { tab.reload() }
+                // Chrome と同じく、⇧を押しながらならキャッシュを使わずに取り直す。
+                Button("再読み込み", systemImage: "arrow.clockwise") {
+                    if NSEvent.modifierFlags.contains(.shift) { tab.reloadFromOrigin() } else { tab.reload() }
+                }
                     .disabled(!tab.hasContent)
             }
             AddressBar(tab: tab, store: store)

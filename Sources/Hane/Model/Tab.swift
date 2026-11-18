@@ -207,6 +207,13 @@ final class Tab: Identifiable {
         page.reload()
     }
 
+    /// 眠っているタブは起こせばどのみち取り直すので、起こすだけにする。
+    func reloadFromOrigin() {
+        guard let page else { return wake() }
+        failure = nil
+        page.reloadFromOrigin()
+    }
+
     func stop() {
         page?.stopLoading()
     }
