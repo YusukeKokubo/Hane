@@ -25,9 +25,9 @@ import WebKit
         let third = store.add(title: "C", url: c, before: second.id)
         #expect(store.bookmarks.map(\.id) == [first.id, third.id, second.id])
 
-        store.move(first.id)
+        store.move(first.id, to: nil)
         #expect(store.bookmarks.map(\.id) == [third.id, second.id, first.id], "目印を省くと末尾へ")
-        store.move(first.id, before: third.id)
+        store.move(first.id, to: nil, before: third.id)
         #expect(store.bookmarks.map(\.id) == [first.id, third.id, second.id])
 
         #expect(store.remove(third.id))
@@ -53,7 +53,8 @@ import WebKit
 
         let saved = BookmarkStore(fileURL: file)
         saved.add(title: "A", url: a)
-        saved.add(title: "B", url: b)
+        saved.add(title: "B", url: b, group: PinnedGroup(id: UUID()))
+        saved.add(title: "C", url: c, group: PinnedGroup(id: nil))
 
         let loaded = BookmarkStore(fileURL: file)
         #expect(loaded.bookmarks == saved.bookmarks)
@@ -178,15 +179,28 @@ import WebKit
         tab.load(URLRequest(url: blank))
         try await waitForURL(tab)
 
-        store.drop(.tab(tab.id), before: first.id)
+        store.drop(.tab(tab.id), pinningTo: nil, before: first.id)
         let pinned = try #require(store.bookmarkID(of: tab))
         #expect(store.bookmarks.bookmarks.map(\.id) == [pinned, first.id, second.id])
 
-        store.drop(.bookmark(pinned), before: nil)
+        store.drop(.bookmark(pinned), pinningTo: nil, before: nil)
         #expect(store.bookmarks.bookmarks.map(\.id) == [first.id, second.id, pinned])
 
-        store.drop(.bookmark(second.id), before: first.id)
+        store.drop(.bookmark(second.id), pinningTo: nil, before: first.id)
         #expect(store.bookmarks.bookmarks.map(\.id) == [second.id, first.id, pinned])
+    }
+
+    @Test func pinsOnlyIntoTheShownGroup() async throws {
+        let tab = store.tabs[0]
+        tab.load(URLRequest(url: blank))
+        try await waitForURL(tab)
+
+        #expect(store.pin(tab.id, to: PinnedGroup(id: UUID())) == nil, "出していない組へ固定すると見えなくなるので断る")
+        let pinned = try #require(store.pinToGroup(tab.id))
+        #expect(pinned.group == PinnedGroup(id: nil))
+        #expect(store.groupBookmarks.map(\.id) == [pinned.id])
+        #expect(store.sharedBookmarks.isEmpty)
+        #expect(store.bookmarkTabs[pinned.id]?.id == tab.id)
     }
 
     @Test func tracksPagesThatWanderedAway() async throws {

@@ -1,17 +1,20 @@
 import SwiftUI
 
-/// バーの左側に並ぶブックマーク。
+/// バーに並ぶブックマーク。左端のどのグループでも並ぶもの（`place` が `nil`）と、
+/// グループの切り替えの右に並ぶ、出しているグループの固定の二か所で使う。
 struct BookmarkStrip: View {
     let store: TabStore
+    let place: PinnedGroup?
 
     var body: some View {
+        let bookmarks = place == nil ? store.sharedBookmarks : store.groupBookmarks
         HStack(spacing: 2) {
-            ForEach(store.bookmarks.bookmarks) { bookmark in
+            ForEach(bookmarks) { bookmark in
                 BookmarkChip(store: store, bookmark: bookmark)
             }
             // 末尾への落とし先を兼ねる仕切り。ブックマークがまだなくても、ここへタブを落とせば最初の1件になる。
             Group {
-                if store.bookmarks.bookmarks.isEmpty {
+                if bookmarks.isEmpty {
                     Color.clear.frame(width: 10)
                 } else {
                     Divider().padding(.horizontal, 6)
@@ -19,7 +22,7 @@ struct BookmarkStrip: View {
             }
             .frame(height: 22)
             .contentShape(.rect)
-            .barDropTarget { store.drop($0, before: nil) }
+            .barDropTarget { store.drop($0, pinningTo: place, before: nil) }
         }
     }
 }
@@ -58,7 +61,7 @@ private struct BookmarkChip: View {
             BookmarkEditor(store: store, target: .bookmark(bookmark.id))
         }
         .draggable(BarDragItem.bookmark(bookmark.id))
-        .barDropTarget { store.drop($0, before: bookmark.id) }
+        .barDropTarget { store.drop($0, pinningTo: bookmark.group, before: bookmark.id) }
         // タブとブックマークを、VoiceOver や hanectl の ui-snapshot から見分けられるようにする。
         .accessibilityElement(children: .contain)
         .accessibilityLabel(bookmark.title)
@@ -90,6 +93,11 @@ private struct BookmarkActions: View {
         Button("ページを閉じる") { if let tab { store.close(tab.id) } }
             .disabled(tab == nil)
         Divider()
+        if bookmark.group != nil {
+            Button("すべてのグループに固定") { store.moveBookmark(bookmark.id, to: nil) }
+        } else if !store.groups.isEmpty {
+            Button("このグループだけに固定") { store.moveBookmark(bookmark.id, to: PinnedGroup(id: store.currentGroupID)) }
+        }
         // 開いているページは消さずに普通のタブへ戻る（`removeBookmark`）ので、そのときは固定を外すと言う。
         Button(tab == nil ? "削除" : "固定を外す") { store.removeBookmark(bookmark.id) }
     }

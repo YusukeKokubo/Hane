@@ -195,6 +195,47 @@ import WebKit
         #expect(store.tabs.map(\.title) == ["Pinned"], "消したブックマークのページはタブに残る")
     }
 
+    @Test func groupBookmarkCommands() async throws {
+        try await open(html: "<title>Pinned</title>")
+        #expect((await run("group-new", "A", "--move")).ok)
+        var response = await run("bookmark-add", "--group")
+        #expect(response.ok, "\(response.output)")
+        #expect(response.output.contains("* 1 Pinned"))
+        #expect(response.output.contains("[group: A]"))
+        #expect(await run("ui").output.contains("group bookmarks: [*Pinned (open)]"))
+        #expect(await run("tab").output.contains("[group bookmark: Pinned]"))
+
+        response = await run("bookmark-add", "about:blank", "--name", "Shared")
+        #expect(response.output.contains("1 Shared — about:blank\n"), "どの組でも並ぶものが先に数えられる")
+        #expect(response.output.contains("2 Pinned"))
+
+        _ = await run("group-show", "none")
+        #expect(!(await run("ui")).output.contains("group bookmarks:"), "ほかの組の固定は並ばない")
+
+        response = await run("bookmark-move", "2", "--to", "none")
+        #expect(response.output.contains("2 Pinned — "))
+        #expect(response.output.contains("[group: none]"))
+        #expect(await run("ui").output.contains("group bookmarks: [Pinned (open)]"))
+        response = await run("bookmark-move", "2", "--before", "1")
+        #expect(response.output.contains("1 Pinned"), "--before の置き場へ移る")
+        #expect(!response.output.contains("[group:"))
+        #expect(!(await run("bookmark-move", "1", "--to", "B")).ok)
+        _ = await run("bookmark-move", "2", "--to", "A")
+        #expect(!(await run("bookmark-move", "1", "--to", "none", "--before", "2")).ok, "--before が別の置き場なら断る")
+    }
+
+    @Test func tabOrderCommand() async {
+        _ = await run("new")
+        _ = await run("new")
+        let numbers = store.tabs.map(\.number)
+        var response = await run("tab-order", "\(numbers[2])", "--before", "\(numbers[0])")
+        #expect(response.ok, "\(response.output)")
+        #expect(store.tabs.map(\.number) == [numbers[2], numbers[0], numbers[1]])
+        response = await run("tab-order", "\(numbers[2])")
+        #expect(store.tabs.map(\.number) == numbers, "目印を省くと末尾へ")
+        #expect(!(await run("tab-order", "99")).ok)
+    }
+
     @Test func rejectsUnknownKeys() async {
         #expect(await !run("key").ok)
         #expect(await !run("key", "f13").ok)

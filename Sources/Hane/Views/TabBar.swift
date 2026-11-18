@@ -2,7 +2,7 @@ import CoreTransferable
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// ツールバー直下の一列。左にブックマーク、仕切りを挟んで組の切り替え、その右に今の組の普通のタブが並ぶ。
+/// ツールバー直下の一列。左にブックマーク、仕切りを挟んで組の切り替え、その右に今の組の固定と普通のタブが並ぶ。
 struct TabBar: View {
     let store: TabStore
     let onClose: (Tab.ID) -> Void
@@ -16,9 +16,11 @@ struct TabBar: View {
 
     var body: some View {
         HStack(spacing: Self.spacing) {
-            BookmarkStrip(store: store)
+            BookmarkStrip(store: store, place: nil)
                 .fixedSize()
             GroupSwitcher(store: store)
+                .fixedSize()
+            BookmarkStrip(store: store, place: PinnedGroup(id: store.currentGroupID))
                 .fixedSize()
             // 入りきらないときは、まずタブを縮め、それでも足りなければ横に流す。
             // ViewThatFits で両方を候補に出すと、並びを二組作って変化のたびに両方を測り直すので、
@@ -67,10 +69,19 @@ struct TabBar: View {
                     onSelect: { store.selectedID = tab.id },
                     onClose: { onClose(tab.id) }
                 )
+                .barDropTarget { store.dropOnTabs($0, before: tab.id) }
                 .contextMenu {
                     // 行き先のないまっさらなタブは固定できない（`pin` が断る）。
-                    Button("タブを固定") { store.pin(tab.id) }
-                        .disabled(tab.url == nil)
+                    // グループを作っていなければ固定の置き場を分ける意味がないので、今までどおり一つだけ出す。
+                    if store.groups.isEmpty {
+                        Button("タブを固定") { store.pin(tab.id) }
+                            .disabled(tab.url == nil)
+                    } else {
+                        Button("このグループに固定") { store.pinToGroup(tab.id) }
+                            .disabled(tab.url == nil)
+                        Button("すべてのグループに固定") { store.pin(tab.id) }
+                            .disabled(tab.url == nil)
+                    }
                     MoveToGroupMenu(store: store, tab: tab)
                     Divider()
                     Button("タブを閉じる") { onClose(tab.id) }
@@ -79,11 +90,13 @@ struct TabBar: View {
         }
     }
 
+    /// タブの並びの末尾への落とし先を兼ねる。
     private var newTabButton: some View {
         Button("新規タブ", systemImage: "plus") { store.newTab() }
             .labelStyle(.iconOnly)
             .buttonStyle(.borderless)
             .padding(.horizontal, 6)
+            .barDropTarget { store.dropOnTabs($0, before: nil) }
     }
 }
 

@@ -145,6 +145,21 @@ final class ControlService {
             try store.selectedID = tab.id
             return state.tab(tab)
 
+        case "tab-order":
+            let store = try store
+            let anchorNumber = try takeOption("--before", from: &args)
+            let tab = try tab(numbered: try integer(try argument(args, 0, "タブ番号"), "タブ番号"))
+            let inGroup = { (tab: Tab) in store.tabs.contains { $0 === tab } }
+            guard inGroup(tab) else { throw ControlError("タブ \(tab.number) は普通のタブではない（ブックマークのページは bookmark-move で並べ替える）。") }
+            var anchor: Tab.ID?
+            if let anchorNumber {
+                let anchorTab = try self.tab(numbered: try integer(anchorNumber, "--before"))
+                guard inGroup(anchorTab) else { throw ControlError("--before のタブ \(anchorTab.number) は普通のタブではない。") }
+                anchor = anchorTab.id
+            }
+            store.moveTab(tab.id, before: anchor)
+            return state.tabs(of: store)
+
         case "close":
             let number = try args.first.map { try integer($0, "タブ番号") } ?? options.tabNumber
             let tab = try tab(numbered: number)
@@ -457,17 +472,38 @@ final class ControlService {
 
         case "bookmark-add":
             let name = try takeOption("--name", from: &args)
+            let place = takeFlag("--group", from: &args) ? PinnedGroup(id: try store.currentGroupID) : nil
             let store = try store
             if args.isEmpty {
                 let tab = try target(options)
                 guard store.bookmarkID(of: tab) == nil else { throw ControlError("このタブはすでにブックマークのページ。") }
-                guard store.pin(tab.id, title: name) != nil else {
+                guard store.pin(tab.id, title: name, to: place) != nil else {
                     throw ControlError("このタブにはまだページがない。")
                 }
             } else {
                 let url = try url(from: args)
-                store.bookmarks.add(title: name ?? "", url: url)
+                store.bookmarks.add(title: name ?? "", url: url, group: place)
             }
+            return try state.bookmarks(of: self.store)
+
+        case "bookmark-move":
+            let store = try store
+            let placeName = try takeOption("--to", from: &args)
+            let anchorNumber = try takeOption("--before", from: &args)
+            let id = try bookmarkID(try argument(args, 0, "ブックマークの番号"), in: store)
+            let anchor = try anchorNumber.map { try bookmarkID($0, in: store) }
+            let place: PinnedGroup?
+            if let placeName {
+                place = placeName == "all" ? nil : PinnedGroup(id: try groupID(named: placeName, in: store))
+            } else if let anchor {
+                place = store.bookmarks.bookmark(anchor)?.group
+            } else {
+                place = store.bookmarks.bookmark(id)?.group
+            }
+            if let anchor, store.bookmarks.bookmark(anchor)?.group != place {
+                throw ControlError("--before のブックマークは移す先（--to）と別の置き場にある。")
+            }
+            store.moveBookmark(id, to: place, before: anchor)
             return try state.bookmarks(of: self.store)
 
         case "bookmark-open":

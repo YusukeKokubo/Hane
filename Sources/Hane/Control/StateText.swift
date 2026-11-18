@@ -35,7 +35,8 @@ final class StateText {
         let url = tab.url?.absoluteString ?? "(空)"
         let loading = tab.isLoading ? " [loading]" : tab.isAsleep ? " [asleep]" : ""
         let icon = tab.favicon != nil ? " [icon]" : ""
-        let bookmark = model.store.flatMap { store in store.bookmarkID(of: tab).flatMap(store.bookmarks.bookmark) }.map { " [bookmark: \($0.title)]" } ?? ""
+        let pinned: Bookmark? = model.store.flatMap { store in store.bookmarkID(of: tab).flatMap(store.bookmarks.bookmark) }
+        let bookmark = pinned.map { "\($0.group == nil ? " [bookmark" : " [group bookmark"): \($0.title)]" } ?? ""
         return "\(mark) tab \(tab.number): \(tab.title) — \(url)\(loading)\(icon)\(bookmark)"
     }
 
@@ -100,7 +101,10 @@ final class StateText {
                 lines.append("failure shown: \(failure)")
             }
         }
-        lines.append("bookmarks bar: " + bookmarkBar(of: store))
+        lines.append("bookmarks bar: " + bookmarkBar(store.sharedBookmarks, of: store))
+        if !store.groupBookmarks.isEmpty {
+            lines.append("group bookmarks: " + bookmarkBar(store.groupBookmarks, of: store))
+        }
         if !store.groups.isEmpty {
             let bar = store.groups.filter(\.showsInBar).map { "[" + (store.currentGroupID == $0.id ? "*" : "") + $0.name + "]" }
             lines.append("group: " + (store.currentGroup?.name ?? "(グループなし)")
@@ -127,9 +131,9 @@ final class StateText {
 
     /// バーの左側を、画面に出ている文字のとおりに一行で表す。
     /// 選ばれている項目には *、ページを開いている項目には (open) を付ける。
-    private func bookmarkBar(of store: TabStore) -> String {
-        guard !store.bookmarks.bookmarks.isEmpty else { return "(なし)" }
-        return store.bookmarks.bookmarks.map { bookmark in
+    private func bookmarkBar(_ bookmarks: [Bookmark], of store: TabStore) -> String {
+        guard !bookmarks.isEmpty else { return "(なし)" }
+        return bookmarks.map { bookmark in
             let tab = store.bookmarkTabs[bookmark.id]
             let label = store.awayTitle(for: bookmark).map { "\(bookmark.title) / \($0)" } ?? bookmark.title
             return "[" + mark(tab) + label + (tab != nil ? " (open)" : "") + "]"
@@ -159,19 +163,20 @@ final class StateText {
 
     // MARK: ブックマーク
 
-    /// ブックマークを番号つきで一覧する。番号はバーの左からの通し番号。
+    /// ブックマークを番号つきで一覧する。どのグループでも並ぶもの、グループの固定（グループなし、グループの並び順）の順の通し番号。
     func bookmarks(of store: TabStore) -> String {
-        let lines = store.bookmarks.bookmarks.enumerated().map { index, bookmark in
+        let lines = store.listedBookmarks.enumerated().map { index, bookmark in
             let tab = store.bookmarkTabs[bookmark.id]
             let open = tab.map { " (open: tab \($0.number))" } ?? ""
-            return "\(mark(tab).isEmpty ? " " : "*") \(index + 1) \(bookmark.title) — \(bookmark.url.absoluteString)\(open)"
+            let group = bookmark.group.map { " [group: " + ($0.id.flatMap { store.group(withID: $0)?.name } ?? "none") + "]" } ?? ""
+            return "\(mark(tab).isEmpty ? " " : "*") \(index + 1) \(bookmark.title) — \(bookmark.url.absoluteString)\(open)\(group)"
         }
         return lines.isEmpty ? "（ブックマークなし）" : lines.joined(separator: "\n")
     }
 
     /// `bookmarks` の一覧に出る番号を、ブックマークのIDに引き直す。
     static func bookmarkID(_ number: Int, in store: TabStore) throws -> UUID {
-        let bookmarks = store.bookmarks.bookmarks
+        let bookmarks = store.listedBookmarks
         guard bookmarks.indices.contains(number - 1) else {
             throw ControlError("ブックマーク \(number) はない。`bookmarks` で一覧を見ること。")
         }

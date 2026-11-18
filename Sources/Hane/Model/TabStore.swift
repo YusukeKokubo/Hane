@@ -9,7 +9,8 @@ import Observation
 ///
 /// 普通のタブは組（`TabGroup`）に分けて持ち、バーには選んでいる組のタブ（`tabs`）だけを出す。
 /// ほかの組のタブ（`parkedTabs`）は、選ばれていないタブと同じ扱いで、眠らせ方も変わらない。
-/// ブックマークのページはどの組にも入らず、どの組を出していてもバーの左に並ぶ。
+/// ブックマークには、どの組を出していてもバーの左に並ぶものと、組ごとの固定（`Bookmark.group`）がある。
+/// 組の固定はその組を出しているときだけ、組の切り替えの右に並ぶ。どちらのページも `bookmarkTabs` で持つ。
 ///
 /// しばらく画面に出していないタブは、選択が変わったときに眠らせてページのプロセスを返す（`sleepIdleTabs`）。
 /// 眠らせるかを決めるのは選択が変わったときだけで、タイマーは使わない。
@@ -94,6 +95,10 @@ final class TabStore: TabOpening {
         if !restore(session.load()) {
             newTab()
         }
+        // 閲覧状態から消えた組の固定は、組を解いたときと同じく組に入っていないタブの固定にする。
+        // 拾わないと、どの組を出しても見えないまま残る。
+        let known = Set(groups.map(\.id))
+        bookmarks.ungroupPins { !known.contains($0) }
         recorder = SessionRecorder(
             session: session,
             watched: { [weak self] in self?.touchSessionShape() },
@@ -105,9 +110,29 @@ final class TabStore: TabOpening {
         }
     }
 
-    /// バーに見える順のすべてのページ。ブックマークのページが先、普通のタブが後。
+    /// バーに見える順のすべてのページ。ブックマーク、組の固定、普通のタブの順。
     var allTabs: [Tab] {
-        bookmarks.bookmarks.compactMap { bookmarkTabs[$0.id] } + tabs
+        barBookmarks.compactMap { bookmarkTabs[$0.id] } + tabs
+    }
+
+    /// どの組を出していても並ぶブックマーク。
+    var sharedBookmarks: [Bookmark] {
+        bookmarks.bookmarks(in: nil)
+    }
+
+    /// 出している組の固定。
+    var groupBookmarks: [Bookmark] {
+        bookmarks.bookmarks(in: PinnedGroup(id: currentGroupID))
+    }
+
+    /// バーに見える順のブックマーク。どの組でも並ぶものが先、出している組の固定が後。
+    var barBookmarks: [Bookmark] {
+        sharedBookmarks + groupBookmarks
+    }
+
+    /// すべてのブックマークを、どの組でも並ぶもの、組に入っていないタブの固定、組の並び順の固定の順に。
+    var listedBookmarks: [Bookmark] {
+        sharedBookmarks + groupKeys.flatMap { bookmarks.bookmarks(in: PinnedGroup(id: $0)) }
     }
 
     /// 出していない組のタブも含めた、すべてのページ。ブックマークのページ、組に入っていないタブ、組の並び順。
@@ -271,7 +296,8 @@ final class TabStore: TabOpening {
     func reopenClosedTab() -> Tab? {
         guard !isShutDown, let closed = closedTabs.popLast() else { return nil }
         let tab = makeTab(restoring: closed.page)
-        if let id = closed.page.bookmark, bookmarks.bookmark(id) != nil, bookmarkTabs[id] == nil {
+        if let id = closed.page.bookmark, let bookmark = bookmarks.bookmark(id), bookmarkTabs[id] == nil {
+            showGroup(holding: bookmark)
             bookmarkTabs[id] = tab
         } else if let index = closed.index {
             if closed.group != currentGroupID, closed.group.map({ group(withID: $0) != nil }) ?? true {
@@ -311,7 +337,7 @@ final class TabStore: TabOpening {
             if let last = tabs.last { selectedID = last.id }
             return
         }
-        let pinned = bookmarks.bookmarks
+        let pinned = barBookmarks
         if pinned.indices.contains(number - 1) {
             activate(bookmark: pinned[number - 1].id)
             return
@@ -336,13 +362,15 @@ final class TabStore: TabOpening {
     // MARK: ブックマーク
 
     /// ブックマークを開く。ページがあればそこへ切り替え、なければその場で読み込む。
+    /// ほかの組の固定なら、その組を出してから開く。
     @discardableResult
     func activate(bookmark id: UUID) -> Tab? {
+        guard let bookmark = bookmarks.bookmark(id) else { return nil }
+        showGroup(holding: bookmark)
         if let tab = bookmarkTabs[id] {
             selectedID = tab.id
             return tab
         }
-        guard let bookmark = bookmarks.bookmark(id) else { return nil }
         let tab = makeTab()
         tab.load(URLRequest(url: bookmark.url), from: .bookmark)
         bookmarkTabs[id] = tab
@@ -350,29 +378,94 @@ final class TabStore: TabOpening {
         return tab
     }
 
-    /// 普通のタブをブックマークにして、ページごとブックマークの側へ移す。
+    /// 出している組の普通のタブをブックマークにして、ページごとブックマークの側へ移す。
+    /// `group` を渡せば組の固定になる。ページが見えなくならないよう、固定できるのは出している組だけ。
     @discardableResult
-    func pin(_ tabID: Tab.ID, title: String? = nil, before anchor: UUID? = nil) -> Bookmark? {
-        guard let index = tabs.firstIndex(where: { $0.id == tabID }), let url = tabs[index].url else { return nil }
+    func pin(_ tabID: Tab.ID, title: String? = nil, to group: PinnedGroup? = nil, before anchor: UUID? = nil) -> Bookmark? {
+        guard group.map({ $0.id == currentGroupID }) ?? true,
+              let index = tabs.firstIndex(where: { $0.id == tabID }), let url = tabs[index].url
+        else { return nil }
         let tab = tabs.remove(at: index)
-        let bookmark = bookmarks.add(title: title ?? tab.title, url: url, before: anchor)
+        let bookmark = bookmarks.add(title: title ?? tab.title, url: url, group: group, before: anchor)
         bookmarkTabs[bookmark.id] = tab
         return bookmark
     }
 
-    /// ブックマークを消す。開いていたページは普通のタブとして残す。
-    func removeBookmark(_ id: UUID) {
-        guard bookmarks.remove(id), let tab = bookmarkTabs.removeValue(forKey: id) else { return }
-        tabs.append(tab)
+    /// 出している組の固定にする（`pin` の組を出している組に決めたもの）。
+    @discardableResult
+    func pinToGroup(_ tabID: Tab.ID, before anchor: UUID? = nil) -> Bookmark? {
+        pin(tabID, to: PinnedGroup(id: currentGroupID), before: anchor)
     }
 
-    /// バーへのドロップを、ブックマークの移動か、タブのブックマーク化に置き換える。
-    func drop(_ item: BarDragItem, before anchor: UUID?) {
+    /// ブックマークを消す。開いていたページは普通のタブとして残す。組の固定ならその組へ、
+    /// どの組でも並ぶものなら出している組へ入れ、`anchor` のタブの前（省くと末尾）に置く。
+    /// `opening` なら、ページを開いていなくても普通のタブとして裏で開く（タブの並びへドラッグしたとき）。
+    func removeBookmark(_ id: UUID, before anchor: Tab.ID? = nil, opening: Bool = false) {
+        guard let bookmark = bookmarks.bookmark(id), bookmarks.remove(id) else { return }
+        var tab = bookmarkTabs.removeValue(forKey: id)
+        if tab == nil, opening {
+            let opened = makeTab()
+            opened.load(URLRequest(url: bookmark.url), from: .bookmark)
+            tab = opened
+        }
+        guard let tab else { return }
+        let group = bookmark.group?.id ?? currentGroupID
+        if group == currentGroupID {
+            let position = anchor.flatMap { anchor in tabs.firstIndex { $0.id == anchor } }
+            tabs.insert(tab, at: position ?? tabs.endIndex)
+        } else {
+            parkedTabs[group, default: []].append(tab)
+        }
+    }
+
+    /// ブックマークの置き場と並びを変える（`nil` はどの組でも並ぶもの）。`anchor` は移す先の置き場のもの。
+    /// 開いているページを選んでいて、ほかの組の固定へ移したなら、見えなくなるので選び直す。
+    func moveBookmark(_ id: UUID, to place: PinnedGroup?, before anchor: UUID? = nil) {
+        guard place?.id.map({ group(withID: $0) != nil }) ?? true else { return }
+        bookmarks.move(id, to: place, before: anchor)
+        guard let tab = bookmarkTabs[id], tab.id == selectedID, !allTabs.contains(where: { $0 === tab }) else { return }
+        if let next = tabs.last ?? allTabs.first {
+            selectedID = next.id
+        } else {
+            newTab()
+        }
+    }
+
+    /// ブックマークの並び（`place` が `nil` ならどの組でも並ぶもの、そうでなければ組の固定）へのドロップを、
+    /// ブックマークの移動か、タブの固定に置き換える。
+    func drop(_ item: BarDragItem, pinningTo place: PinnedGroup?, before anchor: UUID?) {
         switch item {
-        case .tab(let id): pin(id, before: anchor)
-        case .bookmark(let id): bookmarks.move(id, before: anchor)
+        case .tab(let id): pin(id, to: place, before: anchor)
+        case .bookmark(let id): moveBookmark(id, to: place, before: anchor)
         case .group: break
         }
+    }
+
+    /// 普通のタブの並びへのドロップを、タブの並べ替えか、固定を外すことに置き換える。
+    func dropOnTabs(_ item: BarDragItem, before anchor: Tab.ID?) {
+        switch item {
+        case .tab(let id): moveTab(id, before: anchor)
+        case .bookmark(let id): removeBookmark(id, before: anchor, opening: true)
+        case .group: break
+        }
+    }
+
+    /// 出している組の普通のタブの並びを変える。`anchor` のタブの前へ、省くと末尾へ。
+    func moveTab(_ id: Tab.ID, before anchor: Tab.ID? = nil) {
+        guard id != anchor, let index = tabs.firstIndex(where: { $0.id == id }) else { return }
+        var reordered = tabs
+        let tab = reordered.remove(at: index)
+        let position = anchor.flatMap { anchor in reordered.firstIndex { $0.id == anchor } }
+        reordered.insert(tab, at: position ?? reordered.endIndex)
+        tabs = reordered
+    }
+
+    /// ほかの組の固定なら、その組を出す。選択は呼んだ側が変える。
+    private func showGroup(holding bookmark: Bookmark) {
+        guard let place = bookmark.group, place.id != currentGroupID,
+              place.id.map({ group(withID: $0) != nil }) ?? true
+        else { return }
+        swapShownGroup(to: place.id)
     }
 
     /// ブックマークから開いたページを、ブックマークのアドレスへ戻す。
@@ -429,7 +522,8 @@ final class TabStore: TabOpening {
         guard !isShutDown, id != currentGroupID, id.map({ group(withID: $0) != nil }) ?? true else { return }
         swapShownGroup(to: id)
         let remembered = groupSelections[id].flatMap { id in allTabs.first { $0.id == id } }
-        if let next = remembered ?? tabs.last {
+        let pinned = groupBookmarks.compactMap { bookmarkTabs[$0.id] }.last
+        if let next = remembered ?? tabs.last ?? pinned {
             selectedID = next.id
         } else {
             newTab()
@@ -507,9 +601,11 @@ final class TabStore: TabOpening {
         groups[index].showsInBar = shows
     }
 
-    /// 組を解く。中のタブは閉じずに、組に入っていないタブの後ろへ移す。出している組なら、組に入っていないタブを出す。
+    /// 組を解く。中のタブは閉じずに、組に入っていないタブの後ろへ移す。組の固定も、組に入っていないタブの固定にする。
+    /// 出している組なら、組に入っていないタブを出す。
     func removeGroup(_ id: UUID) {
         guard !isShutDown, let index = groups.firstIndex(where: { $0.id == id }) else { return }
+        bookmarks.ungroupPins { $0 == id }
         if currentGroupID == id {
             tabs = (parkedTabs.removeValue(forKey: nil) ?? []) + tabs
             groupSelections[nil] = nil

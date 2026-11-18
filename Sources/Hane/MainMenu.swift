@@ -210,7 +210,7 @@ final class MainMenu: NSObject, NSMenuItemValidation, NSMenuDelegate {
         menu.removeAllItems()
         // 題名は validateMenuItem。
         menu.addItem(item("ブックマークを追加…", #selector(editBookmark), "d"))
-        let bookmarks = store?.bookmarks.bookmarks ?? []
+        let bookmarks = store?.barBookmarks ?? []
         if !bookmarks.isEmpty {
             menu.addItem(.separator())
         }
