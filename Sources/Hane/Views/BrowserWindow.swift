@@ -13,6 +13,8 @@ struct BrowserWindow: View {
     let slot: BrowserWindowSlot
     @State private var newProfileName = ""
 
+    /// 窓の中身の最小の大きさ。窓（`MainWindow`）にも同じ値を決め打ちで持たせる。
+    static let minimumSize = CGSize(width: 480, height: 320)
     /// 左上の信号機ボタンを避けるための余白。
     fileprivate static let windowControlsWidth: CGFloat = 78
     /// タブが増えてもウインドウを掴んで動かせるよう、タブバーの右端に必ず残す余白。
@@ -95,7 +97,7 @@ struct BrowserWindow: View {
                 Color.clear
             }
         }
-        .frame(minWidth: 480, minHeight: 320)
+        .frame(minWidth: Self.minimumSize.width, minHeight: Self.minimumSize.height)
         .ignoresSafeArea(edges: .top)
         .background { StillWindow() }
     }
@@ -135,7 +137,7 @@ private struct ProfilePicker: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .padding(.bottom, 34)
         }
-        .frame(minWidth: 480, minHeight: 320)
+        .frame(minWidth: BrowserWindow.minimumSize.width, minHeight: BrowserWindow.minimumSize.height)
         .ignoresSafeArea(edges: .top)
         .background { StillWindow() }
     }

@@ -42,11 +42,13 @@ final class MainWindow: NSObject, NSWindowDelegate {
         window.isReleasedWhenClosed = false
         window.identifier = NSUserInterfaceItemIdentifier(Self.windowID)
         let hosting = NSHostingController(rootView: BrowserWindow(model: model, slot: slot))
-        // 大きさは窓が決める。中身の大きさに合わせて窓を縮めないよう、最小の大きさだけ受ける。
-        hosting.sizingOptions = [.minSize]
+        // 大きさは窓が決め、最小の大きさも窓に決め打ちで持たせる。中身から最小の大きさを受けると、
+        // 画面が変わるたびに SwiftUI が窓全体の最小の大きさを測り直し、ページを移るたびのアプリの手間が5%ほど増えていた。
+        hosting.sizingOptions = []
         // 画面の navigationTitle を窓の題名にする（hanectl ui が読む）。
         hosting.sceneBridgingOptions = [.title]
         window.contentViewController = hosting
+        window.contentMinSize = BrowserWindow.minimumSize
         window.setContentSize(NSSize(width: 1200, height: 800))
         window.center()
         window.delegate = self
